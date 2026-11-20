@@ -657,6 +657,7 @@ void BuildingTypeExt::LoadFromINIFile(CCINIClass* const pINI)
 	this->BunkerWallsDownSound.Read(exINI, pSection, "BunkerWallsDownSound");
 	this->BunkerStateUpdateDelay.Read(exINI, pSection, "BunkerStateUpdateDelay");
 	this->BuildingRepairedSound.Read(exINI, pSection, "BuildingRepairedSound");
+	this->AIBuildThis_Written.Read(exINI, pSection, "AIBuildThis");
 	this->Refinery_UseStorage.Read(exINI, pSection, "Refinery.UseStorage");
 	this->UndeploysInto_Sellable.Read(exINI, pSection, "UndeploysInto.Sellable");
 	this->BuildingRadioLink_SyncOwner.Read(exINI, pSection, "BuildingRadioLink.SyncOwner");
@@ -969,6 +970,7 @@ void BuildingTypeExt::Serialize(T& Stm)
 		.Process(this->BunkerWallsDownSound)
 		.Process(this->BunkerStateUpdateDelay)
 		.Process(this->BuildingRepairedSound)
+		.Process(this->AIBuildThis_Written)
 		.Process(this->Refinery_UseNormalActiveAnim)
 		.Process(this->HasPowerUpAnim)
 		.Process(this->UndeploysInto_Sellable)

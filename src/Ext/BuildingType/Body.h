@@ -109,6 +109,10 @@ public:
 
 	NullableIdx<VocClass> BuildingRepairedSound;
 
+	// AIBuildThis as the INI writes it: the game keeps only its bool, false when absent, so the
+	// Neural AI tells a building kept from the AI (=no) from one whose INI does not say.
+	Nullable<bool> AIBuildThis_Written;
+
 	Valueable<bool> Refinery_UseNormalActiveAnim;
 
 	ValueableVector<bool> HasPowerUpAnim;
@@ -241,6 +245,7 @@ public:
 		, BunkerWallsDownSound {}
 		, BunkerStateUpdateDelay {}
 		, BuildingRepairedSound {}
+		, AIBuildThis_Written {}
 		, Refinery_UseNormalActiveAnim { false }
 		, HasPowerUpAnim {}
 		, UndeploysInto_Sellable { false }

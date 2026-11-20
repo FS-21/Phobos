@@ -112,23 +112,36 @@ namespace
 		BanProductionPick(pHouse, pType, queue, UndeliveredPickBanFrames << std::min(bans, UndeliveredPickBanDoublings), reason);
 	}
 
-	// Evaluates buildability strictly under Human Player rules:
+	// Evaluates buildability under Human Player rules:
 	// - Requires valid human TechLevel (0..10), excluding TechLevel=-1 AI script
 	// hacks/limbo dummies and TechLevel=11 disabled types. What a captured secret lab
 	// grants the house is outside those levels on purpose: for it the level is not
 	// looked at and the other prerequisites decide (HouseExt::PrerequisitesMet)
-	// - Excludes legacy *_AI hack clones and TEST_BUILDING
-	// - Temporarily sets IsHumanPlayer=true and AIBuildThis=true during
-	// HouseClass::CanBuild so Ares/YRpp enforce real human Prerequisites,
-	// Prerequisite.Negative, Owner/ForbiddenHouses, BuildLimit, and
-	// PowersUpBuilding instead of AIBuildThis/PrerequisiteOverride
+	// - AIBuildThis as the INI writes it decides for the AI (IsKeptFromAI, IsAIOnlyBuilding):
+	// =no keeps a building from it, =yes lets it build a TechLevel=-1 one (the AI variants of
+	// a mod) under the other prerequisites; NeuralAI::OnScenarioStart lists what =no keeps out
+	// - Excludes [AI] NeuralAI.IgnoreTypes
+	// - Temporarily sets IsHumanPlayer=true during HouseClass::CanBuild so Ares/YRpp enforce
+	// real human Prerequisites, Prerequisite.Negative, Owner/ForbiddenHouses, BuildLimit,
+	// and PowersUpBuilding instead of PrerequisiteOverride; an AI-only building is asked as
+	// the AI it is, since Ares refuses TechLevel=-1 to a human
 	bool CanBuildUnderHumanRules(HouseClass* pHouse, TechnoTypeClass* pType)
 	{
 		if (!pHouse || !pType)
 			return false;
 
-		if (!pHouse->HasFromSecretLab(pType) && (pType->TechLevel < 0 || pType->TechLevel > 10 || pType->TechLevel > pHouse->TechLevel))
+		auto const pBld = abstract_cast<BuildingTypeClass*>(pType);
+
+		if (pBld && IsKeptFromAI(pBld))
 			return false;
+
+		const bool aiOnly = IsAIOnlyBuilding(pType);
+
+		if (!aiOnly && !pHouse->HasFromSecretLab(pType)
+			&& (pType->TechLevel < 0 || pType->TechLevel > 10 || pType->TechLevel > pHouse->TechLevel))
+		{
+			return false;
+		}
 
 		const char* id = pType->ID;
 
@@ -144,8 +157,6 @@ namespace
 			if (std::find(ignored.begin(), ignored.end(), pType) != ignored.end())
 				return false;
 		}
-
-		auto const pBld = abstract_cast<BuildingTypeClass*>(pType);
 
 		if (pBld && pBld->SuperWeapon >= 0 && pBld->SuperWeapon < SuperWeaponTypeClass::Array.Count)
 		{
@@ -188,10 +199,11 @@ namespace
 				return false;
 		}
 
+		// The INI's AIBuildThis is judged above, so the call sees it set.
 		const bool prevHuman = pHouse->IsHumanPlayer;
 		const bool prevAIBuild = pBld ? pBld->AIBuildThis : true;
 
-		pHouse->IsHumanPlayer = true;
+		pHouse->IsHumanPlayer = !aiOnly;
 
 		if (pBld)
 			pBld->AIBuildThis = true;
@@ -283,8 +295,8 @@ namespace
 		{
 			auto const pBld = idx >= 0 && idx < BuildingTypeClass::Array.Count ? BuildingTypeClass::Array.GetItem(idx) : nullptr;
 
-			return pBld && pBld->TechLevel >= 0 && pBld->TechLevel <= pHouse->TechLevel
-				&& (ownHouseBit == 0u || pBld->InOwners(ownHouseBit));
+			return pBld && ((pBld->TechLevel >= 0 && pBld->TechLevel <= pHouse->TechLevel) || IsAIOnlyBuilding(pBld))
+				&& !IsKeptFromAI(pBld) && (ownHouseBit == 0u || pBld->InOwners(ownHouseBit));
 		};
 
 		auto const met = [&](auto const& list)
@@ -1887,6 +1899,11 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		// The building a crossing asks for (crossingPrerequisites).
 		int bestCrossingIdx = -1;
 		int bestCrossingScore = -32000;
+		// The next step of the tech progression floor (TechStepFloorFrames), and whether the yard
+		// builds one now.
+		int bestTechStepIdx = -1;
+		int bestTechStepScore = -32000;
+		bool techStepInProgress = false;
 		// The barracks an urgent capture site asks for (UpdateCaptureBarracks).
 		int bestCaptureBarracksIdx = -1;
 		int bestCaptureBarracksScore = -32000;
@@ -1902,8 +1919,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 			for (auto const pDefType : BuildingTypeClass::Array)
 			{
-				if (!pDefType || !pDefType->IsBaseDefense || pDefType->TechLevel < 0
-					|| (ownHouseBit != 0u && !pDefType->InOwners(ownHouseBit)))
+				if (!pDefType || !pDefType->IsBaseDefense || (pDefType->TechLevel < 0 && !IsAIOnlyBuilding(pDefType))
+					|| IsKeptFromAI(pDefType) || (ownHouseBit != 0u && !pDefType->InOwners(ownHouseBit)))
 				{
 					continue;
 				}
@@ -3131,17 +3148,31 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			// or buildings gets 300 + 120 per type it unlocks (up to 1400) once the core economy
 			// and production stand.
 			int techUnlockBonus = 0;
+			bool opensTechTypes = false;
 
 			if (owned == 0 && hasCoreEconomyAndProduction)
 			{
 				auto const& unlocks = GetMacroState(pHouse).TechUnlocks;
 
 				if (auto const it = unlocks.find(pBld->ArrayIndex); it != unlocks.end() && it->second > 0)
+				{
 					techUnlockBonus = std::min(1400, 300 + 120 * it->second);
+					opensTechTypes = true;
+				}
 
 				// Expert 2: more when it opens a better counter of the seen enemy army.
 				techUnlockBonus += CounterUnlockBonusFor(pHouse, pBld);
 			}
+
+			// A radar or tech center of a group we do not hold yet (IsCoreTechBuilding), and once a tech
+			// center stands a superweapon building of our tree: with the unlockers, the steps of the tech
+			// progression floor (TechStepFloorFrames).
+			const bool isCoreTechStep = owned == 0 && hasCoreEconomyAndProduction && IsCoreTechBuilding(pBld)
+				&& !OwnsCoreTechGroupOf(pHouse, pBld);
+			const bool isSuperWeaponStep = owned == 0 && hasCoreEconomyAndProduction && hasTechCenter
+				&& !IsCoreTechBuilding(pBld) && !pBld->IsBaseDefense && pBld->Factory == AbstractType::None
+				&& !IsTunnelNetworkBuilding(pBld) && (pBld->SuperWeapon != -1 || pBld->SuperWeapon2 != -1);
+			const bool isTechStep = opensTechTypes || isCoreTechStep || isSuperWeaponStep;
 
 			// Branch choices (Prerequisite.Negative: two tech labs, rival defense lines): the first of
 			// each gets a per-match taste of +-250, so one match goes one way and another the other,
@@ -3475,6 +3506,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 						score += 350;
 				}
 
+				// An airfield that is our radar (IsCoreTechBuilding) is a tech step as well.
+				if (isCoreTechStep)
+					score += CoreTechStepBonus;
 			}
 			else if (pBld->UnitRepair)
 			{
@@ -3497,8 +3531,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					bestForwardRepairIdx = pBld->ArrayIndex;
 				}
 			}
-			else if (pBld->SuperWeapon != -1)
+			else if (pBld->SuperWeapon != -1 && !IsCoreTechBuilding(pBld))
 			{
+				// A tech center or radar that grants a superweapon (a force shield, a spy plane) is
+				// scored with the tech buildings below.
 				if (owned >= 1)
 					continue;
 
@@ -3882,16 +3918,13 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				if (sensorBuildingReach > 0)
 					score += std::min(DetectionScoreMost, DetectionScorePerCell * sensorBuildingReach);
 
-				const bool isCoreTechUnlock = pBld->SpySat
-					|| (RulesClass::Instance
-						&& (RulesClass::Instance->BuildTech.FindItemIndex(pBld) != -1
-							|| RulesClass::Instance->BuildRadar.FindItemIndex(pBld) != -1))
-					|| (pBld->TechLevel >= 3 && pBld->Cost >= 1000 && pBld->PowerDrain > 0);
+				// A radar or tech center counts once per group (isCoreTechStep), a big support building
+				// that drains power once per type.
+				const bool isCoreTechUnlock = IsCoreTechBuilding(pBld) ? isCoreTechStep
+					: (pBld->TechLevel >= 3 && pBld->Cost >= 1000 && pBld->PowerDrain > 0 && owned == 0 && hasCoreEconomyAndProduction);
 
-				if (isCoreTechUnlock && owned == 0 && hasCoreEconomyAndProduction)
-				{
-					score += 750 + (underVehicleAttack ? 450 : 0);
-				}
+				if (isCoreTechUnlock)
+					score += CoreTechStepBonus + (underVehicleAttack ? 450 : 0);
 
 				if (pHouse->NumConYards >= 2 && SlotGate(scores[82], 60, 82))
 					score += 250 + std::clamp(static_cast<int>(scores[82]) / 2, 0, 300);
@@ -3978,6 +4011,18 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				bestPriorityAirfieldIdx = pBld->ArrayIndex;
 			}
 
+			if (isTechStep)
+			{
+				if (isBldInProgress)
+					techStepInProgress = true;
+
+				if (score > bestTechStepScore)
+				{
+					bestTechStepScore = score;
+					bestTechStepIdx = pBld->ArrayIndex;
+				}
+			}
+
 			if (score > bestBldScore)
 			{
 				bestBldScore = score;
@@ -4045,6 +4090,42 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		{
 			bestBldIdx = bestPriorityAirfieldIdx;
 			bestBldScore = std::max(bestBldScore, bestPriorityAirfieldScore);
+		}
+
+		// Tech progression floor (user approved, 2026-11-20, «se supone que ha de desarrollar todo su
+		// árbol tecnológico»): once the core economy and production stand, when no tech step (a first
+		// building that opens types of our tree or of a captured one, a radar or tech center of a group
+		// we lack, after the tech center a superweapon building) has been in construction for
+		// TechStepFloorFrames, the best of them is the pick, before the bank governor's factories.
+		// Defenses outscored it: over 46 matches 32 of 74 houses alive at frame 36000 had picked a tech
+		// center by then and 6 of 49 a superweapon by frame 60000, with banks of 100000 credits and
+		// more. Paid as it goes; never over restoring income, a building already under construction or
+		// a gun an air raid still needs; the plans below and the power plant before it still come first.
+		auto& techMacro = GetMacroState(pHouse);
+		const int techNow = Unsorted::CurrentFrame;
+
+		if (!hasCoreEconomyAndProduction || techStepInProgress || bestTechStepIdx < 0 || techMacro.TechStepWaitSince > techNow)
+			techMacro.TechStepWaitSince = techNow;
+
+		const int techStepWaited = techNow - techMacro.TechStepWaitSince;
+		const bool techFloorPick = bestTechStepIdx >= 0 && techStepWaited >= TechStepFloorFrames && hasActiveBuildingIncome
+			&& !bestFillsAirDeficit && inProgressBldIdx < 0 && inProgressDefIdx < 0;
+
+		if (techFloorPick && bestBldIdx != bestTechStepIdx)
+		{
+			// TEMP diagnostic: what the floor takes the yard from (TechFloorLogLines a match).
+			if (techMacro.TechFloorLogCount < TechFloorLogLines && techNow - techMacro.TechFloorLogFrame >= TechFloorLogFrames)
+			{
+				++techMacro.TechFloorLogCount;
+				techMacro.TechFloorLogFrame = techNow;
+				Debug::Log("[NeuralAI] House %d tech floor: %s after %d frames instead of %s (score %d against %d), credits %d, frame %d.\n",
+					pHouse->ArrayIndex, BuildingTypeClass::Array.GetItem(bestTechStepIdx)->ID, techStepWaited,
+					bestBldIdx >= 0 ? BuildingTypeClass::Array.GetItem(bestBldIdx)->ID : "none", bestTechStepScore, bestBldScore,
+					money, techNow);
+			}
+
+			bestBldIdx = bestTechStepIdx;
+			bestBldScore = std::max(bestBldScore, bestTechStepScore);
 		}
 
 		// Forward Repair: the second repair station comes before the other picks, the bank governor's
@@ -4162,8 +4243,11 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				&& bestBldIdx != awaitedRefineryIdx)
 			{
 				auto const pPicked = bestBldIdx >= 0 ? BuildingTypeClass::Array.GetItem(bestBldIdx) : nullptr;
+				// The tech floor yields to the refinery (expansion is crucial) until it has waited
+				// TechStepRefineryYieldFrames, then takes one building between refineries.
 				const bool keepPick = pPicked
-					&& (pPicked->Refinery || (pHouse->HasLowPower() && pPicked->PowerBonus > pPicked->PowerDrain));
+					&& (pPicked->Refinery || (pHouse->HasLowPower() && pPicked->PowerBonus > pPicked->PowerDrain)
+						|| (techFloorPick && bestBldIdx == bestTechStepIdx && techStepWaited >= TechStepRefineryYieldFrames));
 
 				if (!keepPick)
 					bestBldIdx = awaitedRefineryIdx;

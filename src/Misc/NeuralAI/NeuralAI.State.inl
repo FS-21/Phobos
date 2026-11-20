@@ -1054,13 +1054,19 @@ namespace
 		int ResourceClaimZone { -1 };
 		int LastResourceClaimFrame { -100000 };
 		// Tech tree progress (UpdateTechUnlocks): per building type index, how many types it would
-		// unlock as a missing prerequisite; whether one of those is buildable right now.
+		// unlock as a missing prerequisite, with half of what the buildings it opens unlock per step
+		// (TechUnlockTransitiveDepth); whether one of those is buildable right now.
 		std::unordered_map<int, int> TechUnlocks {};
 		// The not yet buildable types behind each of those buildings (same scan), so a building can
 		// be valued by what it would open, not only by how much.
 		std::unordered_map<int, std::vector<TechnoTypeClass*>> TechUnlockTypes {};
 		bool HasBuildableTechUnlock { false };
 		int TechUnlockFrame { -100000 };
+		// Tech progression floor (TechStepFloorFrames): since when no tech step was in construction,
+		// and its TEMP diagnostic lines.
+		int TechStepWaitSince { 0 };
+		int TechFloorLogCount { 0 };
+		int TechFloorLogFrame { -100000 };
 		// Counter composition (UpdateCounterComposition): production score shift per buildable
 		// combat type against the enemy army seen so far and what is attacking the base now, the
 		// extra priority of the first of a building that would unlock a better counter than any we
@@ -1822,6 +1828,9 @@ namespace
 			this->TechUnlockTypes.clear();
 			this->HasBuildableTechUnlock = false;
 			this->TechUnlockFrame = -100000;
+			this->TechStepWaitSince = 0;
+			this->TechFloorLogCount = 0;
+			this->TechFloorLogFrame = -100000;
 			this->CounterBonus.clear();
 			this->CounterUnlockBonus.clear();
 			this->CounterFrame = -100000;
@@ -2490,6 +2499,18 @@ namespace
 	constexpr int CrossingNeedFrames = 3600;
 	constexpr int CrossingPrerequisiteBonus = 1200;
 	constexpr int CrossingTransportBonus = 1100;
+	// Tech progression (user approved, 2026-11-20). CoreTechStepBonus: the first radar or tech center of a
+	// group we lack, whatever branch scores it (IsCoreTechBuilding). TechUnlockTransitiveDepth: the steps
+	// behind an unlocker that count for it, at half weight per step (UpdateTechUnlocks). The floor: with
+	// no tech step in construction for TechStepFloorFrames the best one is the pick; it waits for the
+	// refinery the economy hold saves for until TechStepRefineryYieldFrames. TechFloorLogLines and
+	// TechFloorLogFrames: lines a match of its TEMP diagnostic, at most one per house in that time.
+	constexpr int CoreTechStepBonus = 750;
+	constexpr int TechUnlockTransitiveDepth = 3;
+	constexpr int TechStepFloorFrames = 3600;
+	constexpr int TechStepRefineryYieldFrames = 7200;
+	constexpr int TechFloorLogLines = 40;
+	constexpr int TechFloorLogFrames = 900;
 	constexpr double OpTransportMinHealth = 0.5;
 	// Stuck transports (user approved, 2026-11-20, «Sí, todos»; match #12347, Tsunami: of the four hovercraft
 	// of house 1 one sat at 41% for 30000 frames by the exit of its ROBOTYARD, ordered to dock for repair
