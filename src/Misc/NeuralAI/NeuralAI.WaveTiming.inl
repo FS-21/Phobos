@@ -433,6 +433,31 @@ namespace
 			macro.WaveFailuresInARow++;
 		}
 
+		// Siege mode: the places our waves did not take (Siege*). A building taken there clears the place.
+		{
+			auto& places = macro.ResistedPlaces;
+			std::erase_if(places, [frame](const NeuralResistedPlace& place)
+				{ return frame - place.Frame > SiegeMemoryFrames || frame < place.Frame; });
+			auto const itPlace = std::find_if(places.begin(), places.end(), [&macro](const NeuralResistedPlace& place)
+				{ return place.Cell.DistanceFrom(macro.WaveVerdictCell) <= WaveVerdictCells; });
+
+			if (tookBuilding)
+			{
+				if (itPlace != places.end())
+					places.erase(itPlace);
+			}
+			else if (itPlace != places.end())
+			{
+				itPlace->Failures++;
+				itPlace->Frame = frame;
+				itPlace->Owner = macro.WaveVerdictOwner;
+			}
+			else
+			{
+				places.push_back({ macro.WaveVerdictCell, macro.WaveVerdictOwner, 1, frame });
+			}
+		}
+
 		// The verdict is the result of the mission the wave left for (Reprisal, Clear Our Ground).
 		const bool onMission = macro.WaveVerdictMission >= 0 && macro.WaveVerdictMission < static_cast<int>(NeuralPlanId::Count);
 
@@ -455,11 +480,32 @@ namespace
 	// A new wave of the tank mass leaves for a target with known enemy buildings: it waits for its
 	// verdict. The wave before it gets its own first. mission: the plan id of the mission the
 	// target stands for (Reprisal, Clear Our Ground), -1 for none; the wave counts as its start.
-	void NoteWaveForVerdict(HouseClass* pHouse, const CellStruct& target, int mission)
+	// owner: the house of the target building (siege mode), -1 for none.
+	// A wave to about the same place as the one waiting for its verdict joins it, and the verdict
+	// waits for both. One to another place before the last got there replaces it with no verdict:
+	// judged at once, every change of target was a failure (match #12285: house 2 sent 8 waves of
+	// 30 to 50 units at 153% to 248% of the enemy expected to 8 targets in 1545 frames, each one
+	// "never arrived", 20 failures in a row, and the next wave asked for 32 units).
+	void NoteWaveForVerdict(HouseClass* pHouse, const CellStruct& target, int mission, int owner)
 	{
+		auto& macro = GetMacroState(pHouse);
+
+		if (macro.WaveVerdictPending)
+		{
+			if (target.DistanceFrom(macro.WaveVerdictCell) <= WaveVerdictCells)
+				return;
+
+			if (!macro.WaveVerdictArrived && Unsorted::CurrentFrame - macro.WaveStartFrame < WaveVerdictFrames)
+			{
+				Debug::Log("[NeuralAI] Frame %d | House #%d wave to (%d,%d) replaced by one to (%d,%d) before it got there, no verdict\n",
+					Unsorted::CurrentFrame, pHouse->ArrayIndex, macro.WaveVerdictCell.X, macro.WaveVerdictCell.Y, target.X, target.Y);
+				macro.WaveVerdictPending = false;
+				macro.WaveVerdictMission = -1;
+			}
+		}
+
 		UpdateWaveVerdict(pHouse, true);
 
-		auto& macro = GetMacroState(pHouse);
 		const int buildings = CountKnownEnemyBuildingsNear(pHouse, target);
 
 		if (buildings <= 0)
@@ -470,6 +516,7 @@ namespace
 		macro.WaveVerdictCell = target;
 		macro.WaveVerdictBuildings = buildings;
 		macro.WaveVerdictMission = mission;
+		macro.WaveVerdictOwner = owner;
 
 		if (mission >= 0 && mission < static_cast<int>(NeuralPlanId::Count))
 			CountPlanOutcome(pHouse->ArrayIndex, static_cast<NeuralPlanId>(mission), NeuralPlanOutcome::Started);
