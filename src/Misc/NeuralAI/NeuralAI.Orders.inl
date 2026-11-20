@@ -114,7 +114,7 @@ namespace
 		return false;
 	}
 
-	void OrderFootToEnter(FootClass* pFoot, TechnoClass* pEnterTarget)
+	void OrderFootToEnter(FootClass* pFoot, TechnoClass* pEnterTarget, const char* callerFile, int callerLine)
 	{
 		if (!pFoot || !pEnterTarget || pFoot->InLimbo || !pFoot->IsAlive || pEnterTarget->InLimbo
 			|| !pEnterTarget->IsAlive || IsHeldByTransportOp(pFoot))
@@ -142,6 +142,10 @@ namespace
 			}
 		}
 
+		// Another code holds the unit for its own goal (order leases).
+		if (!MayOrderUnit(pFoot, pEnterTarget->GetMapCoords(), callerFile, callerLine))
+			return;
+
 		// Match EventClass::Execute (MEGA_MISSION, 0x004C73B9-0x004C747C) exact call
 		// order: UnitClass::Assign_Destination (0x00741C54) and
 		// InfantryClass::Assign_Destination (0x0051AC2A) ONLY establish radio contact
@@ -163,6 +167,7 @@ namespace
 		pFoot->ClearNavigationList();
 		pFoot->SetTarget(nullptr);
 		pFoot->SetDestination(pEnterTarget, true);
+		NoteOrderCaller(pFoot, "enter", callerFile, callerLine);
 
 		if (pFoot->ReadyToNextMission())
 			pFoot->NextMission();

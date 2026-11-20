@@ -591,6 +591,7 @@ namespace
 	// farther from the cell it was sent to than OpMemberStuckFarCells). Cleared while it is aboard.
 	// Client: the one that asked for it, which it goes back to; a wave and the economy share the
 	// operation of a crossing (RequestTransportOperation), so it may differ from the operation's.
+	// HoldCell: the wait cell it was given while it has no seat, kept while it is still one.
 	struct NeuralOpMember
 	{
 		DWORD UniqueID { 0 };
@@ -606,6 +607,7 @@ namespace
 		int LoadFrame { -1 };
 		CellStruct ProgressCell { CellStruct::Empty };
 		int ProgressFrame { -1 };
+		CellStruct HoldCell { CellStruct::Empty };
 	};
 
 	// A transport an operation holds: its type, its leg and the frame the leg began, the cell it sets
@@ -1151,6 +1153,8 @@ namespace
 		std::unordered_set<DWORD> McvInDanger;
 		// Expansion goals packed MCVs turned back from for an enemy near them (goal, frame until).
 		std::vector<std::pair<CellStruct, int>> McvFledSites;
+		// Stolen MCVs that were home at their last look (Micro, slot 82: ForeignMcvHomeCells).
+		std::unordered_set<DWORD> ForeignMcvHome;
 		// Packed MCVs that were unfolding (unit -> NeuralMcvUnfold).
 		std::unordered_map<DWORD, NeuralMcvUnfold> McvUnfolds;
 		// Expansion MCVs waiting for a ride to the island goal (unit -> NeuralIslandMcvWait).
@@ -1802,6 +1806,7 @@ namespace
 			this->McvIdle.clear();
 			this->McvInDanger.clear();
 			this->McvFledSites.clear();
+			this->ForeignMcvHome.clear();
 			this->McvUnfolds.clear();
 			this->IslandMcvWaits.clear();
 			this->IslandWaitYards.clear();
@@ -2742,6 +2747,12 @@ namespace
 	constexpr int McvFledSiteCells = 8;
 	constexpr int McvFledSiteFrames = 9000;
 	constexpr int McvFledLogLines = 30;
+	// A stolen MCV is home (slot 82, Micro) within ForeignMcvHomeCells of the yard or of the cell its way
+	// home leads to (the placement cell of its yard, which may lie farther: there it was sent to that cell
+	// again and again and never unfolded), and stays home until it is ForeignMcvHomeExitCells farther: its
+	// deploy stand, a cell past that edge, and the way home took it in turns.
+	constexpr int ForeignMcvHomeCells = 16;
+	constexpr int ForeignMcvHomeExitCells = 8;
 	// Armies go out in mass (user approved, 2026-11-19: "sí haz las 4"; match #11465 Dead Six: two
 	// allied houses of 80+ units and 100000+ credits streamed packets of 7 to 17 units for 18000
 	// frames while a third of each army stayed home). Once the army (idle and busy fighters, not
