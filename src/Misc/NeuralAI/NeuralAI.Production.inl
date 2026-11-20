@@ -351,6 +351,136 @@ namespace
 	void SellFactoryRoadBlock(HouseClass* pHouse);
 	void SellPocketBlock(HouseClass* pHouse);
 
+	// A further coverage support building that found no key building to cover waits this long
+	// before it is tried again (AdvAI's support group cooldown).
+	constexpr int SupportNoCoverFrames = 3600;
+
+	// Coverage support buildings (AdvAI BuildSupport): gap and cloak generators, inhibitors and radar
+	// jammers protect the key buildings within their radius. Sensors are left to the detection need.
+	bool IsCoverageSupport(const BuildingTypeClass* pType)
+	{
+		if (!pType || pType->IsBaseDefense)
+			return false;
+
+		auto const pBldExt = BuildingTypeExt::Fetch(pType);
+		const bool gapGenerator = (pBldExt && pBldExt->GapGenerator) || pType->GapGenerator;
+		auto const pTechExt = TechnoTypeExt::Fetch(pType);
+
+		return (pType->CloakGenerator && pType->CloakRadiusInCells > 0) || (gapGenerator && GetSupportRadius(pType) > 0)
+			|| (pTechExt && pTechExt->InhibitorRange.isset() && pTechExt->InhibitorRange.Get() > 0)
+			|| (pTechExt && pTechExt->RadarJamRadius.Get() > 0);
+	}
+
+	// Two support buildings of one network cover for each other: the same type, the same GroupAs or
+	// the same function.
+	bool IsSameSupportNetwork(const BuildingTypeClass* pA, const BuildingTypeClass* pB)
+	{
+		if (!pA || !pB)
+			return false;
+
+		if (pA == pB
+			|| _strcmpi(TechnoTypeExt::GetSelectionGroupID(const_cast<BuildingTypeClass*>(pA)),
+				TechnoTypeExt::GetSelectionGroupID(const_cast<BuildingTypeClass*>(pB))) == 0)
+		{
+			return true;
+		}
+
+		auto const pExtA = BuildingTypeExt::Fetch(pA);
+		auto const pExtB = BuildingTypeExt::Fetch(pB);
+		const bool gapA = (pExtA && pExtA->GapGenerator) || pA->GapGenerator;
+		const bool gapB = (pExtB && pExtB->GapGenerator) || pB->GapGenerator;
+		auto const pTechA = TechnoTypeExt::Fetch(pA);
+		auto const pTechB = TechnoTypeExt::Fetch(pB);
+		const bool inhibitorA = pTechA && pTechA->InhibitorRange.isset() && pTechA->InhibitorRange.Get() > 0;
+		const bool inhibitorB = pTechB && pTechB->InhibitorRange.isset() && pTechB->InhibitorRange.Get() > 0;
+		const bool jammerA = pTechA && pTechA->RadarJamRadius.Get() > 0;
+		const bool jammerB = pTechB && pTechB->RadarJamRadius.Get() > 0;
+
+		return (gapA && gapB) || (pA->CloakGenerator && pB->CloakGenerator) || (pA->SensorArray && pB->SensorArray)
+			|| (inhibitorA && inhibitorB) || (jammerA && jammerB);
+	}
+
+	// The buildings a support network should cover (AdvAI's base buildings): construction yards,
+	// factories, airfields and helipads, refineries, radars, superweapons, service depots and tech.
+	bool IsSupportKeyBuilding(BuildingTypeClass* pType)
+	{
+		if (!pType || pType->IsBaseDefense || pType->Wall || pType->InvisibleInGame)
+			return false;
+
+		auto const pBldExt = BuildingTypeExt::Fetch(pType);
+
+		return pType->ConstructionYard || pType->Factory != AbstractType::None || pType->Helipad || pType->Refinery
+			|| pType->Radar || pType->SpySat || pType->UnitRepair || pType->SuperWeapon != -1 || pType->SuperWeapon2 != -1
+			|| (pBldExt && !pBldExt->SuperWeapons.empty()) || IsCoreTechBuilding(pType);
+	}
+
+	// Distance from a support building within which a key building counts as covered.
+	int SupportCoverageCells(const BuildingTypeClass* pType)
+	{
+		return std::max(3, GetSupportRadius(pType) - 1);
+	}
+
+	// Separation between two support buildings of one network: 1.8 times the radius (AdvAI).
+	int SupportSeparationCells(const BuildingTypeClass* pType)
+	{
+		const int radius = GetSupportRadius(pType);
+
+		return radius > 1 ? std::max(7, radius * 9 / 5) : 8;
+	}
+
+	// The key buildings no support building of the network covers yet, and how many buildings the
+	// network has.
+	void GatherSupportCoverage(HouseClass* pHouse, const BuildingTypeClass* pSupport, std::vector<CellStruct>& networkCells,
+		std::vector<CellStruct>& uncoveredKeyCells)
+	{
+		networkCells.clear();
+		uncoveredKeyCells.clear();
+		std::vector<CellStruct> keyCells;
+
+		for (auto const pOwnBld : pHouse->Buildings)
+		{
+			if (!pOwnBld || pOwnBld->InLimbo || !pOwnBld->IsAlive || !pOwnBld->Type)
+				continue;
+
+			const CellStruct cell = pOwnBld->GetMapCoords();
+
+			if (IsSameSupportNetwork(pOwnBld->Type, pSupport))
+				networkCells.push_back(cell);
+
+			if (IsSupportKeyBuilding(pOwnBld->Type))
+				keyCells.push_back(cell);
+		}
+
+		const double coverage = static_cast<double>(SupportCoverageCells(pSupport));
+
+		for (const CellStruct& keyCell : keyCells)
+		{
+			const bool covered = std::any_of(networkCells.begin(), networkCells.end(),
+				[&keyCell, coverage](const CellStruct& supportCell) { return keyCell.DistanceFrom(supportCell) <= coverage; });
+
+			if (!covered)
+				uncoveredKeyCells.push_back(keyCell);
+		}
+	}
+
+	// The first coverage support building of a network is wanted as before; one more while a key
+	// building lies outside the network and its power drain leaves the base powered (user,
+	// 2026-11-20: the AdvAI BuildSupport rules).
+	bool SupportCopyWanted(HouseClass* pHouse, const BuildingTypeClass* pSupport, int ownedOfType)
+	{
+		std::vector<CellStruct> networkCells;
+		std::vector<CellStruct> uncoveredKeyCells;
+		GatherSupportCoverage(pHouse, pSupport, networkCells, uncoveredKeyCells);
+
+		if (networkCells.empty() && ownedOfType == 0)
+			return true;
+
+		if (pHouse->HasLowPower() || pHouse->PowerOutput - pHouse->PowerDrain < pSupport->PowerDrain)
+			return false;
+
+		return !uncoveredKeyCells.empty();
+	}
+
 	int CountOwnedUnitWithConversions(HouseClass* pHouse, const UnitTypeClass* pUnit)
 	{
 		if (!pHouse || !pUnit)
@@ -3923,8 +4053,18 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					? DetectionReachCells(pBld, DetectionNeedStealth) : 0;
 				const int maxAllowed = ((supportRadius > 0 && hasTechCenter && money > 3000) ? 2 : 1) + (sensorBuildingReach > 0 ? 1 : 0);
 
-				if (owned >= maxAllowed)
+				// Gap and cloak generators, inhibitors and radar jammers: one more while a key building
+				// is outside the network and power allows (AdvAI BuildSupport), placed to cover it
+				// (FindSpatialTetrisBuildCell); the other support buildings keep the cap.
+				if (IsCoverageSupport(pBld))
+				{
+					if (!SupportCopyWanted(pHouse, pBld, owned))
+						continue;
+				}
+				else if (owned >= maxAllowed)
+				{
 					continue;
+				}
 
 				score = scores[4] + 550 + std::min(600, pBld->Cost / 3) - owned * 700;
 
