@@ -410,9 +410,11 @@ void NeuralAI::ExtractFogFilteredFeatures(HouseClass* pHouse, std::array<int8_t,
 		// Aircraft plus JumpJet / Fly vehicles and infantry (Rocketeers, Siege Choppers...).
 		RecordEnemySighting(pHouse, pTechno);
 
-		if (IsAirborneThreatTechno(pTechno))
+		// A launcher of aircraft (AircraftSpawnOf) is an air threat as well as what it is.
+		if (IsAirborneThreatTechno(pTechno) || AircraftSpawnOf(pTechno->GetTechnoType()))
 			RecordAirThreatSighting(pHouse, pTechno);
-		else if (pTechno->WhatAmI() == AbstractType::Building && IsCellVisibleToAI(pHouse, pCell))
+
+		if (pTechno->WhatAmI() == AbstractType::Building && IsCellVisibleToAI(pHouse, pCell))
 		{
 			// Only real sight: "WhoLastHurtMe" visibility must not leak a whole base.
 			GetMacroState(pHouse).SeenEnemyBuildings.insert(pTechno->UniqueID);
