@@ -1904,6 +1904,15 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		int bestTechStepIdx = -1;
 		int bestTechStepScore = -32000;
 		bool techStepInProgress = false;
+		// The buildings the yards of this house build now, read from the factories: GetPrimaryFactory
+		// finds none for an AI house (inProgressBldIdx was none in all 8893 samples of 2026-11-20).
+		std::vector<int> yardBuildIdxs;
+
+		for (auto const pFactory : FactoryClass::Array)
+		{
+			if (pFactory && pFactory->Owner == pHouse && pFactory->Object && pFactory->Object->WhatAmI() == AbstractType::Building)
+				yardBuildIdxs.push_back(static_cast<BuildingClass*>(pFactory->Object)->Type->ArrayIndex);
+		}
 		// The barracks an urgent capture site asks for (UpdateCaptureBarracks).
 		int bestCaptureBarracksIdx = -1;
 		int bestCaptureBarracksScore = -32000;
@@ -4013,7 +4022,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 			if (isTechStep)
 			{
-				if (isBldInProgress)
+				if (std::find(yardBuildIdxs.begin(), yardBuildIdxs.end(), pBld->ArrayIndex) != yardBuildIdxs.end())
 					techStepInProgress = true;
 
 				if (score > bestTechStepScore)
