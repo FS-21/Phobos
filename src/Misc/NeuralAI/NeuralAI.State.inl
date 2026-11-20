@@ -207,6 +207,35 @@ namespace
 		int SinceFrame { 0 };
 	};
 
+	// Progress clocks (NeuralAI.Progress.inl): how long a unit has kept to one spot, by the rule of each
+	// stuck watchdog. Still: every ground unit (IsFootHeldStill). OrderStill: a ground unit with an order
+	// pending (UpdateStuckUnits). Hover: a flying ground unit (UpdateHoveringFlyers). Air: an aircraft on
+	// Attack, with its ammo (UpdateStuckUnits). HarvestIdle: an empty harvester on Harvest
+	// (UpdateIdleHarvesters). Unload: a transport on Unload, by its exact cell (UpdateStuckUnloads).
+	enum class NeuralClock : uint8_t
+	{
+		Still,
+		OrderStill,
+		Hover,
+		Air,
+		HarvestIdle,
+		Unload,
+		Count
+	};
+
+	constexpr size_t NeuralClockCount = static_cast<size_t>(NeuralClock::Count);
+
+	// One clock of a unit: the cell it keeps to and since when; Aux and AuxSince: what else the clock
+	// follows and since when (an aircraft's ammo); Seen: the serial of the sample that last kept it.
+	struct NeuralClockState
+	{
+		CellStruct Anchor { CellStruct::Empty };
+		int Since { 0 };
+		int Aux { 0 };
+		int AuxSince { 0 };
+		int Seen { -1 };
+	};
+
 	// A ship of ours that waits outside a crowded narrow water passage (UpdateNavalPassageGate): the passage's
 	// centre, where it was bound, whether it was on an attack-move, and since when it waits.
 	struct NeuralPassageWait
@@ -897,6 +926,13 @@ namespace
 		int UncolonizedOreFields { 0 };
 		// Idle harvester dispatcher (UpdateIdleHarvesters), same keyed shape as StuckTracks.
 		std::unordered_map<DWORD, NeuralStuckTrack> IdleHarvesterTracks {};
+		// Progress clocks by unit UniqueID (NeuralAI.Progress.inl), the serial of the last sample of each
+		// clock (a clock counts only while that sample kept it), the serial counter and the last purge.
+		// Keyed lookups only, never iterated to decide.
+		std::unordered_map<DWORD, std::array<NeuralClockState, NeuralClockCount>> ProgressClocks {};
+		std::array<int, NeuralClockCount> ClockSampleSerial {};
+		int ClockSerialCounter { 0 };
+		int ClockPurgeFrame { 0 };
 		// Deployed slave miners (UpdateStrandedSlaveMiners): ore samples in their slaves' reach (read
 		// by the economy unit cap), the frame each one ran out of ore in reach, and the moves ordered
 		// since the last log line.
@@ -1671,6 +1707,10 @@ namespace
 			this->AirStallTracks.clear();
 			this->UncolonizedOreFields = 0;
 			this->IdleHarvesterTracks.clear();
+			this->ProgressClocks.clear();
+			this->ClockSampleSerial.fill(0);
+			this->ClockSerialCounter = 0;
+			this->ClockPurgeFrame = 0;
 			this->MinerOreSamples.clear();
 			this->StrandedMinerSince.clear();
 			this->MinerRelocations = 0;
@@ -2322,6 +2362,13 @@ namespace
 	// once it has waited OpStarvedFrames (user, 2026-11-19: the oldest operation took each transport
 	// that came free or was built, and those on other crossings waited OpNoTransportFrames).
 	constexpr int OpStarvedFrames = 1800;
+
+	// Progress clocks (PurgeClocks): how often the clocks no sample can carry on any more go.
+	constexpr int ClockPurgeFrames = 900;
+	// TEMP diagnostic (NoteClockShadow): the clock mismatches logged per match, and how often the
+	// samples and mismatches of each clock are summed up.
+	constexpr int ClockShadowLogLines = 40;
+	constexpr int ClockShadowSummaryFrames = 9000;
 	// TEMP diagnostic (LogOpTransportRefusals): how often an operation that no transport takes names
 	// why each transport of ours is turned down, the lines a match and the transports a line.
 	constexpr int OpRefusalLogFrames = 1800;
