@@ -1217,6 +1217,20 @@ namespace
 		// hold that bought nothing for 3600 frames rests 1800).
 		int EconomyHoldSince { -1 };
 		int EconomyHoldPauseUntil { -1 };
+		// TEMP diagnostic (economy hold): what the hold saves for (1 harvester, 2 refinery, 3 MCV, 4 broke),
+		// when it began, the productions it cancelled since then and since the last status line, what the house
+		// owned of that kind when it began, and the status lines written this match.
+		int EconomyHoldKind { 0 };
+		int EconomyHoldCancels { 0 };
+		int EconomyHoldLineCancels { 0 };
+		int EconomyHoldStartAssets { 0 };
+		int EconomyHoldLogLines { 0 };
+		int EconomyHoldStartFrame { -1 };
+		// A hold that ended with the credits at the price: its kind, frame and what the house owned of
+		// that kind then, looked at again 1800 frames later (was the item bought).
+		int EconomyHoldPaidKind { 0 };
+		int EconomyHoldPaidFrame { -1 };
+		int EconomyHoldPaidAssets { 0 };
 		// Enemy units seen cloaked, cloakable or under water: UniqueID -> (cell, frame), for
 		// superweapons that reveal stealth (SW.AITargeting=Stealth).
 		std::unordered_map<DWORD, std::pair<CellStruct, int>> StealthSightings;
@@ -1824,6 +1838,15 @@ namespace
 			this->RefinerySaveTarget = 0;
 			this->EconomyHoldSince = -1;
 			this->EconomyHoldPauseUntil = -1;
+			this->EconomyHoldKind = 0;
+			this->EconomyHoldCancels = 0;
+			this->EconomyHoldLineCancels = 0;
+			this->EconomyHoldStartAssets = 0;
+			this->EconomyHoldLogLines = 0;
+			this->EconomyHoldStartFrame = -1;
+			this->EconomyHoldPaidKind = 0;
+			this->EconomyHoldPaidFrame = -1;
+			this->EconomyHoldPaidAssets = 0;
 			this->StealthSightings.clear();
 			this->LastEnemySeenFrame = 0;
 			this->HiddenLosses.clear();
@@ -2557,6 +2580,8 @@ namespace
 	constexpr int EconomyRecoverySaleFrames = 300;
 	constexpr int EconomyRecoverySaleQuietFrames = 1800;
 	constexpr int EconomyRecoveryKeepFactories = 1;
+	// TEMP diagnostic (economy hold): status lines a house writes a match, one every 900 frames of a hold.
+	constexpr int EconomyHoldLogLinesMost = 120;
 	// Ore cells of a held 12x12 ore block for each refinery past the first it takes (3 at most).
 	constexpr int RefineryOreCellsPerExtra = 24;
 	// A newly reached ore field gets a refinery past what we own (and past the held fields' room) at
