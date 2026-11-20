@@ -970,6 +970,8 @@ namespace
 		int ClockPurgeFrame { 0 };
 		// TEMP diagnostic: the Edge Blitz starts logged this match (EdgeBlitzLogLines).
 		int EdgeBlitzLogCount { 0 };
+		// The size of the next Edge Blitz group, doubled after each failure (0: EdgeBlitzGroupLeast).
+		int EdgeBlitzSize { 0 };
 		// Deployed slave miners (UpdateStrandedSlaveMiners): ore samples in their slaves' reach (read
 		// by the economy unit cap), the frame each one ran out of ore in reach, and the moves ordered
 		// since the last log line.
@@ -1789,6 +1791,7 @@ namespace
 			this->ClockSerialCounter = 0;
 			this->ClockPurgeFrame = 0;
 			this->EdgeBlitzLogCount = 0;
+			this->EdgeBlitzSize = 0;
 			this->MinerOreSamples.clear();
 			this->StrandedMinerSince.clear();
 			this->MinerRelocations = 0;
@@ -2903,7 +2906,7 @@ namespace
 	// building of its owner within ExpansionDenialBaseCells) counts its distance divided by
 	// ExpansionDenialDistDivisor.
 	constexpr int CaptureUnguardedDefenseMargin = 2;
-	// Edge Blitz (UpdateStrategicPlans): EdgeBlitzGroupLeast to EdgeBlitzGroupMost of the strongest fast
+	// Edge Blitz (UpdateStrategicPlans): the house's blitz size (EdgeBlitzSize) of the strongest fast
 	// idle ground units go round the enemy base: out to the side of the line between the bases as far as
 	// EdgeBlitzSideMostCells (at least EdgeBlitzSideLeastCells), then EdgeBlitzBehindCells past the target,
 	// each leg ending within EdgeBlitzWaypointCells or after EdgeBlitzLegFrames; then they strike. The
@@ -2912,7 +2915,9 @@ namespace
 	// EdgeBlitzFrames, or when the group keeps less than EdgeBlitzKeepPercent of its value. TEMP: the starts,
 	// EdgeBlitzLogLines a match.
 	constexpr size_t EdgeBlitzGroupLeast = 4;
-	constexpr size_t EdgeBlitzGroupMost = 10;
+	// The group a house sends (EdgeBlitzSize) doubles after each failed blitz, up to EdgeBlitzGroupMost,
+	// as the tank mass grows: the bigger group wins (user, 2026-11-20). It waits for that many idle units.
+	constexpr size_t EdgeBlitzGroupMost = 32;
 	constexpr double EdgeBlitzSideMostCells = 60.0;
 	constexpr double EdgeBlitzSideLeastCells = 12.0;
 	constexpr double EdgeBlitzBehindCells = 14.0;

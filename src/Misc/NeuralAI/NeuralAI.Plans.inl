@@ -11746,6 +11746,8 @@ namespace
 				else if (memberValue(plan) * 100 < plan.InitialValue * EdgeBlitzKeepPercent || Unsorted::CurrentFrame >= plan.Deadline)
 				{
 					finishPlan(NeuralPlanId::EdgeBlitz, false, true);
+					// The next blitz goes with twice the units (EdgeBlitzSize).
+					macro.EdgeBlitzSize = std::min(std::max(macro.EdgeBlitzSize, static_cast<int>(EdgeBlitzGroupLeast)) * 2, static_cast<int>(EdgeBlitzGroupMost));
 				}
 				else if (plan.AuxPeak >= 0 && plan.AuxPeak < static_cast<int>(plan.Cells.size()))
 				{
@@ -11781,8 +11783,12 @@ namespace
 						return va != vb ? va > vb : a->UniqueID < b->UniqueID;
 					});
 
-				if (group.size() > EdgeBlitzGroupMost)
-					group.resize(EdgeBlitzGroupMost);
+				// As many as the house's blitz size, the strongest first; fewer idle units wait.
+				const size_t blitzSize = static_cast<size_t>(std::clamp(macro.EdgeBlitzSize, static_cast<int>(EdgeBlitzGroupLeast),
+					static_cast<int>(EdgeBlitzGroupMost)));
+
+				if (group.size() > blitzSize)
+					group.resize(blitzSize);
 
 				// The centre of each enemy house's known buildings on our ground.
 				std::vector<long long> sumX(HouseClass::Array.Count, 0);
@@ -11812,7 +11818,7 @@ namespace
 				double centreY = 0.0;
 				double targetDepth = 0.0;
 
-				if (group.size() >= EdgeBlitzGroupLeast)
+				if (group.size() >= blitzSize)
 				{
 					for (auto const pBld : knownEnemyBuildingList)
 					{
