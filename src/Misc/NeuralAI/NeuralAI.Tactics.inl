@@ -109,10 +109,9 @@ namespace
 		if (pFoot->LastFireBulletFrame > 0 && now >= pFoot->LastFireBulletFrame && now - pFoot->LastFireBulletFrame < 300)
 			return false;
 
-		auto const& progress = GetMacroState(pHouse).FootProgress;
-		auto const it = progress.find(pFoot->UniqueID);
+		auto const pClock = GetClock(GetMacroState(pHouse), pFoot->UniqueID, NeuralClock::Still);
 
-		if (it == progress.end() || now < it->second.SinceFrame || now - it->second.SinceFrame < frames)
+		if (!pClock || now < pClock->Since || now - pClock->Since < frames)
 			return false;
 
 		return !(pFoot->Target && pFoot->IsCloseEnoughToAttack(pFoot->Target));
@@ -1235,9 +1234,9 @@ namespace
 			if (!ordered)
 				return;
 
-			auto const it = macro.FootProgress.find(pFoot->UniqueID);
+			auto const pClock = GetClock(macro, pFoot->UniqueID, NeuralClock::Still);
 
-			if (it != macro.FootProgress.end() && now >= it->second.SinceFrame && now - it->second.SinceFrame >= 90)
+			if (pClock && now >= pClock->Since && now - pClock->Since >= 90)
 				waiting.push_back(pFoot->GetMapCoords());
 		};
 
@@ -1415,9 +1414,9 @@ namespace
 			if (!ordered || !pGoal)
 				return;
 
-			auto const it = macro.FootProgress.find(pFoot->UniqueID);
+			auto const pClock = GetClock(macro, pFoot->UniqueID, NeuralClock::Still);
 
-			if (it == macro.FootProgress.end() || now < it->second.SinceFrame || now - it->second.SinceFrame < EmergencyLaneWaitFrames)
+			if (!pClock || now < pClock->Since || now - pClock->Since < EmergencyLaneWaitFrames)
 				return;
 
 			const CellStruct here = pFoot->GetMapCoords();
@@ -1554,7 +1553,6 @@ namespace
 	{
 		auto& macro = GetMacroState(pHouse);
 		const int now = Unsorted::CurrentFrame;
-		std::unordered_map<DWORD, NeuralStuckTrack> next;
 		const int hoverPrevious = BeginClockSample(macro, NeuralClock::Hover);
 
 		for (auto const pUnit : UnitClass::Array)
@@ -1568,27 +1566,22 @@ namespace
 			}
 
 			const CellStruct here = pUnit->GetMapCoords();
-			NeuralStuckTrack track { here, now };
+			NeuralClockState track { here, now };
 
-			if (auto const it = macro.HoverTracks.find(pUnit->UniqueID);
-				it != macro.HoverTracks.end() && it->second.Cell.DistanceFrom(here) <= 1.5 && now >= it->second.SinceFrame)
+			if (auto const pCarried = CarriedClock(macro, pUnit->UniqueID, NeuralClock::Hover, hoverPrevious);
+				pCarried && pCarried->Anchor.DistanceFrom(here) <= 1.5 && now >= pCarried->Since)
 			{
-				track = it->second;
+				track = *pCarried;
 			}
 
-			// TEMP (rule consolidation, case 5): the clock the registry carries on, checked against the track.
-			NoteTrackShadow(pHouse, NeuralClock::Hover, pUnit->UniqueID, FindTrack(macro.HoverTracks, pUnit->UniqueID),
-				CarriedClock(macro, pUnit->UniqueID, NeuralClock::Hover, hoverPrevious));
-
 			if (pUnit->IsFiring || (pUnit->LastFireBulletFrame > 0 && now >= pUnit->LastFireBulletFrame && now - pUnit->LastFireBulletFrame < 300))
-				track.SinceFrame = now;
+				track.Since = now;
 
 			const bool inPlan = macro.PlanMembers.contains(pUnit->UniqueID);
 
-			if (now - track.SinceFrame < (inPlan ? 900 : 600))
+			if (now - track.Since < (inPlan ? 900 : 600))
 			{
-				next.emplace(pUnit->UniqueID, track);
-				KeepClock(macro, pUnit->UniqueID, NeuralClock::Hover, { track.Cell, track.SinceFrame });
+				KeepClock(macro, pUnit->UniqueID, NeuralClock::Hover, track);
 				continue;
 			}
 
@@ -1618,15 +1611,14 @@ namespace
 
 			if (!exposed && !deadOrder)
 			{
-				next.emplace(pUnit->UniqueID, track);
-				KeepClock(macro, pUnit->UniqueID, NeuralClock::Hover, { track.Cell, track.SinceFrame });
+				KeepClock(macro, pUnit->UniqueID, NeuralClock::Hover, track);
 				continue;
 			}
 
 			auto const pTargetObj = abstract_cast<ObjectClass*>(pUnit->Target);
 			auto const pCarryExt = UnitExt::Fetch(pUnit);
 			Debug::Log("[NeuralAI] Frame %d | House #%d hovering %s #%u at (%d,%d) for %d frames: mission %d mega %d dest (%d,%d) target %s (%d,%d) passengers %d carryall state %d cargo %s plan %d -> %s\n",
-				now, pHouse->ArrayIndex, pUnit->Type->ID, pUnit->UniqueID, here.X, here.Y, now - track.SinceFrame,
+				now, pHouse->ArrayIndex, pUnit->Type->ID, pUnit->UniqueID, here.X, here.Y, now - track.Since,
 				static_cast<int>(pUnit->CurrentMission), static_cast<int>(pUnit->MegaMission),
 				pDestCell ? pDestCell->MapCoords.X : -1, pDestCell ? pDestCell->MapCoords.Y : -1,
 				pTargetObj && pTargetObj->GetType() ? pTargetObj->GetType()->ID : "-",
@@ -1649,8 +1641,6 @@ namespace
 			CountDecision(NeuralDecision::HoverReleased, pHouse->ArrayIndex);
 			// Its next stop starts a new track.
 		}
-
-		macro.HoverTracks = std::move(next);
 	}
 
 	// TEMP diagnostic: the biggest group of our held units (each within 2 cells of another) once it
@@ -1739,8 +1729,8 @@ namespace
 			(goal <= 4.0 ? goalNear : (goal <= 12.0 ? goalMid : goalFar))++;
 			dests[{ h.Dest.X, h.Dest.Y }]++;
 
-			if (auto const it = macro.FootProgress.find(pFoot->UniqueID); it != macro.FootProgress.end() && now >= it->second.SinceFrame)
-				longest = std::max(longest, now - it->second.SinceFrame);
+			if (auto const pClock = GetClock(macro, pFoot->UniqueID, NeuralClock::Still); pClock && now >= pClock->Since)
+				longest = std::max(longest, now - pClock->Since);
 
 			const bool member = macro.PlanMembers.contains(pFoot->UniqueID);
 			inPlan += member ? 1 : 0;
@@ -2046,7 +2036,6 @@ namespace
 			return;
 
 		auto& macro = GetMacroState(pHouse);
-		std::unordered_map<DWORD, NeuralStuckTrack> next;
 		const int now = Unsorted::CurrentFrame;
 		// Units of ours held 450+ frames on one cell with an order pending, and where they want to go.
 		std::vector<NeuralHeldOrder> stuckOrders;
@@ -2099,17 +2088,13 @@ namespace
 			if (here.DistanceFrom(destCell) <= 2.5)
 				return;
 
-			NeuralStuckTrack track { here, now };
+			NeuralClockState track { here, now };
 
-			if (auto const it = macro.StuckTracks.find(pFoot->UniqueID);
-				it != macro.StuckTracks.end() && it->second.Cell.DistanceFrom(here) <= 1.5)
+			if (auto const pCarried = CarriedClock(macro, pFoot->UniqueID, NeuralClock::OrderStill, orderPrevious);
+				pCarried && pCarried->Anchor.DistanceFrom(here) <= 1.5)
 			{
-				track = it->second;
+				track = *pCarried;
 			}
-
-			// TEMP (rule consolidation, case 5): the clock the registry carries on, checked against the track.
-			NoteTrackShadow(pHouse, NeuralClock::OrderStill, pFoot->UniqueID, FindTrack(macro.StuckTracks, pFoot->UniqueID),
-				CarriedClock(macro, pFoot->UniqueID, NeuralClock::OrderStill, orderPrevious));
 
 			auto const pTargetTechno = abstract_cast<TechnoClass*>(pFoot->Target);
 
@@ -2118,10 +2103,10 @@ namespace
 			if (pFoot->IsFiring
 				|| (pTargetTechno && pTargetTechno->IsAlive && !pTargetTechno->InLimbo && pFoot->IsCloseEnoughToAttack(pTargetTechno)))
 			{
-				track.SinceFrame = now;
+				track.Since = now;
 			}
 
-			const int stuckFrames = now - track.SinceFrame;
+			const int stuckFrames = now - track.Since;
 			auto const pDestObject = abstract_cast<ObjectClass*>(pDest);
 			const int footZone = ObjectZone(pFoot, pType->MovementZone);
 			const int destZone = MapClass::Instance.GetMovementZoneType(
@@ -2172,8 +2157,7 @@ namespace
 			if (stuckFrames >= 450)
 				stuckOrders.push_back({ pFoot, here, destCell });
 
-			next.emplace(pFoot->UniqueID, track);
-			KeepClock(macro, pFoot->UniqueID, NeuralClock::OrderStill, { track.Cell, track.SinceFrame });
+			KeepClock(macro, pFoot->UniqueID, NeuralClock::OrderStill, track);
 		};
 
 		for (auto const pUnit : UnitClass::Array)
@@ -2182,11 +2166,8 @@ namespace
 		for (auto const pInf : InfantryClass::Array)
 			check(pInf, false);
 
-		macro.StuckTracks = std::move(next);
-
 		// Where every ground unit of ours stands and since when (firing restarts it): IsFootHeldStill.
 		{
-			std::unordered_map<DWORD, NeuralStuckTrack> progress;
 			const int stillPrevious = BeginClockSample(macro, NeuralClock::Still);
 
 			auto const trackProgress = [&](FootClass* pFoot)
@@ -2195,19 +2176,15 @@ namespace
 					return;
 
 				const CellStruct here = pFoot->GetMapCoords();
-				NeuralStuckTrack track { here, now };
+				NeuralClockState track { here, now };
 
-				if (auto const it = macro.FootProgress.find(pFoot->UniqueID);
-					it != macro.FootProgress.end() && it->second.Cell.DistanceFrom(here) <= 1.5 && !pFoot->IsFiring)
+				if (auto const pCarried = CarriedClock(macro, pFoot->UniqueID, NeuralClock::Still, stillPrevious);
+					pCarried && pCarried->Anchor.DistanceFrom(here) <= 1.5 && !pFoot->IsFiring)
 				{
-					track = it->second;
+					track = *pCarried;
 				}
 
-				// TEMP (rule consolidation, case 5): the clock the registry carries on, checked against the track.
-				NoteTrackShadow(pHouse, NeuralClock::Still, pFoot->UniqueID, FindTrack(macro.FootProgress, pFoot->UniqueID),
-					CarriedClock(macro, pFoot->UniqueID, NeuralClock::Still, stillPrevious));
-				progress.emplace(pFoot->UniqueID, track);
-				KeepClock(macro, pFoot->UniqueID, NeuralClock::Still, { track.Cell, track.SinceFrame });
+				KeepClock(macro, pFoot->UniqueID, NeuralClock::Still, track);
 			};
 
 			for (auto const pUnit : UnitClass::Array)
@@ -2215,12 +2192,9 @@ namespace
 
 			for (auto const pInf : InfantryClass::Array)
 				trackProgress(pInf);
-
-			macro.FootProgress = std::move(progress);
 		}
 
 		PurgeClocks(macro);
-		LogClockShadowSummary();
 
 		LogHeldColumn(pHouse, stuckOrders);
 		UpdateJamBreaker(pHouse, stuckOrders);
@@ -2237,7 +2211,6 @@ namespace
 		// shot, or 1800 frames in the air without a shot. Plan members too: their plan sends them
 		// again once they rest armed (ReadyPlanAircraft); left alone they stayed on Attack on
 		// their pad until the plan ran out of time.
-		std::unordered_map<DWORD, NeuralAirStallTrack> nextAir;
 		const int airPrevious = BeginClockSample(macro, NeuralClock::Air);
 
 		for (auto const pAir : AircraftClass::Array)
@@ -2249,38 +2222,30 @@ namespace
 			}
 
 			const CellStruct here = pAir->GetMapCoords();
-			NeuralAirStallTrack track { here, now, pAir->Ammo, now };
+			// The cell and the ammo it keeps to, and since when (Aux: the ammo).
+			NeuralClockState track { here, now, pAir->Ammo, now };
 
-			// TEMP (rule consolidation, case 5): the clock the registry carries on, checked against the track.
+			if (auto const pCarried = CarriedClock(macro, pAir->UniqueID, NeuralClock::Air, airPrevious))
 			{
-				auto const oldIt = macro.AirStallTracks.find(pAir->UniqueID);
-				const bool oldKept = oldIt != macro.AirStallTracks.end();
-				NoteClockShadow(pHouse, NeuralClock::Air, pAir->UniqueID, oldKept, oldKept ? oldIt->second.Cell : CellStruct::Empty,
-					oldKept ? oldIt->second.SinceFrame : 0, oldKept ? oldIt->second.Ammo : 0, oldKept ? oldIt->second.AmmoSinceFrame : 0,
-					CarriedClock(macro, pAir->UniqueID, NeuralClock::Air, airPrevious));
-			}
+				track = *pCarried;
 
-			if (auto const it = macro.AirStallTracks.find(pAir->UniqueID); it != macro.AirStallTracks.end())
-			{
-				track = it->second;
-
-				if (track.Cell.DistanceFrom(here) > 1.5)
+				if (track.Anchor.DistanceFrom(here) > 1.5)
 				{
-					track.Cell = here;
-					track.SinceFrame = now;
+					track.Anchor = here;
+					track.Since = now;
 				}
 
-				if (track.Ammo != pAir->Ammo)
+				if (track.Aux != pAir->Ammo)
 				{
-					track.Ammo = pAir->Ammo;
-					track.AmmoSinceFrame = now;
+					track.Aux = pAir->Ammo;
+					track.AuxSince = now;
 				}
 			}
 
 			if (pAir->IsFiring)
 			{
-				track.SinceFrame = now;
-				track.AmmoSinceFrame = now;
+				track.Since = now;
+				track.AuxSince = now;
 			}
 
 			// An aircraft sent to attack from its dock is put back to sleep by the dock one frame
@@ -2293,8 +2258,8 @@ namespace
 					pAir->SendCommand(RadioCommand::NotifyUnlink, pHolder);
 			}
 
-			const bool parked = !pAir->IsInAir() && now - track.SinceFrame >= 450 && now - track.AmmoSinceFrame >= 450;
-			const bool idleFlight = pAir->IsInAir() && now - track.AmmoSinceFrame >= 1800;
+			const bool parked = !pAir->IsInAir() && now - track.Since >= 450 && now - track.AuxSince >= 450;
+			const bool idleFlight = pAir->IsInAir() && now - track.AuxSince >= 1800;
 
 			if (parked || idleFlight)
 			{
@@ -2305,11 +2270,8 @@ namespace
 				continue; // Its next attack starts a new track.
 			}
 
-			nextAir.emplace(pAir->UniqueID, track);
-			KeepClock(macro, pAir->UniqueID, NeuralClock::Air, { track.Cell, track.SinceFrame, track.Ammo, track.AmmoSinceFrame });
+			KeepClock(macro, pAir->UniqueID, NeuralClock::Air, track);
 		}
-
-		macro.AirStallTracks = std::move(nextAir);
 	}
 
 	// Idle harvester dispatcher: an empty harvester on Harvest that has not left its cell for 900
@@ -2325,7 +2287,6 @@ namespace
 			return;
 
 		auto& macro = GetMacroState(pHouse);
-		std::unordered_map<DWORD, NeuralStuckTrack> next;
 		const int now = Unsorted::CurrentFrame;
 		// Expert 0 in charge moves a harvester stuck on a drained field three times sooner.
 		auto const pIdleExt = HouseExt::Fetch(pHouse);
@@ -2349,22 +2310,17 @@ namespace
 			}
 
 			const CellStruct here = pUnit->GetMapCoords();
-			NeuralStuckTrack track { here, now };
+			NeuralClockState track { here, now };
 
-			if (auto const it = macro.IdleHarvesterTracks.find(pUnit->UniqueID);
-				it != macro.IdleHarvesterTracks.end() && it->second.Cell.DistanceFrom(here) <= 1.5)
+			if (auto const pCarried = CarriedClock(macro, pUnit->UniqueID, NeuralClock::HarvestIdle, harvestPrevious);
+				pCarried && pCarried->Anchor.DistanceFrom(here) <= 1.5)
 			{
-				track = it->second;
+				track = *pCarried;
 			}
 
-			// TEMP (rule consolidation, case 5): the clock the registry carries on, checked against the track.
-			NoteTrackShadow(pHouse, NeuralClock::HarvestIdle, pUnit->UniqueID, FindTrack(macro.IdleHarvesterTracks, pUnit->UniqueID),
-				CarriedClock(macro, pUnit->UniqueID, NeuralClock::HarvestIdle, harvestPrevious));
-
-			if (now - track.SinceFrame < idleWait)
+			if (now - track.Since < idleWait)
 			{
-				next.emplace(pUnit->UniqueID, track);
-				KeepClock(macro, pUnit->UniqueID, NeuralClock::HarvestIdle, { track.Cell, track.SinceFrame });
+				KeepClock(macro, pUnit->UniqueID, NeuralClock::HarvestIdle, track);
 				continue;
 			}
 
@@ -2472,12 +2428,9 @@ namespace
 			}
 
 			// No field in reach: look again in 900 frames rather than scanning every tick.
-			track.SinceFrame = now;
-			next.emplace(pUnit->UniqueID, track);
-			KeepClock(macro, pUnit->UniqueID, NeuralClock::HarvestIdle, { track.Cell, track.SinceFrame });
+			track.Since = now;
+			KeepClock(macro, pUnit->UniqueID, NeuralClock::HarvestIdle, track);
 		}
-
-		macro.IdleHarvesterTracks = std::move(next);
 	}
 
 	int BuildingGroundZone(const BuildingClass* pBld);
