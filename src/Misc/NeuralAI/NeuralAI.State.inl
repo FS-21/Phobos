@@ -1212,6 +1212,8 @@ namespace
 		std::unordered_map<DWORD, NeuralMcvIdleUnfold> McvIdleUnfolds;
 		// Expansion MCVs holding the ground (unit -> NeuralMcvFallback, Micro).
 		std::unordered_map<DWORD, NeuralMcvFallback> McvFallbacks;
+		// Stolen MCVs (Micro, StolenMcv*): unit -> the frame it was first seen stolen and packed.
+		std::unordered_map<DWORD, int> StolenMcvSince;
 		// Packed MCVs that had an enemy near them at their last look (Micro, the MCV danger rule).
 		std::unordered_set<DWORD> McvInDanger;
 		// Expansion goals packed MCVs turned back from for an enemy near them (goal, frame until).
@@ -1868,6 +1870,7 @@ namespace
 			this->McvIdle.clear();
 			this->McvIdleUnfolds.clear();
 			this->McvFallbacks.clear();
+			this->StolenMcvSince.clear();
 			this->McvInDanger.clear();
 			this->McvFledSites.clear();
 			this->ForeignMcvHome.clear();
@@ -2824,6 +2827,15 @@ namespace
 	// deploy stand, a cell past that edge, and the way home took it in turns.
 	constexpr int ForeignMcvHomeCells = 16;
 	constexpr int ForeignMcvHomeExitCells = 8;
+	// Stolen MCVs (user, 2026-11-20: «si no se pudiese desplegar el MCV controlado la única salida que veo es
+	// meterlo en el grinder para obtener dinero extra.. y si se puede desplegar lo ideal sería expandir ese
+	// arbol tecnológico en zona segura»; match #12285, In The Pipe: three Robot MCVs Yuri took 140 cells from
+	// its only yard drove home through enemy ground, and the hunt the engine gives a unit a computer house
+	// captures took them back toward the enemy). No MCV hunts. A stolen MCV out of danger within
+	// StolenMcvOwnCells of a building of ours unfolds there; one still packed StolenMcvGrinderFrames after it
+	// was first seen goes into our Grinder when it reaches it.
+	constexpr int StolenMcvOwnCells = 10;
+	constexpr int StolenMcvGrinderFrames = 5400;
 	// Hold the ground (user approved, 2026-11-20, «haz todas las propuestas que me acabas de hacer», match
 	// #12278: in a contested middle with no enemy building known, expansion MCVs turned home from every
 	// enemy unit passing by, and one stood 900 frames in danger at its home cell next to the front). An
