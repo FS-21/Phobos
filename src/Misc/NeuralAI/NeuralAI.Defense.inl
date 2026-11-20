@@ -736,6 +736,15 @@ void NeuralAI::OnTechnoDestroyed(TechnoClass* pVictim, TechnoClass* pKiller)
 		NoteAirForceKill(pKiller->Owner, static_cast<AircraftClass*>(pKiller), static_cast<BuildingClass*>(pVictim));
 	}
 
+	// Expansion MCVs wait after a ConYard of ours is destroyed (ExpansionMcvLossFrames).
+	if (pVictimOwner && pVictim->WhatAmI() == AbstractType::Building && NeuralAI::IsEnabledForHouse(pVictimOwner))
+	{
+		auto const pVictimBld = static_cast<BuildingClass*>(pVictim);
+
+		if (pVictimBld->Type && pVictimBld->Type->ConstructionYard)
+			GetMacroState(pVictimOwner).ConYardLostFrame = Unsorted::CurrentFrame;
+	}
+
 	// TEMP diagnostic (NoteOrderCaller): the record of a dead unit goes with it.
 	if (pVictimOwner && pVictimOwner->ArrayIndex >= 0 && pVictimOwner->ArrayIndex < 32)
 		LastOrderCaller[pVictimOwner->ArrayIndex].erase(pVictim->UniqueID);

@@ -3576,6 +3576,10 @@ namespace
 	// enemy across the water is harassed from range and invaded with a beachhead.
 	constexpr int OffensiveBankSurplus = 25000;
 
+	// Windows of four the governor's factories keep under threat with an offensive bank: the money
+	// is there, building time is not, and the last window still goes to the towers and the tech.
+	constexpr int OffensiveBankThreatWindows = 3;
+
 	bool HasOffensiveBank(HouseClass* pHouse)
 	{
 		return pHouse && GetMacroState(pHouse).BankSurplus >= OffensiveBankSurplus;

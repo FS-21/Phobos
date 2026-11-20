@@ -210,6 +210,36 @@ namespace
 		return count;
 	}
 
+	// The aircraft a launcher sends (a weapon with Spawner=yes and an aircraft as Spawns: the
+	// dreadnought's missiles, the carrier's planes, the V3 rocket), or null.
+	AircraftTypeClass* AircraftSpawnOf(const TechnoTypeClass* pType)
+	{
+		auto const pSpawns = pType ? pType->Spawns : nullptr;
+
+		if (!pSpawns)
+			return nullptr;
+
+		for (int i = 0; i < 2; ++i)
+		{
+			auto const pWS = const_cast<TechnoTypeClass*>(pType)->GetWeapon(i);
+
+			if (pWS && pWS->WeaponType && pWS->WeaponType->Spawner)
+				return pSpawns;
+		}
+
+		return nullptr;
+	}
+
+	// Air threat of a launcher (user, 2026-11-20: seeing a dreadnought means attacks from the air,
+	// its weapons are aircraft, like the Allied carrier's): what it sends, SpawnsNumber times. It
+	// asks for anti-air before the spawns arrive; the launcher itself stays a target of its own kind.
+	int AircraftSpawnThreatOf(const TechnoTypeClass* pType)
+	{
+		auto const pSpawns = AircraftSpawnOf(pType);
+
+		return pSpawns ? GetCombatValueOfType(pSpawns, false) * std::max(1, pType->SpawnsNumber) : 0;
+	}
+
 	void RecordAirThreatSighting(HouseClass* pHouse, TechnoClass* pTechno)
 	{
 		auto const pType = pTechno ? pTechno->GetTechnoType() : nullptr;
@@ -247,8 +277,11 @@ namespace
 		track.UniqueID = pTechno->UniqueID;
 		track.LastCoords = coords;
 		track.LastSeenFrame = Unsorted::CurrentFrame;
-		track.ThreatValue = GetCombatValueOfType(pType, false);
-		track.IsHeavy = pType->Strength >= 600;
+		// A launcher on the ground or at sea counts as what it sends.
+		const bool airborne = IsAirborneThreatTechno(pTechno);
+		auto const pSpawns = airborne ? nullptr : AircraftSpawnOf(pType);
+		track.ThreatValue = pSpawns ? AircraftSpawnThreatOf(pType) : GetCombatValueOfType(pType, false);
+		track.IsHeavy = (pSpawns ? pSpawns->Strength : pType->Strength) >= 600;
 		tracks.push_back(track);
 	}
 

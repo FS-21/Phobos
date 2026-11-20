@@ -1388,14 +1388,17 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			? std::clamp(ownedRefineries - TankMassRefineries + 3, 1, TankMassWarFactories)
 			: 0;
 
+		// No fixed ceiling (user: the caps nobody asked for kept a house from matching the enemy's
+		// production): the economy or one more than the known factories of the strongest enemy,
+		// whichever is more, bounded only by room, money and the difficulty cap per category.
 		const int maxWarFactories = std::max(tankMassWarFactories, (hasTechCenter || money >= 2400)
-			? std::clamp(std::max(ecoWarFactoryCap, maxEnemyWarFactories + 1), 2, 7) + bankSteps + frontFactoryRoom
+			? std::max({ 2, ecoWarFactoryCap, maxEnemyWarFactories + 1 }) + bankSteps + frontFactoryRoom
 			: std::clamp(ecoWarFactoryCap, 1, 3));
 
 		const int ecoBarracksCap = (ownedRefineries >= 4) ? 2 : 1;
 
 		const int maxBarracks = (hasTechCenter || money >= 2500)
-			? std::clamp(std::max(ecoBarracksCap, maxEnemyBarracks), 2, 4) + bankSteps / 2 + frontFactoryRoom / 2
+			? std::max({ 2, ecoBarracksCap, maxEnemyBarracks + 1 }) + bankSteps / 2 + frontFactoryRoom / 2
 			: std::clamp(ecoBarracksCap, 1, 2);
 
 		// Shipyards (user): on an island map (starting bases not linked by land, or enemy buildings
@@ -3107,7 +3110,12 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				// The war factories of the tank mass do not wait for the tech either.
 				const bool tankMassNeedsCopy = pBld->Factory == AbstractType::UnitType && owned < tankMassWarFactories;
 
-				if (!outpostNeedsCopy && !bankNeedsCopy && !tankMassNeedsCopy)
+				// Nor the copies that bring us level with the known factories of the strongest enemy.
+				const bool parityNeedsCopy = (pBld->Factory == AbstractType::InfantryType)
+					? ownedBarracks < maxEnemyBarracks
+					: ownedWarFactories < maxEnemyWarFactories;
+
+				if (!outpostNeedsCopy && !bankNeedsCopy && !tankMassNeedsCopy && !parityNeedsCopy)
 					continue;
 			}
 
@@ -3977,13 +3985,16 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		// wants most; the other windows keep the usual picks (tech, defenses, power, refineries).
 		// Building time is what a big bank lacks, so the share grows with the surplus: two windows
 		// in four, three from 50000 credits beyond the reserve, all from 100000. Under attack or
-		// facing a frontline threat none below 30000, one from 30000, two from 100000. Never while
-		// restoring income.
+		// facing a frontline threat none, and OffensiveBankThreatWindows with an offensive bank
+		// (match #12322: a Nod house under attack in every sample kept 50000 to 70000 credits and
+		// gave half its yard time to towers that died while the enemy grew from 6 to 17 war
+		// factories). Never while restoring income.
 		const bool bankUnderThreat = wasRecentlyAttacked || effectiveFrontlineThreat;
 		const int bankSurplus = bankMacro.BankSurplus;
 		// The tank mass answers a threat with tanks, and tanks come from war factories: it keeps
 		// TankMassBankWindowsThreat windows under threat and TankMassBankWindows otherwise.
-		const int usualBankWindowShare = bankUnderThreat ? (bankSurplus >= 100000 ? 2 : (bankSurplus >= 30000 ? 1 : 0))
+		const int usualBankWindowShare = bankUnderThreat
+			? (bankSurplus >= OffensiveBankSurplus ? OffensiveBankThreatWindows : 0)
 			: (bankSurplus >= 100000 ? 4 : (bankSurplus >= 50000 ? 3 : 2));
 		const int bankWindowShare = pExt->NeuralAI_Archetype == TankMassArchetype
 			? std::max(usualBankWindowShare, bankUnderThreat ? TankMassBankWindowsThreat : TankMassBankWindows)
@@ -5412,6 +5423,18 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	int awaitedMcvIdx = -1;
 	int awaitedMcvScore = -32000;
 
+	// No expansion MCV while losing (ExpansionMcvAdvantageMin, ExpansionMcvLossFrames): our army
+	// against the army of the strongest enemy seen, and the last ConYard of ours destroyed.
+	auto const& mcvWaveState = GetWaveTimingState(pHouse);
+	int strongestEnemyArmy = 0;
+
+	for (auto const& enemy : mcvWaveState.Enemies)
+		strongestEnemyArmy = std::max(strongestEnemyArmy, enemy.Army);
+
+	const bool expansionMcvWaits = pHouse->NumConYards >= 1
+		&& ((strongestEnemyArmy > 0 && mcvWaveState.OwnArmyValue * 100 < strongestEnemyArmy * ExpansionMcvAdvantageMin)
+			|| Unsorted::CurrentFrame - GetMacroState(pHouse).ConYardLostFrame < ExpansionMcvLossFrames);
+
 	for (auto const pUnit : UnitTypeClass::Array)
 	{
 		if (!pUnit || !CanBuildUnderHumanRules(pHouse, pUnit))
@@ -5459,6 +5482,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			}
 
 			if (!bankWantsYard && pHouse->NumConYards >= 1 && features[20] <= 6 && !hasUncolonizedIslandTarget && !fieldsRunningDry)
+				continue;
+
+			// While losing, the vehicle queue builds the army, not another base (one under way is finished).
+			if (expansionMcvWaits && !isUnitInProgress)
 				continue;
 
 			// A house with a ConYard but nothing gathering rebuilds its income first (a harvester, or a
