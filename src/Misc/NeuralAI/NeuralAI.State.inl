@@ -591,6 +591,7 @@ namespace
 	// farther from the cell it was sent to than OpMemberStuckFarCells). Cleared while it is aboard.
 	// Client: the one that asked for it, which it goes back to; a wave and the economy share the
 	// operation of a crossing (RequestTransportOperation), so it may differ from the operation's.
+	// HoldCell: the wait cell it was given while it has no seat, kept while it is still one.
 	struct NeuralOpMember
 	{
 		DWORD UniqueID { 0 };
@@ -606,6 +607,7 @@ namespace
 		int LoadFrame { -1 };
 		CellStruct ProgressCell { CellStruct::Empty };
 		int ProgressFrame { -1 };
+		CellStruct HoldCell { CellStruct::Empty };
 	};
 
 	// A transport an operation holds: its type, its leg and the frame the leg began, the cell it sets
