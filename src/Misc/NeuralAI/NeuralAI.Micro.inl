@@ -20,6 +20,47 @@ namespace
 	size_t KeepRemnantSearchers(HouseClass* pHouse, std::vector<UnitClass*>& idleUnits, std::vector<InfantryClass*>& idleInf);
 	void NoteRemnantSearcher(HouseClass* pHouse, const FootClass* pFoot, const CellStruct& place);
 	bool MayLogRemnantNoPlace(HouseClass* pHouse);
+
+	// Whether a cell stands on high ground over the ground of a zone: a cell of that zone
+	// CellClass::BridgeLevels or more below it within CliffScanCells (sampled every 2 cells). The
+	// ground does not change, so the answer is kept for the match, by zone and cell.
+	bool IsHighGroundOverZone(const CellStruct& cell, int level, int zone)
+	{
+		static int cacheSerial = -1;
+		static std::unordered_map<long long, bool> cache;
+
+		if (cacheSerial != NeuralMatchSerial)
+		{
+			cacheSerial = NeuralMatchSerial;
+			cache.clear();
+		}
+
+		if (level < CellClass::BridgeLevels || zone < 0)
+			return false;
+
+		const long long key = (static_cast<long long>(zone) << 32) | (static_cast<long long>(static_cast<unsigned short>(cell.X)) << 16)
+			| static_cast<unsigned short>(cell.Y);
+
+		if (auto const itKnown = cache.find(key); itKnown != cache.end())
+			return itKnown->second;
+
+		bool high = false;
+
+		for (int dy = -CliffScanCells; dy <= CliffScanCells && !high; dy += 2)
+		{
+			for (int dx = -CliffScanCells; dx <= CliffScanCells && !high; dx += 2)
+			{
+				const CellStruct belowCell { static_cast<short>(cell.X + dx), static_cast<short>(cell.Y + dy) };
+				auto const pBelow = dx * dx + dy * dy <= CliffScanCells * CliffScanCells ? MapClass::Instance.TryGetCellAt(belowCell) : nullptr;
+
+				high = pBelow && pBelow->Level <= level - CellClass::BridgeLevels
+					&& MapClass::Instance.GetMovementZoneType(belowCell, MovementZone::Normal, false) == zone;
+			}
+		}
+
+		cache.emplace(key, high);
+		return high;
+	}
 }
 
 // Land before islands (IslandMcvWaitFrames, NeuralAI.State.inl).
@@ -820,6 +861,66 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		Debug::Log("[NeuralAI] House %d MCV holds: %s %u %s (%d,%d), from (%d,%d), enemy value %d near, ours %d, %d yards, frame %d.\n",
 			pHouse->ArrayIndex, pMcv->Type->ID, pMcv->UniqueID, what, at.X, at.Y, here.X, here.Y, enemyValue, ownValue,
 			pHouse->NumConYards, Unsorted::CurrentFrame);
+	};
+
+	// A free start location (StartSpot*, NeuralAI.State.inl): start i is defined, no house of ours or of an
+	// ally started there, it was seen empty or its house was defeated, no known building of anyone stands
+	// within StartSpotTakenCells and an ore field lies within StartSpotOreCells. Out: the start's cell.
+	auto const IsFreeStartSpot = [pHouse](int i, CellStruct& outCell) -> bool
+	{
+		if (!ScenarioClass::Instance->IsDefinedWaypoint(i))
+			return false;
+
+		const CellStruct startCell = ScenarioClass::Instance->GetWaypointCoords(i);
+		bool leftByDefeated = false;
+
+		for (auto const pOther : HouseClass::Array)
+		{
+			if (!pOther || pOther->IsNeutral() || pOther->BaseSpawnCell == CellStruct::Empty || pOther->BaseSpawnCell.DistanceFrom(startCell) > 6.0)
+				continue;
+
+			if (pOther == pHouse || pHouse->IsAlliedWith(pOther))
+				return false;
+
+			leftByDefeated = leftByDefeated || pOther->Defeated;
+		}
+
+		auto const pStartCell = MapClass::Instance.TryGetCellAt(startCell);
+
+		if (!pStartCell)
+			return false;
+
+		const bool seenEmpty = (GetMacroState(pHouse).ScoutedStartMask & (1u << i)) != 0 || IsCellVisibleToAI(pHouse, pStartCell);
+
+		if (!seenEmpty && !leftByDefeated)
+			return false;
+
+		for (auto const pBld : BuildingClass::Array)
+		{
+			if (!pBld || pBld->InLimbo || !pBld->IsAlive || !pBld->Owner || pBld->Owner->IsNeutral() || !pBld->Type
+				|| pBld->Type->Insignificant || pBld->Type->InvisibleInGame || pBld->Type->Wall)
+			{
+				continue;
+			}
+
+			const bool known = pBld->Owner == pHouse || pHouse->IsAlliedWith(pBld->Owner) || IsEnemyBuildingKnown(pHouse, pBld);
+			const CellStruct bc = pBld->GetMapCoords();
+
+			if (known && std::max(std::abs(bc.X - startCell.X), std::abs(bc.Y - startCell.Y)) <= StartSpotTakenCells)
+				return false;
+		}
+
+		const bool oreNear = std::any_of(GetOreFields().begin(), GetOreFields().end(), [&](const auto& field)
+		{
+			return std::max(std::abs(field.Cell.X - startCell.X), std::abs(field.Cell.Y - startCell.Y)) <= StartSpotOreCells;
+		});
+
+		if (!oreNear)
+			return false;
+
+		outCell = startCell;
+
+		return true;
 	};
 
 	auto const pExt = HouseExt::Fetch(pHouse);
@@ -3962,6 +4063,15 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				if (pLinkedBld->Type
 					&& (pLinkedBld->Type->WeaponsFactory || pLinkedBld->Type->Factory == AbstractType::UnitType))
 				{
+					// A damaged unit (or one sent in) that docks at a repair station that is also a factory (a
+					// CABAL yard) is not leaving it: dispersed each tick it never docked (match #12347, Tsunami: a
+					// hovercraft at 41% for 30000 frames by a ROBOTYARD).
+					if (pLinkedBld->Type->UnitRepair && (pUnit->GetHealthPercentage() < 1.0
+						|| pUnit->CurrentMission == Mission::Enter || pUnit->QueuedMission == Mission::Enter))
+					{
+						continue;
+					}
+
 					if (pUnit->CurrentMission == Mission::Move && pUnit->Destination != nullptr)
 					{
 						continue; // Never interrupt a vehicle's short exit move while still
@@ -5599,6 +5709,62 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 							bestExpDist = distFromMCV;
 							pExpansionDest = pCell;
+						}
+					}
+				}
+
+				// A free start location is one more candidate next to the fields (StartSpot*, NeuralAI.State.inl).
+				if (!siegeDestFound && mcvZone >= 0)
+				{
+					int bestStart = -1;
+					int bestStartMetric = bestExpDist;
+					CellStruct bestStartCell = CellStruct::Empty;
+
+					for (int i = 0; i < MaxStartWaypoints; ++i)
+					{
+						CellStruct startCell = CellStruct::Empty;
+
+						if (!IsFreeStartSpot(i, startCell)
+							|| MapClass::Instance.GetMovementZoneType(startCell, MovementZone::Normal, false) != mcvZone)
+						{
+							continue;
+						}
+
+						const int metric = std::abs(startCell.X - mcvCell.X) + std::abs(startCell.Y - mcvCell.Y) - StartSpotBonusCells;
+
+						if (metric >= bestStartMetric || !IsMcvSiteSafe(pHouse, mcvDangers, startCell)
+							|| IsExpansionCellTakenByTeam(pHouse, startCell))
+						{
+							continue;
+						}
+
+						bestStart = i;
+						bestStartMetric = metric;
+						bestStartCell = startCell;
+					}
+
+					if (bestStart >= 0)
+					{
+						if (auto const pStartDest = MapClass::Instance.TryGetCellAt(bestStartCell))
+						{
+							// TEMP diagnostic: an expansion MCV sent to a free start location (StartSpotLogLines).
+							static int startSpotLogSerial = -1;
+							static int startSpotLogCount = 0;
+
+							if (startSpotLogSerial != NeuralMatchSerial)
+							{
+								startSpotLogSerial = NeuralMatchSerial;
+								startSpotLogCount = 0;
+							}
+
+							if (pUnit->Destination != pStartDest && startSpotLogCount++ < StartSpotLogLines)
+							{
+								Debug::Log("[NeuralAI] House %d expansion: %s %u heads for the free start location %d at (%d,%d), %d cells away "
+									"(nearest field %d), frame %d.\n", pHouse->ArrayIndex, pType->ID, pUnit->UniqueID, bestStart, bestStartCell.X,
+									bestStartCell.Y, bestStartMetric + StartSpotBonusCells, pExpansionDest ? bestExpDist : -1, Unsorted::CurrentFrame);
+							}
+
+							pExpansionDest = pStartDest;
 						}
 					}
 				}
@@ -10224,6 +10390,56 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		}
 	}
 
+	// High ground (Cliff*): the share of our armed ground army whose projectile a cliff stops going
+	// up, and, when it is CliffBlockedSharePercent or more, the cells of the known enemy defenses.
+	int cliffBlockedPercent = 0;
+	std::vector<CellStruct> cliffDefenseCells;
+
+	if (tankMassTargets)
+	{
+		int armedGround = 0;
+		int blockedGoingUp = 0;
+		auto const countCliffShooter = [&armedGround, &blockedGoingUp](FootClass* pFoot)
+		{
+			auto const pType = pFoot->GetTechnoType();
+			auto const pWeapon = pType->GetWeapon(0) ? pType->GetWeapon(0)->WeaponType : nullptr;
+
+			if (!pWeapon || pWeapon->Damage <= 0 || pFoot->IsInAir())
+				return;
+
+			armedGround++;
+
+			if (pWeapon->Projectile && pWeapon->Projectile->SubjectToCliffs)
+				blockedGoingUp++;
+		};
+
+		for (auto const pUnit : UnitClass::Array)
+		{
+			if (pUnit && pUnit->Owner == pHouse && pUnit->IsAlive && !pUnit->InLimbo && pUnit->Type && !pUnit->Type->Naval
+				&& !pUnit->Type->Harvester && !pUnit->Type->ResourceGatherer)
+			{
+				countCliffShooter(pUnit);
+			}
+		}
+
+		for (auto const pInf : InfantryClass::Array)
+		{
+			if (pInf && pInf->Owner == pHouse && pInf->IsAlive && !pInf->InLimbo && pInf->Type)
+				countCliffShooter(pInf);
+		}
+
+		cliffBlockedPercent = armedGround > 0 ? blockedGoingUp * 100 / armedGround : 0;
+
+		if (cliffBlockedPercent >= CliffBlockedSharePercent)
+		{
+			for (auto const& info : GetKnownEnemyBuildingCache(pHouse).Entries)
+			{
+				if (info.IsDefense)
+					cliffDefenseCells.push_back(info.Coords);
+			}
+		}
+	}
+
 	// Siege mode (Siege*): the enemies the tank mass besieges while it dominates (a place of theirs
 	// resisted our waves), those places, and the known defenses of those enemies.
 	unsigned int siegeMask = 0u;
@@ -10357,6 +10573,16 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			{
 				OpLineCost(*pWayDangerMap, homeCoords, ebc, candWayDanger);
 				bldCandScore -= std::min(siegeTarget ? SiegeWayDangerMost : TankMassWayDangerMost, candWayDanger / TankMassWayDangerPerPoint);
+			}
+
+			// High ground with a known defense near it, while most of our army cannot fire up the cliff
+			// (Cliff*): the units would drive round by the ramps into the defenses.
+			if (!cliffDefenseCells.empty()
+				&& std::any_of(cliffDefenseCells.begin(), cliffDefenseCells.end(),
+					[&ebc](const CellStruct& defense) { return defense.DistanceFrom(ebc) <= CliffDefenseCells; })
+				&& IsHighGroundOverZone(ebc, pCell->Level, homeGroundZone))
+			{
+				bldCandScore -= CliffTargetPenalty * cliffBlockedPercent / 100;
 			}
 
 			if (const int owner = pOwner->ArrayIndex; pEnemyBld->Type->PowerBonus > 0 && owner >= 0 && owner < 8
@@ -10663,9 +10889,13 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		if (!pUnit || pUnit->Owner != pHouse || pUnit->InLimbo || !pUnit->IsAlive || !pUnit->Type)
 			continue;
 
-		// Repairers follow the vehicles on their own (Repairer*): no wave or push takes them.
+		// Repairers follow the vehicles on their own (Repairer*): no wave or push takes them. Nor a unit
+		// that unfolds into a building other than a siege gun: its deployer logic leads it (user approved,
+		// 2026-11-20, «Sí, todos»; match #12347, Tsunami: a Nanocore of a refinery, ROBOTEGG_REFN, went with
+		// a unit wave toward an island it could not reach and drove round its own).
 		if (pUnit->Type->Harvester || pUnit->Type->ResourceGatherer
-			|| (pUnit->Type->DeploysInto && pUnit->Type->DeploysInto->ConstructionYard) || IsRepairerUnit(pUnit))
+			|| (pUnit->Type->DeploysInto && (pUnit->Type->DeploysInto->ConstructionYard || !IsDeployableSiegeUnitType(pUnit->Type)))
+			|| IsRepairerUnit(pUnit))
 		{
 			continue;
 		}
@@ -11278,14 +11508,16 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	// Mass, not a stream (match #11465 Dead Six: a wave of 2 or 3 and a dispatch every tick sent the
 	// armies of two houses of 80+ units out in packets of 7 to 17): once the army is big, a main wave
 	// waits for a share of it idle. The army is the idle fighters and those busy at the enemy, not the
-	// guards, plans or garrisons. The guerrilla raider (5) keeps its small groups.
+	// guards, plans or garrisons. The guerrilla raider (5) keeps its small groups. The share does not
+	// hold while the second echelon window is open, and gives way after WaveFloorWaitMostFrames (below).
 	const int waveArmy = static_cast<int>(idleCombatUnits.size() + idleCombatInf.size()) + notIdleBusy + notIdleInfBusy;
-	const size_t armyShareUnits = (endgameRemnantHunt || arch == 5 || waveArmy < WaveArmyMassFrom)
+	const size_t armyShareUnits = (endgameRemnantHunt || arch == 5 || waveArmy < WaveArmyMassFrom || secondEchelonWindow)
 		? 0u
 		: static_cast<size_t>(std::min(WaveArmyShareMost, waveArmy / WaveArmyShareDivisor));
-	const size_t waveUnitsNeeded = std::max(armyShareUnits, teamOrder.MinWaveUnits > 0
+	const size_t waveUnitsWithoutShare = teamOrder.MinWaveUnits > 0
 		? std::min(minWaveUnits, static_cast<size_t>(teamOrder.MinWaveUnits))
-		: minWaveUnits);
+		: minWaveUnits;
+	size_t waveUnitsNeeded = std::max(armyShareUnits, waveUnitsWithoutShare);
 
 	// Expert 3 tacit coalition: this wave goes for the coalition target (approach away from the
 	// spots other houses' armies are hitting).
@@ -11726,6 +11958,45 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			[&](UnitClass* pU) { return reachesWaveGoal(pU); }));
 		waveAbleInf = static_cast<size_t>(std::count_if(idleCombatInf.begin(), idleCombatInf.end(),
 			[&](InfantryClass* pI) { return reachesWaveGoal(pI); }));
+	}
+
+	// The army share floor waits at most WaveFloorWaitMostFrames once the count without it is met:
+	// then the wave goes with what it has (user: waiting to gather must have a limit). A dispatch
+	// starts the wait again, so the waves after it do not stream out at the smaller count.
+	{
+		auto const countMet = [&waveAbleUnits, &waveAbleInf](size_t needed)
+		{
+			return waveAbleUnits >= needed || waveAbleUnits + waveAbleInf >= needed + 4 || waveAbleInf >= needed + 3;
+		};
+		const int floorNow = Unsorted::CurrentFrame;
+
+		if (pWaveTargetCell && !endgameRemnantHunt && waveUnitsNeeded > waveUnitsWithoutShare && countMet(waveUnitsWithoutShare)
+			&& !countMet(waveUnitsNeeded))
+		{
+			if (waveMacro.WaveFloorWaitSince < 0 || waveMacro.WaveFloorWaitSince > floorNow
+				|| waveMacro.LastWaveDispatchFrame >= waveMacro.WaveFloorWaitSince)
+			{
+				waveMacro.WaveFloorWaitSince = floorNow;
+				waveMacro.WaveFloorWaitLogged = false;
+			}
+			else if (floorNow - waveMacro.WaveFloorWaitSince >= WaveFloorWaitMostFrames)
+			{
+				if (!waveMacro.WaveFloorWaitLogged)
+				{
+					Debug::Log("[NeuralAI] Frame %d | House #%d wave floor waited %d frames: the wave asks for %d units instead of %d "
+						"(%d idle reach the target, %d soldiers)\n", floorNow, pHouse->ArrayIndex, floorNow - waveMacro.WaveFloorWaitSince,
+						static_cast<int>(waveUnitsWithoutShare), static_cast<int>(waveUnitsNeeded), static_cast<int>(waveAbleUnits),
+						static_cast<int>(waveAbleInf));
+					waveMacro.WaveFloorWaitLogged = true;
+				}
+
+				waveUnitsNeeded = waveUnitsWithoutShare;
+			}
+		}
+		else
+		{
+			waveMacro.WaveFloorWaitSince = -1;
+		}
 	}
 
 	const bool waveCountReady = waveAbleUnits >= waveUnitsNeeded
@@ -14765,12 +15036,19 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			if (underRepair && transHP < 0.98)
 				continue;
 
-			if (!underRepair && transHP < 0.5)
+			// On a repair trip the trip leads it (its time cap, its give-up, the stations that failed it).
+			if (IsOnRepairTrip(pHouse, pTrans->UniqueID))
+				continue;
+
+			// It goes for repair as a repair trip, with the credits to pay for it (TransportRepairMinCredits).
+			if (!underRepair && transHP < 0.5 && pHouse->Available_Money() >= TransportRepairMinCredits
+				&& !IsRepairStationFailed(pHouse, pTrans->GetTechnoType(), NeuralRepairKind::Depot))
 			{
 				if (auto const pStation = FindBestRepairStation(pHouse, pTrans))
 				{
 					ClearFerryTrip(pTrans->UniqueID);
 					OrderFootToEnter(pTrans, pStation);
+					BeginRepairTrip(pHouse, pTrans, NeuralRepairKind::Depot, pStation->UniqueID, CellStruct::Empty);
 					continue;
 				}
 			}

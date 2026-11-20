@@ -664,6 +664,11 @@ namespace
 		int Tries { 0 };
 		CellStruct ProgressCell { CellStruct::Empty };
 		int ProgressFrame { -1 };
+		// The progress watchdog of its way to its berth (OpStagingStuckFrames): where and when it last
+		// moved, and how many berths it gave up.
+		CellStruct StagingProgressCell { CellStruct::Empty };
+		int StagingProgressFrame { -1 };
+		int StagingTries { 0 };
 		CellStruct OrderCell { CellStruct::Empty };
 		std::vector<CellStruct> Route;
 		int RouteFrame { -1 };
@@ -1505,6 +1510,10 @@ namespace
 		// verdict, the places our waves did not take, the enemies besieged now (a bit per house) and
 		// the last frame of the siege line.
 		int WaveVerdictOwner { -1 };
+		// The army share floor of the main wave (WaveFloorWaitMostFrames): since when the count
+		// without it is met and only it holds the wave (-1 none), and whether that wait was logged.
+		int WaveFloorWaitSince { -1 };
+		bool WaveFloorWaitLogged { false };
 		std::vector<NeuralResistedPlace> ResistedPlaces {};
 		unsigned int SiegeOwnersMask { 0u };
 		int SiegeLogFrame { -100000 };
@@ -2019,6 +2028,8 @@ namespace
 			this->WaveLessonFrame = -100000;
 			this->WaveFailuresInARow = 0;
 			this->WaveVerdictOwner = -1;
+			this->WaveFloorWaitSince = -1;
+			this->WaveFloorWaitLogged = false;
 			this->ResistedPlaces.clear();
 			this->SiegeOwnersMask = 0u;
 			this->SiegeLogFrame = -100000;
@@ -2448,6 +2459,17 @@ namespace
 	constexpr int CrossingPrerequisiteBonus = 1200;
 	constexpr int CrossingTransportBonus = 1100;
 	constexpr double OpTransportMinHealth = 0.5;
+	// Stuck transports (user approved, 2026-11-20, «Sí, todos»; match #12347, Tsunami: of the four hovercraft
+	// of house 1 one sat at 41% for 30000 frames by the exit of its ROBOTYARD, ordered to dock for repair
+	// and dispersed as a vehicle leaving its factory each tick; one took 7700 frames for 15 cells to its
+	// berth; an operation waited 9000 frames for transports that were damaged or docked). A transport on its
+	// way to its berth that has not moved OpStuckCells in OpStagingStuckFrames takes another berth, and
+	// after OpStagingMaxTries the operation lets it go. A damaged transport goes for repair as a repair trip
+	// (its time cap, its give-up, the stations that failed it) and only with TransportRepairMinCredits.
+	constexpr int OpStagingStuckFrames = 1800;
+	constexpr int OpStagingMaxTries = 2;
+	constexpr int OpStagingLogLines = 30;
+	constexpr int TransportRepairMinCredits = 300;
 	constexpr double OpDyingTransportHealth = 0.24;
 	constexpr int OpUnloadRetryFrames = 450;
 	constexpr int OpMaxLandingTries = 4;
@@ -2906,17 +2928,39 @@ namespace
 	constexpr int McvCoverUnitCells = 8;
 	constexpr int McvFledNearGoalCells = 16;
 	constexpr int McvHoldLogLines = 40;
+	// Free start locations (user approved, 2026-11-20: «Creo que la IA desde hace un tiempo ignora los puntos
+	// iniciales donde empiezan los jugadores cuando el mapa está diseñado para más jugadores o cuando se
+	// derrota a uno porque esas zonas suelen ser espaciosas y con recursos», «Sí, hazlo», «espero que sea un
+	// candidato a parte de lo que ya hace»; match #12357, (8) Russian Roulette). The expansion MCV took the
+	// nearest free ore field only, and a start nobody used or a defeated house left was never weighed. A
+	// multiplayer start (waypoints 0..7) that no house of ours or of an ally started at, seen empty
+	// (ScoutedStartMask, or in sight now) or left by a defeated house, with no known building of anyone
+	// within StartSpotTakenCells and an ore field within StartSpotOreCells, is one more candidate next to
+	// the fields: it is taken when it is no farther (in the field scan's measure, |dx| + |dy|) than the
+	// nearest field plus StartSpotBonusCells. StartSpotLogLines: lines a match of its TEMP diagnostic.
+	constexpr int StartSpotTakenCells = 14;
+	constexpr int StartSpotOreCells = 12;
+	constexpr int StartSpotBonusCells = 24;
+	constexpr int StartSpotLogLines = 30;
 	// Armies go out in mass (user approved, 2026-11-19: "sí haz las 4"; match #11465 Dead Six: two
 	// allied houses of 80+ units and 100000+ credits streamed packets of 7 to 17 units for 18000
 	// frames while a third of each army stayed home). Once the army (idle and busy fighters, not
 	// guards or plans) has WaveArmyMassFrom units, a main wave waits for WaveArmyShareDivisor-th of it
 	// idle, at most WaveArmyShareMost; the second echelon discount holds only while
 	// WaveEchelonEngagedUnits of the waves before stand within WaveEchelonEngagedCells of their goal.
+	// The share has limits (user approved, 2026-11-20, P2 of the finishing diagnosis, «esperar a juntar
+	// debe tener un límite»; match #11910: no wave from frame 60000 to 86535 while the enemies had 1 to 5
+	// buildings left, 23 to 40 units asked for with 5 to 14 idle, the next wave took them in 3 minutes;
+	// the median win on small maps went from 46 to 66 minutes after it came). It does not hold while the
+	// second echelon window is open (the waves before fight at their goal: the reinforcements join
+	// that fight), and once the count without it has been met for WaveFloorWaitMostFrames the wave goes
+	// with what it has.
 	constexpr int WaveArmyMassFrom = 18;
 	constexpr int WaveArmyShareDivisor = 3;
 	constexpr int WaveArmyShareMost = 40;
 	constexpr int WaveEchelonEngagedUnits = 3;
 	constexpr double WaveEchelonEngagedCells = 14.0;
+	constexpr int WaveFloorWaitMostFrames = 1800;
 	// A team push lasts at least the walk of its farthest member plus TeamPushMarginFrames; the team
 	// keeps its target for TeamTargetKeepFrames while it stands; a house with TeamWeakHouseBuildings
 	// known buildings or fewer is the team target only when no member picks a stronger one.
@@ -3714,6 +3758,19 @@ namespace
 	constexpr int SiegePowerBonus = 300;
 	constexpr int SiegeFactoryBonus = 300;
 	constexpr int SiegeLogFrames = 2700;
+	// High ground (user approved, 2026-11-20, P8c, «Escríbela ya»): a projectile with SubjectToCliffs
+	// is stopped by a cliff going up, not going down (Ares IsCliffHit: a cell CellClass::BridgeLevels or
+	// more above the one before it and above the firer), and a unit with no clear shot keeps moving
+	// (TechnoClass::IsCloseEnoughToTarget), so below a plateau it drives round by the ramps into the
+	// defenses. While CliffBlockedSharePercent or more of our armed ground army fires such projectiles,
+	// a target of the tank mass on high ground (cells of our home zone BridgeLevels or more below it
+	// within CliffScanCells) with a known enemy defense within CliffDefenseCells loses
+	// CliffTargetPenalty, in proportion to that share. Measured first (TEMP, 21 matches): 9 of 148 waves
+	// went to such targets, all with half or more of the army blocked going up.
+	constexpr int CliffBlockedSharePercent = 50;
+	constexpr int CliffScanCells = 8;
+	constexpr double CliffDefenseCells = 14.0;
+	constexpr int CliffTargetPenalty = 500;
 	// A war factory keeps a road out: two-way ground (cells of walkable 2x2 squares) from its exit
 	// lane to a cell more than FactoryRoadClearCells from every building of ours, found within
 	// FactoryRoadWalkCells cells. Buildings stand at most one cell apart (Adjacent), so a base is
