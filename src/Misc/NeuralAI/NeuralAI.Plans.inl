@@ -2458,6 +2458,7 @@ namespace
 					followUp.StartFrame = Unsorted::CurrentFrame;
 					followUp.Until = Unsorted::CurrentFrame + PlanFollowUpFrames;
 					followUp.InitialValue = std::max(1, followUpValue);
+					followUp.Center = plan.TargetCell;
 					macro.FollowUps.push_back(std::move(followUp));
 				}
 				else
@@ -11561,8 +11562,16 @@ namespace
 
 			const int now = Unsorted::CurrentFrame;
 
+			// TEMP diagnostic: what the last pick found (known buildings of that house, within reach, reached).
+			int pickKnown = 0;
+			int pickNear = 0;
+			int pickReached = 0;
+
 			auto const pickFollowUpTarget = [&](const NeuralFollowUp& followUp, const CellStruct& center, FootClass* pLead) -> BuildingClass*
 			{
+				pickKnown = 0;
+				pickNear = 0;
+				pickReached = 0;
 				BuildingClass* pSame = nullptr;
 				BuildingClass* pAny = nullptr;
 				int sameDistance = INT_MAX;
@@ -11580,12 +11589,20 @@ namespace
 					const CellStruct bc = pBld->GetMapCoords();
 					const int distance = std::max(std::abs(bc.X - center.X), std::abs(bc.Y - center.Y));
 					const bool same = PlanBuildingKindOf(pBld->Type) == followUp.Kind;
+					pickKnown++;
 
-					if (distance > PlanFollowUpCells || distance >= (same ? sameDistance : anyDistance)
-						|| (pLead && !FootReachesAlone(pLead, bc, pBld)))
-					{
+					if (distance > PlanFollowUpCells)
 						continue;
-					}
+
+					pickNear++;
+
+					if (pLead && !FootReachesAlone(pLead, bc, pBld))
+						continue;
+
+					pickReached++;
+
+					if (distance >= (same ? sameDistance : anyDistance))
+						continue;
 
 					(same ? pSame : pAny) = pBld;
 					(same ? sameDistance : anyDistance) = distance;
@@ -11662,11 +11679,14 @@ namespace
 				if (!over && !pTarget)
 				{
 					const int alive = static_cast<int>(followUp.Members.size());
-					const CellStruct center { static_cast<short>(sumX / alive), static_cast<short>(sumY / alive) };
+					const CellStruct center = followUp.Center != CellStruct::Empty
+						? followUp.Center
+						: CellStruct { static_cast<short>(sumX / alive), static_cast<short>(sumY / alive) };
 					pTarget = pickFollowUpTarget(followUp, center, pLead);
 
 					if (pTarget)
 					{
+						followUp.Center = pTarget->GetMapCoords();
 						followUp.TargetID = pTarget->UniqueID;
 						followUp.Ordered.clear();
 						followUp.Targets++;
@@ -11680,7 +11700,9 @@ namespace
 
 				if (over)
 				{
-					logFollowUp(followUp, "ends, home with", nullptr, value);
+					char endText[96];
+					std::snprintf(endText, sizeof(endText), "ends (%d known, %d near, %d reached), home with", pickKnown, pickNear, pickReached);
+					logFollowUp(followUp, endText, nullptr, value);
 
 					if (auto const pHome = MapClass::Instance.TryGetCellAt(homeCell))
 					{
