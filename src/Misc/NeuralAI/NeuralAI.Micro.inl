@@ -14795,7 +14795,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				if (auto const pCarryExt = UnitExt::Fetch(pTrans))
 				{
 					if (!pCarryExt->CarryallCargo)
-						GetMacroState(pHouse).CarryallDropSince.erase(pTrans->UniqueID);
+					{
+						auto& carryMacro = GetMacroState(pHouse);
+						carryMacro.CarryallDropSince.erase(pTrans->UniqueID);
+						carryMacro.CarryallDropTried.erase(pTrans->UniqueID);
+						carryMacro.CarryallDropFailed.erase(pTrans->UniqueID);
+					}
 
 					if (pCarryExt->CarryallCargo && pCarryExt->CarryallCargo->IsAlive)
 					{
@@ -14847,6 +14852,50 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 							// farther every CarryallDropStuckFrames it has gone without setting it down.
 							auto& dropCells = GetMacroState(pHouse).CarryallDropCells;
 							auto& dropSince = GetMacroState(pHouse).CarryallDropSince;
+							auto& dropTried = GetMacroState(pHouse).CarryallDropTried;
+							auto& dropFailed = GetMacroState(pHouse).CarryallDropFailed[pTrans->UniqueID];
+							const int now = Unsorted::CurrentFrame;
+
+							// It was told to set its cargo down and left the unload with it still on: the engine
+							// would not set it down there (match #12344: a HIND sent back 111 times to the cell
+							// next to one it could not unload on, as that one was the nearest to the drop cell).
+							// That cell stays out for CarryallDropFailFrames.
+							if (auto const itTried = dropTried.find(pTrans->UniqueID); itTried != dropTried.end()
+								&& pTrans->CurrentMission != Mission::Unload && pTrans->QueuedMission != Mission::Unload)
+							{
+								std::erase_if(dropFailed, [now](const auto& entry) { return now >= entry.second; });
+
+								if (dropFailed.size() >= CarryallDropFailCells)
+									dropFailed.erase(dropFailed.begin());
+
+								dropFailed.emplace_back(itTried->second, now + CarryallDropFailFrames);
+
+								static int failLogSerial = -1;
+								static int failLogCount = 0;
+
+								if (failLogSerial != NeuralMatchSerial)
+								{
+									failLogSerial = NeuralMatchSerial;
+									failLogCount = 0;
+								}
+
+								if (failLogCount++ < CarryallDropFailLogLines)
+								{
+									Debug::Log("[NeuralAI] House %d airlift (TEMP): %s %u left the unload at (%d,%d) with %s still on, that cell is out for "
+										"%d frames (%d out), frame %d.\n", pHouse->ArrayIndex, pTrans->Type->ID, pTrans->UniqueID, itTried->second.X,
+										itTried->second.Y, pCarriedUnit->Type ? pCarriedUnit->Type->ID : "-", CarryallDropFailFrames,
+										static_cast<int>(dropFailed.size()), now);
+								}
+
+								dropTried.erase(itTried);
+							}
+
+							auto const isFailedDrop = [&dropFailed, now](const CellStruct& cell)
+							{
+								return std::any_of(dropFailed.begin(), dropFailed.end(),
+									[&cell, now](const auto& entry) { return entry.first == cell && now < entry.second; });
+							};
+
 							auto const itChosen = dropCells.find(pTrans->UniqueID);
 							auto const itSince = dropSince.find(pTrans->UniqueID);
 							CellClass* pChosen = itChosen != dropCells.end() ? MapClass::Instance.TryGetCellAt(itChosen->second) : nullptr;
@@ -14854,7 +14903,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 							const int dropSearchCells = CarryallDropSearchCells
 								+ CarryallDropRingCells * std::min(CarryallDropMaxRings, stuckFrames / CarryallDropStuckFrames);
 
-							if (pChosen && (!pCarryExt->CarryallCanDropAt(pChosen)
+							if (pChosen && (!pCarryExt->CarryallCanDropAt(pChosen) || isFailedDrop(pChosen->MapCoords)
 								|| pChosen->MapCoords.DistanceFrom(pDropCell->MapCoords) > dropSearchCells + CarryallDropZoneCells))
 							{
 								dropCells.erase(pTrans->UniqueID);
@@ -14865,13 +14914,16 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 							const bool inDropZone = cellsFromDrop <= CarryallDropZoneCells;
 							const bool nearChosen = pChosen && cellsFromDrop <= dropSearchCells + CarryallDropZoneCells;
 
-							if ((inDropZone || nearChosen) && pCarryExt->CarryallCanDropAt(pTrans->GetCell()))
+							// The clock since when it looks for a cell (dropSince) runs on until the cargo is down, so the
+							// search reaches farther when the engine does not set it down where it was told to.
+							if ((inDropZone || nearChosen) && pCarryExt->CarryallCanDropAt(pTrans->GetCell())
+								&& !isFailedDrop(pTrans->GetMapCoords()))
 							{
 								if (pTrans->CurrentMission != Mission::Unload)
 									CountDecision(NeuralDecision::AirliftDrop, pHouse->ArrayIndex);
 
 								dropCells.erase(pTrans->UniqueID);
-								dropSince.erase(pTrans->UniqueID);
+								dropTried[pTrans->UniqueID] = pTrans->GetMapCoords();
 								pTrans->QueueMission(Mission::Unload, true);
 							}
 							else if (pChosen)
@@ -14899,7 +14951,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 										auto const pCell = MapClass::Instance.TryGetCellAt(cell);
 										const double dist = cell.DistanceFrom(centre);
 
-										if (pCell && dist < bestDist && pCarryExt->CarryallCanDropAt(pCell))
+										if (pCell && dist < bestDist && pCarryExt->CarryallCanDropAt(pCell) && !isFailedDrop(cell))
 										{
 											bestDist = dist;
 											pBest = pCell;

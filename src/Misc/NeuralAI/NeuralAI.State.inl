@@ -1409,6 +1409,11 @@ namespace
 		// Since when a carryall has looked for such a cell without setting its cargo down, by
 		// carryall UniqueID (key access only).
 		std::unordered_map<DWORD, int> CarryallDropSince {};
+		// The cell a loaded carryall was last told to set its cargo down on, and the cells where it was
+		// told to and left the unload with its cargo still on, each until when it stays out
+		// (CarryallDropFailFrames), by carryall UniqueID (key access only). Cleared when the cargo is down.
+		std::unordered_map<DWORD, CellStruct> CarryallDropTried {};
+		std::unordered_map<DWORD, std::vector<std::pair<CellStruct, int>>> CarryallDropFailed {};
 		// Since when a loaded transport on its pickup shore has had no landmass to go to, by
 		// transport UniqueID (key access only).
 		std::unordered_map<DWORD, int> FerryNoGoalSince {};
@@ -1991,6 +1996,8 @@ namespace
 			this->FerryLandings.clear();
 			this->CarryallDropCells.clear();
 			this->CarryallDropSince.clear();
+			this->CarryallDropTried.clear();
+			this->CarryallDropFailed.clear();
 			this->FerryNoGoalSince.clear();
 			this->ParkedFerries.clear();
 			this->ProductionBanUntil.clear();
@@ -2845,6 +2852,12 @@ namespace
 	constexpr int CarryallDropStuckFrames = 450;
 	constexpr int CarryallDropRingCells = 4;
 	constexpr int CarryallDropMaxRings = 3;
+	// A cell where a loaded carryall left the unload with its cargo still on stays out of its drop
+	// choices for CarryallDropFailFrames; it keeps the last CarryallDropFailCells of them.
+	constexpr int CarryallDropFailFrames = 1800;
+	constexpr size_t CarryallDropFailCells = 8;
+	// TEMP diagnostic: the failed drop cells logged per match.
+	constexpr int CarryallDropFailLogLines = 60;
 	// A transport counts as parked to load for this long after the loader last left it so (a
 	// transport the loader stops handling is free again).
 	constexpr int FerryParkedFrames = 300;
