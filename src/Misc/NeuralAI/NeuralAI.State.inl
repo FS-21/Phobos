@@ -1510,6 +1510,10 @@ namespace
 		// verdict, the places our waves did not take, the enemies besieged now (a bit per house) and
 		// the last frame of the siege line.
 		int WaveVerdictOwner { -1 };
+		// The army share floor of the main wave (WaveFloorWaitMostFrames): since when the count
+		// without it is met and only it holds the wave (-1 none), and whether that wait was logged.
+		int WaveFloorWaitSince { -1 };
+		bool WaveFloorWaitLogged { false };
 		std::vector<NeuralResistedPlace> ResistedPlaces {};
 		unsigned int SiegeOwnersMask { 0u };
 		int SiegeLogFrame { -100000 };
@@ -2024,6 +2028,8 @@ namespace
 			this->WaveLessonFrame = -100000;
 			this->WaveFailuresInARow = 0;
 			this->WaveVerdictOwner = -1;
+			this->WaveFloorWaitSince = -1;
+			this->WaveFloorWaitLogged = false;
 			this->ResistedPlaces.clear();
 			this->SiegeOwnersMask = 0u;
 			this->SiegeLogFrame = -100000;
@@ -2933,11 +2939,19 @@ namespace
 	// guards or plans) has WaveArmyMassFrom units, a main wave waits for WaveArmyShareDivisor-th of it
 	// idle, at most WaveArmyShareMost; the second echelon discount holds only while
 	// WaveEchelonEngagedUnits of the waves before stand within WaveEchelonEngagedCells of their goal.
+	// The share has limits (user approved, 2026-11-20, P2 of the finishing diagnosis, «esperar a juntar
+	// debe tener un límite»; match #11910: no wave from frame 60000 to 86535 while the enemies had 1 to 5
+	// buildings left, 23 to 40 units asked for with 5 to 14 idle, the next wave took them in 3 minutes;
+	// the median win on small maps went from 46 to 66 minutes after it came). It does not hold while the
+	// second echelon window is open (the waves before fight at their goal: the reinforcements join
+	// that fight), and once the count without it has been met for WaveFloorWaitMostFrames the wave goes
+	// with what it has.
 	constexpr int WaveArmyMassFrom = 18;
 	constexpr int WaveArmyShareDivisor = 3;
 	constexpr int WaveArmyShareMost = 40;
 	constexpr int WaveEchelonEngagedUnits = 3;
 	constexpr double WaveEchelonEngagedCells = 14.0;
+	constexpr int WaveFloorWaitMostFrames = 1800;
 	// A team push lasts at least the walk of its farthest member plus TeamPushMarginFrames; the team
 	// keeps its target for TeamTargetKeepFrames while it stands; a house with TeamWeakHouseBuildings
 	// known buildings or fewer is the team target only when no member picks a stronger one.
@@ -3735,6 +3749,19 @@ namespace
 	constexpr int SiegePowerBonus = 300;
 	constexpr int SiegeFactoryBonus = 300;
 	constexpr int SiegeLogFrames = 2700;
+	// High ground (user approved, 2026-11-20, P8c, «Escríbela ya»): a projectile with SubjectToCliffs
+	// is stopped by a cliff going up, not going down (Ares IsCliffHit: a cell CellClass::BridgeLevels or
+	// more above the one before it and above the firer), and a unit with no clear shot keeps moving
+	// (TechnoClass::IsCloseEnoughToTarget), so below a plateau it drives round by the ramps into the
+	// defenses. While CliffBlockedSharePercent or more of our armed ground army fires such projectiles,
+	// a target of the tank mass on high ground (cells of our home zone BridgeLevels or more below it
+	// within CliffScanCells) with a known enemy defense within CliffDefenseCells loses
+	// CliffTargetPenalty, in proportion to that share. Measured first (TEMP, 21 matches): 9 of 148 waves
+	// went to such targets, all with half or more of the army blocked going up.
+	constexpr int CliffBlockedSharePercent = 50;
+	constexpr int CliffScanCells = 8;
+	constexpr double CliffDefenseCells = 14.0;
+	constexpr int CliffTargetPenalty = 500;
 	// A war factory keeps a road out: two-way ground (cells of walkable 2x2 squares) from its exit
 	// lane to a cell more than FactoryRoadClearCells from every building of ours, found within
 	// FactoryRoadWalkCells cells. Buildings stand at most one cell apart (Adjacent), so a base is
