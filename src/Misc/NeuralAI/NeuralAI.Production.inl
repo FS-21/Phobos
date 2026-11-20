@@ -5246,11 +5246,15 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 		const bool isIslandWar = features[21] >= 75;
 		const bool isIslandMap = features[21] > 0;
-		const int neededForDemand = (fittingDemandSize + candPassCap - 1) / candPassCap;
 		// The fleet follows what is waiting, with no fixed cap (a cap of 3 left armies of 100+ units
-		// on their island with three boats shuttling, match #6164). What keeps it from spamming is
-		// reuse: while a transport of this size sits empty and idle nothing new is built (below),
-		// and the transport controller gives it the waiting cargo. An island map keeps one at least.
+		// on their island with three boats shuttling, match #6164): the transports that take it in
+		// OpTripsPlanned trips. One for every load built 39 amphibious transports for the 290 units of one
+		// wave operation while its staging beach was the bottleneck (match #12411).
+		// What keeps it from spamming is reuse: while a transport of this size sits empty and idle
+		// nothing new is built (below), and the transport controller gives it the waiting cargo. An
+		// island map keeps one at least.
+		const int loadsPerTransport = candPassCap * OpTripsPlanned;
+		const int neededForDemand = (fittingDemandSize + loadsPerTransport - 1) / loadsPerTransport;
 		const int targetFleet = isIslandWar ? std::max(1, neededForDemand)
 			: (neededForDemand > 0 ? neededForDemand : (isIslandMap ? 1 : 0));
 		const bool needsHeavyMcvTransport = candSizeLimit >= 6 && ownedHeavyIslandTransports == 0
@@ -5304,7 +5308,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		if (ownedForLimit == 0)
 			return std::max(static_cast<int>(scores[28]), 0) + (fittingDemandSize > 0 ? 1100 : 600) - crossingPenalty;
 
-		if (fittingDemandSize > ownedCapForLimit)
+		if (fittingDemandSize > ownedCapForLimit * OpTripsPlanned)
 			return std::max(static_cast<int>(scores[28]), 0) + 900 - crossingPenalty;
 
 		return -900;
