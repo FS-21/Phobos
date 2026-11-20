@@ -470,6 +470,10 @@ void NeuralAI::ExtractFogFilteredFeatures(HouseClass* pHouse, std::array<int8_t,
 		case AbstractType::Infantry:
 			visibleEnemyInfantry++;
 
+			// An enemy on the ground in sight ends land control (UpdateLandControl).
+			if (pTechno->CloakState != CloakState::Cloaked && !pTechno->IsInAir())
+				GetMacroState(pHouse).LastEnemyGroundSeenFrame = Unsorted::CurrentFrame;
+
 			pExt->NeuralAI_EstimatedEnemyThreat[ownerIdx] += 10;
 
 			break;
@@ -485,7 +489,12 @@ void NeuralAI::ExtractFogFilteredFeatures(HouseClass* pHouse, std::array<int8_t,
 					GetMacroState(pHouse).LastEnemyNavySeenFrame = Unsorted::CurrentFrame;
 			}
 			else
+			{
 				visibleEnemyTanks++;
+
+				if (pTechno->CloakState != CloakState::Cloaked && !pTechno->IsInAir())
+					GetMacroState(pHouse).LastEnemyGroundSeenFrame = Unsorted::CurrentFrame;
+			}
 
 			pExt->NeuralAI_EstimatedEnemyThreat[ownerIdx] += 25;
 
