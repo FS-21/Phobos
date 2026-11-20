@@ -3634,6 +3634,82 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		}
 	}
 
+	// TEMP diagnostic: an MCV the idle watchdog followed that began to unfold by another rule's order
+	// leaves the watch with no line of the watchdog; a line tells when its yard stands (the scenario
+	// probes close an MCV's wait on an "unfolds" line). Looked at until McvIdleUnfoldLookFrames; an MCV
+	// that stands packed again, not unfolding, is the watchdog's again.
+	auto const noteWatchedMcvUnfolding = [pHouse](UnitClass* pMcv)
+	{
+		auto& macro = GetMacroState(pHouse);
+
+		if (auto const itWatch = macro.McvIdle.find(pMcv->UniqueID); itWatch != macro.McvIdle.end())
+		{
+			macro.McvIdleUnfolds[pMcv->UniqueID]
+				= { pMcv->GetMapCoords(), Unsorted::CurrentFrame, itWatch->second.SinceFrame, pMcv->Type->ID };
+		}
+	};
+
+	if (auto& idleUnfolds = GetMacroState(pHouse).McvIdleUnfolds; !idleUnfolds.empty())
+	{
+		static int idleUnfoldLogSerial = -1;
+		static int idleUnfoldLogCount = 0;
+
+		if (idleUnfoldLogSerial != NeuralMatchSerial)
+		{
+			idleUnfoldLogSerial = NeuralMatchSerial;
+			idleUnfoldLogCount = 0;
+		}
+
+		const int now = Unsorted::CurrentFrame;
+
+		for (auto it = idleUnfolds.begin(); it != idleUnfolds.end();)
+		{
+			auto const& unfold = it->second;
+			bool over = now < unfold.Frame || now - unfold.Frame > McvIdleUnfoldLookFrames;
+			UnitClass* pMcv = nullptr;
+
+			for (auto const pU : UnitClass::Array)
+			{
+				if (pU && pU->UniqueID == it->first)
+				{
+					pMcv = pU;
+					break;
+				}
+			}
+
+			if (!over && pMcv && pMcv->IsAlive && !pMcv->InLimbo)
+			{
+				// Still packed: unfolding yet, or the engine refused the deploy.
+				over = !pMcv->IsDeploying && pMcv->CurrentMission != Mission::Unload && pMcv->QueuedMission != Mission::Unload;
+			}
+			else if (!over)
+			{
+				for (auto const pBld : pHouse->Buildings)
+				{
+					if (!pBld || !pBld->IsAlive || pBld->InLimbo || !pBld->Type || !pBld->Type->ConstructionYard
+						|| pBld->GetMapCoords().DistanceFrom(unfold.Cell) > 2.0)
+					{
+						continue;
+					}
+
+					if (idleUnfoldLogCount++ < McvIdleUnfoldLogLines)
+					{
+						const CellStruct yardCell = pBld->GetMapCoords();
+						Debug::Log("[NeuralAI] House %d MCV watchdog: %s %u unfolds by its own order at (%d,%d), into %s at (%d,%d), "
+							"watched since frame %d, unfolding since frame %d, %d yards, frame %d.\n",
+							pHouse->ArrayIndex, unfold.TypeId, it->first, unfold.Cell.X, unfold.Cell.Y, pBld->Type->ID, yardCell.X,
+							yardCell.Y, unfold.WatchedSince, unfold.Frame, pHouse->NumConYards, now);
+					}
+
+					over = true;
+					break;
+				}
+			}
+
+			it = over ? idleUnfolds.erase(it) : std::next(it);
+		}
+	}
+
 	for (auto const pUnit : UnitClass::Array)
 	{
 		if (!pUnit || pUnit->Owner != pHouse || pUnit->InLimbo || !pUnit->IsAlive)
@@ -3916,6 +3992,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 					if (!unfoldingTooLong)
 					{
+						noteWatchedMcvUnfolding(pUnit);
 						unfoldMacro.McvIdle.erase(pUnit->UniqueID);
 						continue;
 					}
@@ -4060,6 +4137,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 				if (mayWaitForFerry || unfolding)
 				{
+					if (unfolding)
+						noteWatchedMcvUnfolding(pUnit);
+
 					idleWatch.erase(pUnit->UniqueID);
 				}
 				else
