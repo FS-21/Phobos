@@ -171,6 +171,164 @@ namespace
 
 		return nullptr;
 	}
+
+	// Where a carryall of type pCarryType takes a vehicle of ours that is on its way, or Empty (kind None):
+	// a packed deployer of a colony building (a yard, refinery or factory) to the cell it drives to, a wave
+	// vehicle far behind the wave's forward staging point to that point. Only a trip of AirliftGoalMinCells
+	// or more for a vehicle the loaded carryall outflies AirliftGoalSpeedRatio times; with the carryall's
+	// cell given, only when flying there and then the trip take at most AirliftGoalTimePercent of the drive.
+	CellStruct GoalAirliftDrop(HouseClass* pHouse, const TechnoTypeClass* pCarryType, UnitClass* pUnit, const CellStruct& carrierCell,
+		AirliftKind& kind)
+	{
+		kind = AirliftKind::None;
+		auto const pType = pUnit->Type;
+		auto const pCarryExt = TechnoTypeExt::Fetch(pCarryType);
+		const double flySpeed = static_cast<double>(pCarryType->Speed);
+		const double ladenSpeed = flySpeed * (pCarryExt ? pCarryExt->Carryall_SpeedMultiplier.Get() : 1.0);
+		const double driveSpeed = static_cast<double>(pType->Speed);
+
+		if (driveSpeed <= 0.0 || flySpeed <= 0.0 || ladenSpeed < driveSpeed * AirliftGoalSpeedRatio)
+			return CellStruct::Empty;
+
+		const CellStruct unitCell = pUnit->GetMapCoords();
+		CellStruct goal = CellStruct::Empty;
+		AirliftKind goalKind = AirliftKind::None;
+		auto const pDeploysInto = pType->DeploysInto;
+
+		if (pDeploysInto)
+		{
+			const bool colonyBuilding = pDeploysInto->ConstructionYard || pDeploysInto->Refinery || pDeploysInto->ResourceDestination
+				|| pDeploysInto->Factory != AbstractType::None;
+
+			if (colonyBuilding && !IsDeployableSiegeUnitType(pType) && pUnit->CurrentMission == Mission::Move)
+			{
+				if (auto const pDestCell = abstract_cast<CellClass*>(pUnit->Destination))
+				{
+					goal = pDestCell->MapCoords;
+					goalKind = AirliftKind::Expansion;
+				}
+			}
+		}
+		else if (pType->GetWeapon(0) && pType->GetWeapon(0)->WeaponType)
+		{
+			auto const& macro = GetMacroState(pHouse);
+			const int age = Unsorted::CurrentFrame - macro.WaveStagingFrame;
+
+			if (macro.WaveStagingCell != CellStruct::Empty && age >= 0 && age <= WaveStagingFreshFrames
+				&& unitCell.DistanceFrom(macro.WaveStagingCell) > WaveStragglerCells)
+			{
+				const CellStruct heading = OrderLeaseGoalOf(pUnit);
+
+				if (heading != CellStruct::Empty && heading.DistanceFrom(macro.WaveStagingCell) <= OrderLeaseSameGoalCells)
+				{
+					goal = macro.WaveStagingCell;
+					goalKind = AirliftKind::Straggler;
+				}
+			}
+		}
+
+		if (goal == CellStruct::Empty)
+			return CellStruct::Empty;
+
+		const double tripCells = unitCell.DistanceFrom(goal);
+
+		if (tripCells < AirliftGoalMinCells)
+			return CellStruct::Empty;
+
+		if (carrierCell != CellStruct::Empty)
+		{
+			const double airTime = carrierCell.DistanceFrom(unitCell) / flySpeed + tripCells / ladenSpeed;
+
+			if (airTime * 100.0 > tripCells / driveSpeed * AirliftGoalTimePercent)
+				return CellStruct::Empty;
+		}
+
+		kind = goalKind;
+
+		return goal;
+	}
+
+	// The real pickup order of a carryall went out (AdvanceRoutedPickup): its job counts the frame, and the
+	// order helpers leave the vehicle where it is until it is aboard (AirliftCargoHolds).
+	void NoteAirliftPickupOrder(AircraftClass* pCarryall, UnitClass* pCargo)
+	{
+		auto& job = AirliftJobs[pCarryall->UniqueID];
+
+		if (job.CargoID != pCargo->UniqueID)
+			job = { pCargo->UniqueID, AirliftKind::None, CellStruct::Empty, Unsorted::CurrentFrame, -1, false };
+
+		job.OrderFrame = Unsorted::CurrentFrame;
+		AirliftCargoHolds[pCargo->UniqueID] = pCarryall->UniqueID;
+	}
+
+	// Ends the airlift job of a carryall (AirliftJobs) and frees its vehicle. A pickup that went wrong (how
+	// says what happened) keeps carryalls off the vehicle for CarryallRefusedPickupFrames; the TEMP line
+	// says what held the vehicle.
+	void EndAirliftJob(HouseClass* pHouse, AircraftClass* pCarryall, const char* how = nullptr)
+	{
+		auto const itJob = AirliftJobs.find(pCarryall->UniqueID);
+
+		if (itJob == AirliftJobs.end())
+			return;
+
+		const NeuralAirliftJob job = itJob->second;
+		AirliftJobs.erase(itJob);
+
+		if (auto const itHold = AirliftCargoHolds.find(job.CargoID);
+			itHold != AirliftCargoHolds.end() && itHold->second == pCarryall->UniqueID)
+		{
+			AirliftCargoHolds.erase(itHold);
+		}
+
+		if (!how)
+			return;
+
+		const int now = Unsorted::CurrentFrame;
+
+		if (AirliftRefusedUntil.size() > 256)
+			std::erase_if(AirliftRefusedUntil, [now](const auto& entry) { return entry.second <= now; });
+
+		AirliftRefusedUntil[job.CargoID] = now + CarryallRefusedPickupFrames;
+
+		const int houseIndex = std::clamp(pHouse->ArrayIndex, 0, 31);
+
+		if (AirliftRefusalLogCount[houseIndex] >= CarryallRefusalLogLines)
+			return;
+
+		AirliftRefusalLogCount[houseIndex]++;
+		UnitClass* pCargo = nullptr;
+
+		for (auto const pUnit : UnitClass::Array)
+		{
+			if (pUnit && pUnit->UniqueID == job.CargoID)
+			{
+				pCargo = pUnit;
+				break;
+			}
+		}
+
+		TechnoClass* pLink = nullptr;
+
+		for (int i = 0; pCargo && pCargo->RadioLinks.Items && i < pCargo->RadioLinks.Capacity; ++i)
+		{
+			if (pCargo->RadioLinks.Items[i] && pCargo->RadioLinks.Items[i] != pCarryall)
+			{
+				pLink = pCargo->RadioLinks.Items[i];
+				break;
+			}
+		}
+
+		static constexpr const char* KindNames[] { "rescue", "evacuation", "strike APC", "stranded harvester", "island", "expansion",
+			"straggler", "none" };
+		auto const pLinkType = pLink ? pLink->GetTechnoType() : nullptr;
+		const CellStruct cargoCell = pCargo ? pCargo->GetMapCoords() : CellStruct::Empty;
+
+		Debug::Log("[NeuralAI] House %d airlift %s: %s %u at (%d,%d), mission %d, linked to %s %u, tethered %d; %s %u, job %s, "
+			"%d frames after the pickup order, frame %d.\n", pHouse->ArrayIndex, how, pCargo && pCargo->Type ? pCargo->Type->ID : "-",
+			job.CargoID, cargoCell.X, cargoCell.Y, pCargo ? static_cast<int>(pCargo->CurrentMission) : -1, pLinkType ? pLinkType->ID : "-",
+			pLink ? pLink->UniqueID : 0u, pCargo && pCargo->IsTether ? 1 : 0, pCarryall->Type ? pCarryall->Type->ID : "-", pCarryall->UniqueID,
+			KindNames[std::clamp(static_cast<int>(job.Kind), 0, static_cast<int>(AirliftKind::None))], now - job.OrderFrame, now);
+	}
 }
 
 static void CollectCellFoots(CellClass* pCell, std::vector<FootClass*>& foots)
@@ -12505,6 +12663,13 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				holdAtForwardStaging = false;
 				CountDecision(NeuralDecision::StagingHoldTimedOut, pHouse->ArrayIndex);
 			}
+
+			// The point the carryalls take the wave's slow stragglers to (GoalAirliftDrop).
+			if (pForwardStagingCell)
+			{
+				waveMacro.WaveStagingCell = pForwardStagingCell->MapCoords;
+				waveMacro.WaveStagingFrame = nowFrame;
+			}
 		}
 
 		// A unit an earlier wave sent somewhere else keeps going there until its mission ends
@@ -12683,11 +12848,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 
 			const CellStruct uCellCoords = pU->GetMapCoords();
-			// Cohesion for stragglers: once the wave is released, a unit still > 30 cells behind the
+			// Cohesion for stragglers: once the wave is released, a unit still WaveStragglerCells behind the
 			// staging point (late production, slow units) goes through the staging point instead of
 			// crossing the map alone straight into the enemy.
 			const bool isWaveStraggler = !holdAtForwardStaging && pForwardStagingCell && uz == waveTargetZone
-				&& pUnitWaveGoal == pWaveTargetCell && uCellCoords.DistanceFrom(pForwardStagingCell->MapCoords) > 30.0;
+				&& pUnitWaveGoal == pWaveTargetCell && uCellCoords.DistanceFrom(pForwardStagingCell->MapCoords) > WaveStragglerCells;
 
 			if (isWaveStraggler && pU->CurrentMission == Mission::Guard)
 				CountDecision(NeuralDecision::WaveStragglerRegroup, pHouse->ArrayIndex);
@@ -17076,11 +17241,16 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 	for (auto const pAir : AircraftClass::Array)
 	{
+		if (!pAir || pAir->Owner != pHouse || pAir->InLimbo || !pAir->IsAlive || !pAir->Type)
+			continue;
+
 		// Aircraft flying a strategic plan (air strike, airborne second front...) belong to that plan, the
-		// carryalls of a transport operation to the operation.
-		if (!pAir || pAir->Owner != pHouse || pAir->InLimbo || !pAir->IsAlive || !pAir->Type
-			|| IsPlanMember(pHouse, pAir->UniqueID) || IsInTransportOp(pHouse, pAir->UniqueID))
+		// carryalls of a transport operation to the operation (leaving their airlift job).
+		if (IsPlanMember(pHouse, pAir->UniqueID) || IsInTransportOp(pHouse, pAir->UniqueID))
 		{
+			if (pAir->Type->Carryall)
+				EndAirliftJob(pHouse, pAir);
+
 			continue;
 		}
 
@@ -17104,6 +17274,71 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			|| pAir->CurrentMission == Mission::Sleep
 			|| (pAir->CurrentMission == Mission::Move && pAir->Target == nullptr
 				&& (!pAir->Destination || pAir->DistanceFrom(pAir->Destination) <= 384)));
+
+		// The airlift job of a carryall (AirliftJobs): it ends when the vehicle was set down or is gone, or
+		// when the pickup went wrong: the engine turned the ride down (the carryall is back on Guard with no
+		// destination) or the vehicle was not aboard CarryallPickupTimeoutFrames after the pickup order.
+		// Once that order is out the carryall is left alone: over the vehicle it reads as idle, and an order
+		// given again starts its landing over.
+		if (pAir->Type->Carryall)
+		{
+			if (auto const itJob = AirliftJobs.find(pAir->UniqueID); itJob != AirliftJobs.end())
+			{
+				auto& job = itJob->second;
+				FootClass* const pAboard = pAir->Passengers.GetFirstPassenger();
+
+				if (pAboard)
+				{
+					if (pAboard->UniqueID != job.CargoID)
+					{
+						EndAirliftJob(pHouse, pAir);
+					}
+					else if (!job.Lifted)
+					{
+						job.Lifted = true;
+						AirliftCargoHolds.erase(job.CargoID);
+					}
+				}
+				else if (job.Lifted)
+				{
+					EndAirliftJob(pHouse, pAir);
+				}
+				else if (job.OrderFrame >= 0)
+				{
+					const int sinceOrder = Unsorted::CurrentFrame - job.OrderFrame;
+					auto const pDestUnit = abstract_cast<UnitClass*>(pAir->Destination);
+					const bool timedOut = sinceOrder < 0 || sinceOrder > CarryallPickupTimeoutFrames;
+
+					if (!timedOut && ((pDestUnit && pDestUnit->UniqueID == job.CargoID) || pAir->QueuedMission == Mission::Move
+						|| !isAirIdle || sinceOrder == 0))
+					{
+						continue;
+					}
+
+					// A pickup that ran out of time is called off: lifted later with no job, the vehicle would be
+					// set down by the rules of the other airlifts.
+					if (pDestUnit && pDestUnit->UniqueID == job.CargoID)
+					{
+						pAir->SetDestination(nullptr, true);
+						pAir->EnterIdleMode(false, true);
+					}
+
+					// The vehicle still ours and on the ground: the pickup went wrong, else it is simply gone.
+					bool cargoThere = false;
+
+					for (auto const pUnit : UnitClass::Array)
+					{
+						if (pUnit && pUnit->UniqueID == job.CargoID)
+						{
+							cargoThere = pUnit->IsAlive && !pUnit->InLimbo && pUnit->Owner == pHouse;
+							break;
+						}
+					}
+
+					EndAirliftJob(pHouse, pAir, cargoThere ? (timedOut ? "not aboard in time" : "turned down") : nullptr);
+				}
+			}
+		}
 
 		// Carryall «Matryoshka / Muñeca Rusa» Airlift (Slot 53): Pick up loaded
 		// APCs, Expansion Nanocores/MCVs, or rescue critically damaged tanks!
@@ -17219,7 +17454,15 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			FootClass* pCarriedFoot = pAir->Passengers.GetFirstPassenger();
 			UnitClass* pCarriedUnit = abstract_cast<UnitClass*>(pCarriedFoot);
 			CellClass* pDropCell = nullptr;
-			if (pCarriedUnit && pCarriedUnit->Type)
+			// A vehicle lifted on its way (GoalAirliftDrop) is set down where it was going.
+			auto const itCarriedJob = AirliftJobs.find(pAir->UniqueID);
+
+			if (itCarriedJob != AirliftJobs.end() && pCarriedFoot && itCarriedJob->second.CargoID == pCarriedFoot->UniqueID
+				&& itCarriedJob->second.Drop != CellStruct::Empty)
+			{
+				pDropCell = MapClass::Instance.TryGetCellAt(itCarriedJob->second.Drop);
+			}
+			else if (pCarriedUnit && pCarriedUnit->Type)
 			{
 				BuildingClass* const pCarriedRepair = (pRepairDepot && (pCarriedUnit->GetHealthPercentage() < 0.45
 									|| (pCarriedUnit->Type->Cost >= 1000 && pCarriedUnit->GetHealthPercentage() < 0.75)))
@@ -17280,28 +17523,54 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			{
 				if (CanCarryallLiftUnit(pAir, pPendingCargo))
 				{
-					if (isAirIdle || IsAITickWindow(90, 25))
-						AdvanceRoutedPickup(pHouse, pAir, pPendingCargo);
+					if ((isAirIdle || IsAITickWindow(90, 25)) && AdvanceRoutedPickup(pHouse, pAir, pPendingCargo))
+						NoteAirliftPickupOrder(pAir, pPendingCargo);
 
 					continue;
 				}
 
 				AirPickups.erase(pAir->UniqueID);
+				EndAirliftJob(pHouse, pAir);
 			}
 		}
 
+		// An idle empty carryall takes the most urgent airlift job, the nearest vehicle of that kind: one the
+		// engine gives the ride (CarryallRideAccepted), that no other carryall of ours goes for, and whose
+		// pickup did not go wrong lately (IsAirliftRefused), so a vehicle the engine turns down is not sent
+		// for again at every tick.
 		if (pAir->Type->Carryall && isAirIdle && pAir->Passengers.NumPassengers == 0
 			&& (IsAITickWindow(90, carryallWindow)))
 		{
-			bool pickedAirliftJob = false;
 			const bool islandLiftsPaused = Unsorted::CurrentFrame - GetMacroState(pHouse).LastAirDropAbortFrame < 1800;
 			const bool evacuationAllowed = pRepairDepot && SlotGateHeld(scores[54], -200, 54, pAir->UniqueID);
+			const CellStruct airCell = pAir->GetMapCoords();
+			std::vector<DWORD> takenCargo;
+
+			for (auto const pOtherAir : AircraftClass::Array)
+			{
+				if (!pOtherAir || pOtherAir == pAir || pOtherAir->Owner != pHouse || !pOtherAir->IsAlive || !pOtherAir->Type
+					|| !pOtherAir->Type->Carryall)
+				{
+					continue;
+				}
+
+				if (auto const pOtherCargo = abstract_cast<UnitClass*>(pOtherAir->Destination))
+					takenCargo.push_back(pOtherCargo->UniqueID);
+
+				if (auto const itOtherJob = AirliftJobs.find(pOtherAir->UniqueID); itOtherJob != AirliftJobs.end() && !itOtherJob->second.Lifted)
+					takenCargo.push_back(itOtherJob->second.CargoID);
+			}
+
+			UnitClass* pBestCargo = nullptr;
+			AirliftKind bestKind = AirliftKind::None;
+			CellStruct bestDrop = CellStruct::Empty;
+			int bestDist = INT_MAX;
 
 			for (auto const pU : UnitClass::Array)
 			{
 				// A unit of a transport operation waits for the operation's own transports.
 				if (!pU || pU->Owner != pHouse || pU->InLimbo || !pU->IsAlive || !pU->Type
-					|| !CanCarryallLiftUnit(pAir, pU) || IsInTransportOp(pHouse, pU->UniqueID))
+					|| !CanCarryallLiftUnit(pAir, pU) || IsInTransportOp(pHouse, pU->UniqueID) || IsAirliftRefused(pU))
 				{
 					continue;
 				}
@@ -17329,24 +17598,66 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				const bool isLosingExpensiveUnit = evacuationAllowed && !isCriticallyDamagedTank && pU->Type->Cost >= 1000
 					&& pU->GetHealthPercentage() < 0.70 && IsFootOutmatched(pHouse, pU, 7.0);
 				const bool isIslandJob = isIslandExpansionMCV || isIslandHarvester;
-				if (isCriticallyDamagedTank || isLosingExpensiveUnit || isLoadedStrikeAPC || strandedHarvester
-					|| (isIslandJob && !islandLiftsPaused))
+				AirliftKind kind = AirliftKind::None;
+				CellStruct drop = CellStruct::Empty;
+
+				if (isCriticallyDamagedTank)
+					kind = AirliftKind::Rescue;
+				else if (isLosingExpensiveUnit)
+					kind = AirliftKind::Evacuation;
+				else if (isLoadedStrikeAPC)
+					kind = AirliftKind::StrikeApc;
+				else if (strandedHarvester)
+					kind = AirliftKind::StrandedHarvester;
+				else if (isIslandJob && !islandLiftsPaused)
+					kind = AirliftKind::Island;
+				else if (bestKind >= AirliftKind::Expansion)
+					drop = GoalAirliftDrop(pHouse, pAir->Type, pU, airCell, kind);
+
+				if (kind == AirliftKind::None || kind > bestKind)
+					continue;
+
+				const int dist = pAir->DistanceFrom(pU);
+
+				if ((kind == bestKind && dist >= bestDist) || !CarryallRideAccepted(pU, pAir)
+					|| std::find(takenCargo.begin(), takenCargo.end(), pU->UniqueID) != takenCargo.end())
 				{
-					AdvanceRoutedPickup(pHouse, pAir, pU);
-					CountDecision(NeuralDecision::AirliftJob, pHouse->ArrayIndex);
-
-					if (isCriticallyDamagedTank)
-						CountDecision(NeuralDecision::AirliftRescue, pHouse->ArrayIndex);
-					else if (isLosingExpensiveUnit)
-						CountDecision(NeuralDecision::CombatEvac, pHouse->ArrayIndex);
-
-					pickedAirliftJob = true;
-					break;
+					continue;
 				}
+
+				pBestCargo = pU;
+				bestKind = kind;
+				bestDrop = drop;
+				bestDist = dist;
 			}
 
-			if (!pickedAirliftJob)
+			if (pBestCargo)
+			{
+				const int now = Unsorted::CurrentFrame;
+
+				// Jobs of carryalls that are gone; a vehicle aboard keeps its drop for a long flight.
+				if (AirliftJobs.size() > 64)
+				{
+					std::erase_if(AirliftJobs, [now](const auto& entry)
+						{ return entry.second.Frame > now || now - entry.second.Frame > (entry.second.Lifted ? 18000 : 5400); });
+				}
+
+				AirliftJobs[pAir->UniqueID] = { pBestCargo->UniqueID, bestKind, bestDrop, now, -1, false };
+
+				if (AdvanceRoutedPickup(pHouse, pAir, pBestCargo))
+					NoteAirliftPickupOrder(pAir, pBestCargo);
+
+				CountDecision(NeuralDecision::AirliftJob, pHouse->ArrayIndex);
+
+				if (bestKind == AirliftKind::Rescue)
+					CountDecision(NeuralDecision::AirliftRescue, pHouse->ArrayIndex);
+				else if (bestKind == AirliftKind::Evacuation)
+					CountDecision(NeuralDecision::CombatEvac, pHouse->ArrayIndex);
+			}
+			else
+			{
 				ReturnIdleCarryallToBase(pHouse, pAir);
+			}
 
 			continue;
 		}

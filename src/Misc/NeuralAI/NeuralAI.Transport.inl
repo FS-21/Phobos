@@ -117,6 +117,31 @@ namespace
 		return !pUnit->Transporter;
 	}
 
+	// Whether the engine gives a carryall aircraft (pCarryall, or any) the ride now
+	// (AircraftClass::Mission_Move_Carryall): the vehicle answers the link request only with a free radio
+	// link or one to that carryall already, and turns the ride down while it unloads, deploys, is
+	// tethered (a dock, a repair pad) or goes into a transport or a building. A ride turned down sends the
+	// carryall back to Guard with no destination.
+	bool CarryallRideAccepted(UnitClass* pUnit, const TechnoClass* pCarryall = nullptr)
+	{
+		const bool linkedToCarryall = pCarryall && pUnit->ContainsLink(pCarryall);
+
+		if (!linkedToCarryall && (pUnit->IsTether || !pUnit->HasFreeLink()))
+			return false;
+
+		return !pUnit->IsDeploying && pUnit->CurrentMission != Mission::Unload && pUnit->CurrentMission != Mission::Enter
+			&& pUnit->QueuedMission != Mission::Enter;
+	}
+
+	// Whether a pickup of the vehicle went wrong lately (AirliftRefusedUntil).
+	bool IsAirliftRefused(const UnitClass* pUnit)
+	{
+		auto const itRefused = AirliftRefusedUntil.find(pUnit->UniqueID);
+
+		return itRefused != AirliftRefusedUntil.end() && Unsorted::CurrentFrame < itRefused->second
+			&& itRefused->second - Unsorted::CurrentFrame <= CarryallRefusedPickupFrames;
+	}
+
 	// Can a transport of this type carry something between these two cells? One that flies or
 	// burrows goes anywhere. One that rides land and water needs both ends within the ground and
 	// water it covers itself (one zone of its own movement), so a hovercraft is not asked to get

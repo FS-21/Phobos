@@ -4819,8 +4819,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				ownedSensorLookouts++;
 
 			// Airlift jobs the carryalls really have (same rules as the carryall dispatcher):
-			// critically damaged expensive vehicles to rescue and loaded strike APCs to drop.
+			// critically damaged expensive vehicles to rescue and loaded strike APCs to drop, each one
+			// a vehicle the engine gives the ride whose pickup did not go wrong lately.
 			auto const pOwnedTypeExt = TechnoTypeExt::Fetch(pOwnedType);
+			const bool airliftable = CarryallRideAccepted(pOwnedU) && !IsAirliftRefused(pOwnedU);
 
 			if (!pOwnedType->Naval && !pOwnedType->Organic && !pOwnedType->NonVehicle
 				&& (!pOwnedTypeExt || pOwnedTypeExt->Carryall_Allowed.Get()))
@@ -4834,11 +4836,11 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				{
 					ownedExpensiveVehicles++;
 
-					if (pHouse->UnitRepairStations.Count > 0 && pOwnedU->GetHealthPercentage() < 0.40)
+					if (airliftable && pHouse->UnitRepairStations.Count > 0 && pOwnedU->GetHealthPercentage() < 0.40)
 						carryallLiftJobs++;
 				}
 
-				if (pOwnedType->Passengers >= 3 && pOwnedU->Passengers.NumPassengers >= 1
+				if (airliftable && pOwnedType->Passengers >= 3 && pOwnedU->Passengers.NumPassengers >= 1
 					&& !IsAmphibiousOrAirTransport(pOwnedType))
 				{
 					carryallLiftJobs++;
