@@ -63,14 +63,21 @@ namespace
 		return IsFactoryDeployerUnit(pType) && IsMobileFactoryBuilding(pType->DeploysInto);
 	}
 
+	bool IsSensorLookoutType(const UnitTypeClass* pType);
+
 	// A vehicle that unfolds into a base building other than a yard. Only DeploysInto gives a building
 	// (Convert.Deploy and Universal Deploy turn a unit into another unit). Not a slave miner (its
-	// harvest unfolds it), an MCV (its own expansion logic) nor a unit that unfolds to fight (a siege
-	// gun, an armed vehicle that becomes a defense).
+	// harvest unfolds it), an MCV (its own expansion logic), a mobile sensor array (the lookouts of the
+	// scouting move and unfold it: as a base deployer it unfolded back at its base site each time they
+	// packed it up for a lookout, 20 times in 13 matches of stamp 06a1e8c0e) nor a unit that unfolds to
+	// fight (a siege gun, an armed vehicle that becomes a defense).
 	bool IsBaseDeployerUnit(const UnitTypeClass* pType)
 	{
-		if (!pType || !pType->DeploysInto || pType->DeploysInto->ConstructionYard || pType->Harvester || pType->ResourceGatherer)
+		if (!pType || !pType->DeploysInto || pType->DeploysInto->ConstructionYard || pType->Harvester || pType->ResourceGatherer
+			|| IsSensorLookoutType(pType))
+		{
 			return false;
+		}
 
 		auto const pBld = pType->DeploysInto;
 		auto const pWeaponSlot = const_cast<UnitTypeClass*>(pType)->GetWeapon(0);
