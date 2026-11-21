@@ -758,6 +758,10 @@ namespace
 		int DangerCheckFrame { -1 };
 		int TripDanger { 0 };
 		int DangerHolds { 0 };
+		// Waits the die did not end because the load waits again with an escort (OpEscortWaitsMost), and
+		// the escort ships sent.
+		int EscortWaits { 0 };
+		int EscortsSent { 0 };
 		// The last time the landing of loads under way was changed for enemies gathered at it, and how
 		// many times.
 		int LandingSwitchFrame { -1 };
@@ -2708,6 +2712,8 @@ namespace
 	//   operation lets it go.
 	constexpr bool TransportOpsEnabled = true;
 	constexpr int OpBoardingCapFrames = 3600;
+	// Members waiting for a seat are taken by distance to the staging beach in steps of this many cells.
+	constexpr double OpSeatNearStepCells = 8.0;
 	constexpr int OpNoTransportFrames = 9000;
 	constexpr int OpRetryFrames = 3600;
 	// An operation that no transport takes, for whose staging cell the house has none that seats a
@@ -2804,6 +2810,9 @@ namespace
 	constexpr double OpJoinStagingCells = 40.0;
 	constexpr int OpRestageFrames = 2700;
 	constexpr int OpTripsPlanned = 2;
+	// More waiting than this many times what the fleet carries in OpTripsPlanned trips: an idle empty
+	// transport no longer stops a new one.
+	constexpr int FerryFleetFarShortTimes = 2;
 	constexpr int TransportRepairMinCredits = 300;
 	constexpr double OpDyingTransportHealth = 0.24;
 	constexpr int OpUnloadRetryFrames = 450;
@@ -2889,6 +2898,11 @@ namespace
 	// lost 5 of 6 (2026-11-17).
 	constexpr int OpAbortDangerLimit = 3 * OpSailDangerLimit;
 	constexpr int OpAbortPercent = 50;
+	// Before the die, a load waits again OpEscortWaitsMost times with an escort: up to OpEscortShipsMost
+	// idle warships of ours that can fire at the ground go to its landing (user, 2026-11-21: wait for an
+	// escort rather than send the army home; match #13844: two operations gave back 150 units).
+	constexpr int OpEscortWaitsMost = 2;
+	constexpr int OpEscortShipsMost = 6;
 	// A threat whose weapon takes the transport (mind control) weighs OpRouteTakeFactor times as
 	// much: a transport taken goes over to the enemy with its whole load. 26 of the 28 transports
 	// taken in 47 matches were SAPC landing in the reach of Yuri's Psychic Towers, Yuri and
@@ -4450,6 +4464,10 @@ namespace
 	// wave rides one operation (match #10793: 7 operations, one per landing, in 900 frames). A
 	// fallen bridge within BridgeDeadGoalCells of such a place is repaired whatever the zone map
 	// says of its banks.
+	// Fighting soldiers with Sensors that take the detector patrol and sweep in one tick; the others
+	// join the waves.
+	constexpr int DetectorPatrolCombatMost = 3;
+
 	constexpr int PathDeadFerryTryFrames = 5400;
 	constexpr int PathDeadFerryRestFrames = 9000;
 	constexpr double PathDeadFerryGoalCells = 24.0;

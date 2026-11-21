@@ -1169,6 +1169,53 @@ namespace
 	// operation's landing or another of its candidates (CollectOpLandingCandidates), the one PlanOpRoute
 	// finds cheapest for the first transport that sails. danger: that of the route to it (0 when none
 	// could be planned).
+	// Escort of a load held on its beach by danger (OpEscortWaitsMost): the idle warships of ours nearest
+	// the landing that can fire at the ground, OpEscortShipsMost at most, attack-move to it. How many went.
+	int SendOpEscort(HouseClass* pHouse, const CellStruct& landing)
+	{
+		auto const pLandingCell = MapClass::Instance.CoordinatesLegal(landing) ? MapClass::Instance.TryGetCellAt(landing) : nullptr;
+
+		if (!pLandingCell)
+			return 0;
+
+		std::vector<std::pair<double, UnitClass*>> ships;
+
+		for (auto const pUnit : UnitClass::Array)
+		{
+			if (!pUnit || pUnit->Owner != pHouse || pUnit->InLimbo || !pUnit->IsAlive || !pUnit->Type || !pUnit->Type->Naval
+				|| pUnit->Type->Passengers > 0 || IsHeldByTransportOp(pUnit)
+				|| (pUnit->CurrentMission != Mission::Guard && pUnit->CurrentMission != Mission::Area_Guard))
+			{
+				continue;
+			}
+
+			bool hitsGround = false;
+
+			for (int slot = 0; slot < 2 && !hitsGround; ++slot)
+			{
+				auto const pSlot = pUnit->Type->GetWeapon(slot);
+				auto const pWeapon = pSlot ? pSlot->WeaponType : nullptr;
+				hitsGround = pWeapon && pWeapon->Damage > 0 && LandTargetingAllows(pUnit->Type, slot)
+					&& (!pWeapon->Projectile || pWeapon->Projectile->AG);
+			}
+
+			if (hitsGround)
+				ships.emplace_back(pUnit->GetMapCoords().DistanceFrom(landing), pUnit);
+		}
+
+		std::sort(ships.begin(), ships.end(), [](const auto& a, const auto& b)
+			{
+				return a.first != b.first ? a.first < b.first : a.second->UniqueID < b.second->UniqueID;
+			});
+
+		const int sent = std::min(static_cast<int>(ships.size()), OpEscortShipsMost);
+
+		for (int i = 0; i < sent; ++i)
+			OrderFootToAttackMove(ships[static_cast<size_t>(i)].second, pLandingCell);
+
+		return sent;
+	}
+
 	CellStruct ChooseOpTripLanding(HouseClass* pHouse, NeuralTransportOperation& op, FootClass* pTransport, OpCarrier carrier, int& danger)
 	{
 		danger = 0;
@@ -2655,7 +2702,26 @@ namespace
 				unseated.push_back(&member);
 		}
 
-		std::stable_sort(unseated.begin(), unseated.end(), [](const NeuralOpMember* a, const NeuralOpMember* b) { return a->Size > b->Size; });
+		// The seats go to the members nearest the staging beach first (in steps of OpSeatNearStepCells),
+		// the largest first among those as near: given to the largest wherever it stood, a seat went to a
+		// slow robot far across the island and the transport sailed at the boarding cap with one or two of
+		// its seats taken (match #13844: 82 landed in 71 trips, 100 waiting; user 2026-11-21).
+		std::unordered_map<DWORD, int> seatStep;
+
+		for (auto const pMember : unseated)
+		{
+			auto const pFoot = find(pMember->UniqueID);
+			seatStep[pMember->UniqueID] = pFoot
+				? static_cast<int>(pFoot->GetMapCoords().DistanceFrom(op.Staging) / OpSeatNearStepCells) : INT_MAX;
+		}
+
+		std::stable_sort(unseated.begin(), unseated.end(), [&seatStep](const NeuralOpMember* a, const NeuralOpMember* b)
+			{
+				const int stepA = seatStep[a->UniqueID];
+				const int stepB = seatStep[b->UniqueID];
+
+				return stepA != stepB ? stepA < stepB : a->Size > b->Size;
+			});
 
 		auto const seatOn = [&](NeuralOpMember* pMember, FootClass* pTransport, OpCarrier carrier) -> bool
 		{
@@ -3235,6 +3301,20 @@ namespace
 				if (now - op.DangerWaitSince < OpDangerWaitFrames)
 				{
 					sailNow = false;
+				}
+				else if (op.TripDanger > OpAbortDangerLimit && !crossing && op.EscortWaits < OpEscortWaitsMost)
+				{
+					// Before the die: the load waits again while warships of ours that can fire at the ground
+					// go to its landing (user: wait for an escort rather than send the army home).
+					const CellStruct escortGoal = op.TripLanding != CellStruct::Empty ? op.TripLanding : op.Landing;
+					const int escorts = SendOpEscort(pHouse, escortGoal);
+					op.EscortWaits++;
+					op.EscortsSent += escorts;
+					op.DangerWaitSince = now;
+					sailNow = false;
+					Debug::Log("[NeuralAI] House %d transport op %d: the load waits again (%d of %d), its route still has a danger of %d; %d "
+						"escort ships go to the landing (%d,%d), frame %d.\n", houseIndex, op.Id, op.EscortWaits, OpEscortWaitsMost,
+						op.TripDanger, escorts, escortGoal.X, escortGoal.Y, now);
 				}
 				else if (op.TripDanger > OpAbortDangerLimit && !crossing && ScenarioClass::Instance->Random.RandomRanged(0, 99) < OpAbortPercent)
 				{
