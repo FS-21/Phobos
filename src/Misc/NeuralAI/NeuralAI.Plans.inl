@@ -16,6 +16,13 @@ namespace
 		return members.find(uid) != members.end();
 	}
 
+	// A soldier of a plan boards a seated fighting vehicle of the same plan (UpdatePassengerFill). The plan
+	// gives the order: its members take orders from the plan alone (MayOrderUnit).
+	bool OrderPlanSoldierAboard(FootClass* pSoldier, UnitClass* pVehicle)
+	{
+		return OrderFootToEnter(pSoldier, pVehicle);
+	}
+
 	// The kind of a building, for the follow-up attack of a plan that took one (PlanFollowUp*): 0 a defense,
 	// 1 a construction yard, 2 a factory, 3 a refinery or resource building, 4 a power plant, 5 any other.
 	int PlanBuildingKindOf(const BuildingTypeClass* pType)

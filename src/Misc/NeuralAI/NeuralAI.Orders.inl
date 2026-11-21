@@ -114,12 +114,13 @@ namespace
 		return false;
 	}
 
-	void OrderFootToEnter(FootClass* pFoot, TechnoClass* pEnterTarget, const char* callerFile, int callerLine)
+	// True when the unit is on its way in (ordered now or already), false when no order was given.
+	bool OrderFootToEnter(FootClass* pFoot, TechnoClass* pEnterTarget, const char* callerFile, int callerLine)
 	{
 		if (!pFoot || !pEnterTarget || pFoot->InLimbo || !pFoot->IsAlive || pEnterTarget->InLimbo
 			|| !pEnterTarget->IsAlive || IsHeldByTransportOp(pFoot))
 		{
-			return;
+			return false;
 		}
 
 		if (pFoot->CurrentMission == Mission::Enter || pFoot->QueuedMission == Mission::Enter)
@@ -127,7 +128,7 @@ namespace
 			if (pFoot->ContainsLink(pEnterTarget) || pFoot->ArchiveTarget == pEnterTarget
 				|| pFoot->Destination == pEnterTarget)
 			{
-				return;
+				return true;
 			}
 
 			// When FootClass::Mission_Enter is driving a large vehicle (e.g. Slave
@@ -138,13 +139,13 @@ namespace
 			{
 				const CellStruct dc = CellClass::Coord2Cell(pFoot->Destination->GetCoords());
 				if (dc.DistanceFrom(pEnterTarget->GetMapCoords()) <= 3.5)
-					return;
+					return true;
 			}
 		}
 
 		// Another code holds the unit with a higher priority for its own goal (order leases).
 		if (!MayOrderUnit(pFoot, pEnterTarget->GetMapCoords(), callerFile, callerLine, true))
-			return;
+			return false;
 
 		// Match EventClass::Execute (MEGA_MISSION, 0x004C73B9-0x004C747C) exact call
 		// order: UnitClass::Assign_Destination (0x00741C54) and
@@ -171,6 +172,8 @@ namespace
 
 		if (pFoot->ReadyToNextMission())
 			pFoot->NextMission();
+
+		return true;
 	}
 
 	// The zones a transport compares when a passenger asks to load (UnitClass::Receive_Message):
