@@ -2389,6 +2389,8 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 		std::vector<CellStruct> powerPlantCells;
 
 		std::vector<CellStruct> priorityAssetCells;
+		// The reach within which the defenses of each of them count (GroundCoverCellsFor; 10 for guns that shoot up).
+		std::vector<int> priorityAssetReach;
 		auto const& offensiveStones = GetMacroState(pHouse).OffensiveStones;
 
 		for (auto const pOwnBld : pHouse->Buildings)
@@ -2424,6 +2426,7 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 				priorityAssetCells.insert(priorityAssetCells.begin(),
 					bc); // Highest priority: defend remote Oil Derricks, Tech Outposts
 						// & Expansion Refineries!
+				priorityAssetReach.insert(priorityAssetReach.begin(), isPureAA ? CoverageDefenseCells : GroundCoverCellsFor(pOT));
 			}
 			else if (pOT->ConstructionYard || pOT->Factory == AbstractType::UnitType || pOT->SuperWeapon != -1
 				|| pOT->Refinery || std::find(offensiveStones.begin(), offensiveStones.end(), pOwnBld->UniqueID) != offensiveStones.end()
@@ -2432,6 +2435,7 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 				// A stone of the offensive crawl is a key asset too (user): the front it holds. A gun
 				// that shoots up covers every building a raid goes for (IsAirCoverAssetType).
 				priorityAssetCells.push_back(bc);
+				priorityAssetReach.push_back(isPureAA ? CoverageDefenseCells : GroundCoverCellsFor(pOT));
 			}
 		}
 
@@ -2447,7 +2451,10 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 			}
 
 			if (nearbyPlants >= 3)
+			{
 				priorityAssetCells.push_back(ppc);
+				priorityAssetReach.push_back(CoverageDefenseCells);
+			}
 		}
 
 		// Find the first priority asset or power cluster that lacks a nearby
@@ -2455,20 +2462,23 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 		// An asset with no defense at all comes before a second one next to an asset already
 		// covered: production asks for cover while any asset has none (a house stood 54 ground
 		// towers as placement kept doubling the first assets, match #10523). A gun that shoots up
-		// counts AirCoverGunsPerAsset per asset, as production asks for them.
+		// counts AirCoverGunsPerAsset per asset and a ground tower GroundCoverTowersPerAsset against
+		// the enemy forces that came at us (at least 2 once 3 stand), as production asks for them.
 		const int minDefsPerKeyAsset = isPureAA
 			? AirCoverGunsPerAsset(CalculateEnemyAircraftValue(pHouse))
-			: (ownMatchingDefCells.size() >= 3 ? 2 : 1);
+			: std::max(ownMatchingDefCells.size() >= 3 ? 2 : 1, GroundCoverTowersPerAsset(EnemyGroundThreatValue(pHouse)));
 
 		for (int wantedDefs = 1; wantedDefs <= minDefsPerKeyAsset && undefendedKeyAssetCell == CellStruct::Empty; ++wantedDefs)
 		{
-			for (const CellStruct& ac : priorityAssetCells)
+			for (size_t ai = 0; ai < priorityAssetCells.size(); ++ai)
 			{
+				const CellStruct& ac = priorityAssetCells[ai];
+				const int reach = priorityAssetReach[ai];
 				int localDefsNearAsset = 0;
 
 				for (const CellStruct& dc : ownMatchingDefCells)
 				{
-					if (std::max(std::abs(ac.X - dc.X), std::abs(ac.Y - dc.Y)) <= 10)
+					if (std::max(std::abs(ac.X - dc.X), std::abs(ac.Y - dc.Y)) <= reach)
 						localDefsNearAsset++;
 				}
 

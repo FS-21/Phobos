@@ -1936,6 +1936,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		// AirCoverGunsPerAsset guns each, since aircraft fly over the ground towers to them.
 		int functionalStructures = 0;
 		std::vector<CellStruct> coverageAssets;
+		// The reach of the ground cover of each of them (GroundCoverCellsFor).
+		std::vector<int> coverageAssetCells;
 		std::vector<CellStruct> airCoverAssets;
 		std::vector<CellStruct> groundDefenseCells;
 		std::vector<CellStruct> antiAirDefenseCells;
@@ -1985,27 +1987,31 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					|| std::find(stones.begin(), stones.end(), pOwnBld->UniqueID) != stones.end();
 
 				if (keyAsset)
+				{
 					coverageAssets.push_back(bc);
+					coverageAssetCells.push_back(GroundCoverCellsFor(pOT));
+				}
 
 				if (keyAsset || IsAirCoverAssetType(pOT))
 					airCoverAssets.push_back(bc);
 			}
 		}
 
-		auto const coveredBy = [](const CellStruct& asset, const std::vector<CellStruct>& defenses)
-		{
-			return std::any_of(defenses.begin(), defenses.end(), [&asset](const CellStruct& dc)
-				{ return std::max(std::abs(asset.X - dc.X), std::abs(asset.Y - dc.Y)) <= CoverageDefenseCells; });
-		};
-
 		const bool enemyHasAircraft = enemyAirValue > 0 || knownEnemyAirBases > 0;
 		const int airCoverGunsPerAsset = AirCoverGunsPerAsset(enemyAirValue);
+		const int enemyGroundThreat = EnemyGroundThreatValue(pHouse);
+		const int groundCoverTowersPerAsset = GroundCoverTowersPerAsset(enemyGroundThreat);
 		int groundCoverageDeficit = 0;
 		int antiAirCoverageDeficit = 0;
 
-		for (auto const& asset : coverageAssets)
+		for (size_t i = 0; i < coverageAssets.size(); ++i)
 		{
-			if (!coveredBy(asset, groundDefenseCells))
+			auto const& asset = coverageAssets[i];
+			const int reach = coverageAssetCells[i];
+			const auto towersNear = std::count_if(groundDefenseCells.begin(), groundDefenseCells.end(), [&asset, reach](const CellStruct& dc)
+				{ return std::max(std::abs(asset.X - dc.X), std::abs(asset.Y - dc.Y)) <= reach; });
+
+			if (towersNear < groundCoverTowersPerAsset)
 				groundCoverageDeficit++;
 		}
 
@@ -2030,12 +2036,19 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		if (wasRecentlyAttacked)
 			optimalGroundDefenseValue += DefenseValueRecentAttack;
 
-		optimalGroundDefenseValue = std::min(optimalGroundDefenseValue, DefenseMaxValue[defenseDifficulty]);
-		// One tower or gun per asset at most past the level: with two, a house kept building towers
-		// next to assets already covered while another went without (54 ground towers, match #10523).
+		// The level stops at DefenseMaxValue; the enemy forces that came at our base come on top of it
+		// (GroundThreatValuePerPoint), as the anti-air adds the enemy air value.
+		optimalGroundDefenseValue = std::min(optimalGroundDefenseValue, DefenseMaxValue[defenseDifficulty]) + enemyGroundThreat;
+		// Towers still missing for that value while the threat stands (none without one).
+		const int groundThreatDefenseDeficit = enemyGroundThreat > 0
+			? (std::max(0, optimalGroundDefenseValue - ownedGroundDefenseValue) + GroundDefenseTypicalValue - 1) / GroundDefenseTypicalValue
+			: 0;
+		// The cover asks for its towers per asset at most past the level: with more, a house kept
+		// building towers next to assets already covered while another went without (54 ground
+		// towers, match #10523).
 		const int coverageAssetCount = static_cast<int>(coverageAssets.size());
 		const bool groundCoverageWanted = groundCoverageDeficit > 0
-			&& totalGroundDefenses < optimalGroundDefenseValue / GroundDefenseTypicalValue + coverageAssetCount;
+			&& totalGroundDefenses < optimalGroundDefenseValue / GroundDefenseTypicalValue + coverageAssetCount * groundCoverTowersPerAsset;
 		const bool antiAirCoverageWanted = antiAirCoverageDeficit > 0
 			&& totalAntiAirDefenses < wantedAirValue / airDefenseTypicalValue + static_cast<int>(airCoverAssets.size()) * airCoverGunsPerAsset;
 		bool bestFillsAirDeficit = false;
@@ -3927,13 +3940,19 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				}
 				else if (needsOutpostPointDefense)
 				{
-					score += 580 + (isAntiArmorOrHighTierDefense ? 260 : 0) - owned * 220
-						- totalGroundDefenses * 120;
+					score += 580 + (isAntiArmorOrHighTierDefense ? 260 : 0)
+						- (groundThreatDefenseDeficit > 0 ? 0 : owned * 220 + totalGroundDefenses * 120);
 				}
 				else if (!fillsAirDeficit)
 				{
-					score -= totalGroundDefenses * 210 + owned * 250 + (isUnarmedBunker ? 450 : 0);
+					// A base short of the towers the enemy forces that came at it ask for takes no count penalty.
+					score -= (groundThreatDefenseDeficit > 0 && !isUnarmedBunker ? 0 : totalGroundDefenses * 210 + owned * 250)
+						+ (isUnarmedBunker ? 450 : 0);
 				}
+
+				// The ground threat (EnemyGroundThreatValue): by the towers still missing for it.
+				if (!isPureAA && !isUnarmedBunker && groundThreatDefenseDeficit > 0)
+					score += std::min(GroundDefenseMissingTowerMost, groundThreatDefenseDeficit * GroundDefenseMissingTowerBonus);
 
 				// Proactive Heavy-Armor Shielding: build anti-armor / high-tier defenses BEFORE
 				// the enemy's tank column arrives at an undefended base!
@@ -4482,6 +4501,15 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				airDiagName, airDiagStage, airDiagScore, typeName(scoredBldIdx), bestBldScore, typeName(bestBldIdx),
 				typeName(inProgressBldIdx), typeName(inProgressDefIdx), pHouse->ConYards.Count, ownedBarracks, ownedWarFactories,
 				realPowerSurplus, Unsorted::CurrentFrame);
+		}
+
+		// TEMP diagnostic: the enemy forces that came at us and the towers they ask for.
+		if (enemyGroundThreat > 0 && IsAITickWindow(900, 0))
+		{
+			Debug::Log("[NeuralAI] House %d GroundDefense DIAG: enemy ground threat %d, ground value %d of %d wanted, towers %d (%d missing), "
+				"towers per asset %d, assets short of cover %d of %d, credits %d, frame %d.\n",
+				pHouse->ArrayIndex, enemyGroundThreat, ownedGroundDefenseValue, optimalGroundDefenseValue, totalGroundDefenses,
+				groundThreatDefenseDeficit, groundCoverTowersPerAsset, groundCoverageDeficit, coverageAssetCount, money, Unsorted::CurrentFrame);
 		}
 
 		pExt->NeuralAI_NextBuildingTarget = bestBldIdx;
