@@ -1627,10 +1627,12 @@ namespace
 		int PassengerBoardOrders { 0 };
 		int PassengerPlanBoardOrders { 0 };
 		int PassengerReholds { 0 };
-		// TEMP passenger diagnostic (user, 2026-11-21, P4): each boarding order, by soldier, with its
-		// vehicle and frame, until it ends; how they ended, and the code that gave a diverted soldier its
-		// next order.
+		// Each boarding order (UpdatePassengerFill), by soldier, with its vehicle and frame, until it ends,
+		// and the vehicles that wait for their soldiers, with the frame the wait ends (IsAwaitingPassengers).
+		// TEMP passenger diagnostic (user, 2026-11-21, P4): how the boarding orders ended, and the code that
+		// gave a diverted soldier its next order.
 		std::unordered_map<DWORD, std::pair<DWORD, int>> PassengerBoardTrack {};
+		std::unordered_map<DWORD, int> PassengerAwaitedUntil {};
 		// The soldier's distance to its vehicle when ordered, in cells, and the given-up boardings logged.
 		std::unordered_map<DWORD, int> PassengerBoardStartCells {};
 		int PassengerGiveUpLogCount { 0 };
@@ -2220,6 +2222,7 @@ namespace
 			this->PassengerPlanBoardOrders = 0;
 			this->PassengerReholds = 0;
 			this->PassengerBoardTrack.clear();
+			this->PassengerAwaitedUntil.clear();
 			this->PassengerBoardStartCells.clear();
 			this->PassengerGiveUpLogCount = 0;
 			this->PassengerBoardAboard = 0;
@@ -3242,6 +3245,10 @@ namespace
 	constexpr int PassengerFillHoldFrames = 1200;
 	constexpr int PassengerFillReholdFrames = 900;
 	constexpr int PassengerBoardTrackFrames = 900;
+	// A seated fighting vehicle our soldiers were sent to board waits for them up to this long after the
+	// last boarding order, while one of them is still on the way: only an operation or survival order
+	// takes it (user, 2026-11-21: 56 of 60 boardings given up with the vehicle driving off).
+	constexpr int PassengerBoardWaitFrames = 450;
 	// TEMP: the boardings given up with no other order (the soldier left its Enter by itself) logged in
 	// detail, at most this many per house and match.
 	constexpr int PassengerGiveUpLogMost = 12;
@@ -4984,6 +4991,20 @@ namespace
 			&& pFactory->GetCurrentMission() == Mission::Unload;
 	}
 
+	// A seated fighting vehicle waiting for the soldiers sent to board it (UpdatePassengerFill,
+	// PassengerBoardWaitFrames).
+	bool IsAwaitingPassengers(const FootClass* pFoot)
+	{
+		if (pFoot->WhatAmI() != AbstractType::Unit)
+			return false;
+
+		auto const& awaited = GetMacroState(pFoot->Owner).PassengerAwaitedUntil;
+		auto const itWait = awaited.find(pFoot->UniqueID);
+		const int now = Unsorted::CurrentFrame;
+
+		return itWait != awaited.end() && now < itWait->second && itWait->second - now <= PassengerBoardWaitFrames;
+	}
+
 	// Whether the code at file:line may give pFoot an order toward goal now. An order to board (boarding:
 	// OrderFootToEnter) passes a lease of its own priority too: it mostly ends the way its own code sent
 	// the unit along (a pickup beach, then the transport there), and held to the line it waited out the
@@ -5032,6 +5053,23 @@ namespace
 
 				return false;
 			}
+		}
+
+		// Our soldiers walk to board it: it waits for them, which an operation or survival order overrides.
+		if (CurrentOrderPriority < NeuralOrderPriority::Operation && IsAwaitingPassengers(pFoot))
+		{
+			CountDecision(NeuralDecision::OrderLeaseRefused, pFoot->Owner->ArrayIndex);
+
+			if (NeuralAI::HeadlessMode)
+			{
+				auto& refusals = LeaseRefusals[pFoot->Owner->ArrayIndex];
+				char key[128];
+				std::snprintf(key, sizeof(key), "awaiting passengers > %s:%d", OrderCallerBaseName(file) ? OrderCallerBaseName(file) : "?", line);
+				refusals.Pairs[key]++;
+				refusals.Total++;
+			}
+
+			return false;
 		}
 
 		// A carryall of ours comes for it: it waits for the ride, which only a survival order overrides, so
