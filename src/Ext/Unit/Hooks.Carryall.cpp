@@ -85,6 +85,15 @@ DEFINE_HOOK(0x7388A4, UnitClass_Active_Click_With_Tote, 0x6)
 	return ReturnHandled;
 }
 
+// A carryall setting its cargo down sleeps while it comes down: on Guard an armed one picks a target,
+// and the attack mission takes it back up with the cargo still on. An attack order still does.
+static void BeginCarryallDrop(UnitClass* pThis, UnitExt* pExt)
+{
+	pExt->CarryallState = JumpjetCarryallState::DescendingToDrop;
+	pThis->SetTarget(nullptr);
+	pThis->QueueMission(Mission::Sleep, true);
+}
+
 DEFINE_HOOK(0x700D5D, TechnoClass_CanDeploy_Carryall, 0x5)
 {
 	enum { ReturnValue = 0x700E3F, ReturnDefault = 0 };
@@ -141,8 +150,7 @@ DEFINE_HOOK(0x7393C9, UnitClass_TryToDeploy_Carryall, 0x9)
 	{
 		if (pExt->CarryallState == JumpjetCarryallState::Carrying && pExt->CarryallCanDropAt(pThis->GetCell()))
 		{
-			pExt->CarryallState = JumpjetCarryallState::DescendingToDrop;
-			pThis->QueueMission(Mission::Guard, true);
+			BeginCarryallDrop(pThis, pExt);
 
 			return ReturnSuccess;
 		}
@@ -185,10 +193,7 @@ DEFINE_HOOK(0x741983, UnitClass_AssignDestination_Carryall, 0x6)
 		if (pExt->CarryallCargo)
 		{
 			if (pExt->CarryallState == JumpjetCarryallState::Carrying && pExt->CarryallCanDropAt(pThis->GetCell()))
-			{
-				pExt->CarryallState = JumpjetCarryallState::DescendingToDrop;
-				pThis->QueueMission(Mission::Guard, true);
-			}
+				BeginCarryallDrop(pThis, pExt);
 
 			return ReturnDone;
 		}
@@ -420,10 +425,7 @@ DEFINE_HOOK(0x73D63B, UnitClass_MissionUnload_Carryall, 0x6)
 	if (pExt->CarryallCargo)
 	{
 		if (pExt->CarryallState == JumpjetCarryallState::Carrying && pExt->CarryallCanDropAt(pThis->GetCell()))
-		{
-			pExt->CarryallState = JumpjetCarryallState::DescendingToDrop;
-			pThis->QueueMission(Mission::Guard, true);
-		}
+			BeginCarryallDrop(pThis, pExt);
 
 		return ReturnDelay;
 	}
