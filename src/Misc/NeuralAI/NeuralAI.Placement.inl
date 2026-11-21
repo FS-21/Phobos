@@ -1106,6 +1106,12 @@ namespace
 
 bool NeuralAI::IsCellClearedOfExitCorridors(HouseClass* pHouse, BuildingTypeClass* pType, CellStruct candidateCell)
 {
+	return CellClearedOfExitCorridors(pHouse, pType, candidateCell);
+}
+
+// The deploy site searches of the base deployers (NeuralAI.MobileFactory.inl) ask it outside the class.
+static bool CellClearedOfExitCorridors(HouseClass* pHouse, BuildingTypeClass* pType, CellStruct candidateCell)
+{
 	const int candW = pType->GetFoundationWidth();
 	const int candH = pType->GetFoundationHeight(false);
 	const bool isCandDefense = pType->IsBaseDefense;
@@ -2951,6 +2957,51 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 	{
 		center = allySiteMacro.AllyDefenseCell;
 		targetExpansionZone = -1;
+	}
+
+	// The role goal of this search (NeuralPlacementGoal): where the building is wanted, which the yard
+	// reaches through the adjacency rules below and a deployer of it reaches straight (FindDeployerSite).
+	// The same precedence as the anchors above: the island a plan holds, the building attacked, the key
+	// asset without cover, the hot approach, the threatened sector, the front, the air sector; the free
+	// field of a resource building; the hub that lacks this factory. None: the cell found is the goal.
+	{
+		NeuralPlacementGoal goal {};
+		goal.Anchor = center;
+		goal.Frame = Unsorted::CurrentFrame;
+
+		auto const setGoal = [&goal](const CellStruct& cell, NeuralPlacementGoalKind kind)
+		{
+			if (goal.Kind == NeuralPlacementGoalKind::None && cell != CellStruct::Empty)
+			{
+				goal.Cell = cell;
+				goal.Kind = kind;
+			}
+		};
+
+		if (placingAtAllySite || defendingAlly)
+		{
+			setGoal(center, NeuralPlacementGoalKind::Hub);
+		}
+		else if (isCombatDefense)
+		{
+			setGoal(islandHoldYardCell, NeuralPlacementGoalKind::IslandHold);
+			setGoal(directionalAttackedBld, NeuralPlacementGoalKind::AttackedBuilding);
+			setGoal(undefendedKeyAssetCell, NeuralPlacementGoalKind::KeyAsset);
+			setGoal(routeDefenseSpot, NeuralPlacementGoalKind::RouteSpot);
+			setGoal(defenseSectorCell, NeuralPlacementGoalKind::DefenseSector);
+			setGoal(creepFrontGoal, NeuralPlacementGoalKind::Front);
+			setGoal(airSectorCell, NeuralPlacementGoalKind::AirSector);
+		}
+		else if (isResourceBld)
+		{
+			setGoal(nearestOreCell, NeuralPlacementGoalKind::OreField);
+		}
+		else if (anchoredAtMissingFactoryHub)
+		{
+			setGoal(center, NeuralPlacementGoalKind::Hub);
+		}
+
+		GetMacroState(pHouse).PlacementGoals[pBuildingType->ArrayIndex] = goal;
 	}
 
 	// Whatever we place never touches an ally's factory, refinery, repair station or ConYard (their

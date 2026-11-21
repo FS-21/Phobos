@@ -1,7 +1,13 @@
-// NeuralAI.MobileFactory.inl: Factory deployers, vehicles that unfold into a war factory, barracks or
-// airfield. A mobile factory is one whose building packs back into the same vehicle (UndeploysInto):
-// only those move again. Told apart from the rules only, never by name.
+// NeuralAI.MobileFactory.inl: Base deployers, vehicles that unfold into a base building other than a
+// yard (Nanocores, mobile factories, outposts), and the one placement they share with the yard: the
+// expert decides where it wants a building by its role and the building then comes from the yard or
+// from a deployer sent to that spot, which needs no adjacency. A mobile factory, and any reversible
+// building, is one whose building packs back into the same vehicle (UndeploysInto): only those move
+// again. Told apart from the rules only, never by name.
 // Part of NeuralAI.cpp (included in order; one translation unit).
+
+// NeuralAI::IsCellClearedOfExitCorridors outside the class (NeuralAI.Placement.inl).
+static bool CellClearedOfExitCorridors(HouseClass* pHouse, BuildingTypeClass* pType, CellStruct candidateCell);
 
 namespace
 {
@@ -55,6 +61,205 @@ namespace
 	bool IsMobileFactoryUnit(const UnitTypeClass* pType)
 	{
 		return IsFactoryDeployerUnit(pType) && IsMobileFactoryBuilding(pType->DeploysInto);
+	}
+
+	// A vehicle that unfolds into a base building other than a yard. Only DeploysInto gives a building
+	// (Convert.Deploy and Universal Deploy turn a unit into another unit). Not a slave miner (its
+	// harvest unfolds it), an MCV (its own expansion logic) nor a unit that unfolds to fight (a siege
+	// gun, an armed vehicle that becomes a defense).
+	bool IsBaseDeployerUnit(const UnitTypeClass* pType)
+	{
+		if (!pType || !pType->DeploysInto || pType->DeploysInto->ConstructionYard || pType->Harvester || pType->ResourceGatherer)
+			return false;
+
+		auto const pBld = pType->DeploysInto;
+		auto const pWeaponSlot = const_cast<UnitTypeClass*>(pType)->GetWeapon(0);
+		const bool armed = pWeaponSlot && pWeaponSlot->WeaponType;
+
+		return IsTrueBaseStructureTarget(pBld) && (!pBld->IsBaseDefense || !armed)
+			&& !IsDeployableSiegeUnitType(const_cast<UnitTypeClass*>(pType));
+	}
+
+	// The role of a deployed building, from the same flags the building pick reads.
+	enum class DeployerRole : int
+	{
+		Support,
+		Refinery,
+		Factory,
+		Defense,
+		Power,
+		Tech
+	};
+
+	DeployerRole DeployedBuildingRole(const BuildingTypeClass* pBld)
+	{
+		if (pBld->Refinery || pBld->ResourceDestination || pBld->ResourceGatherer)
+			return DeployerRole::Refinery;
+
+		if (pBld->Factory != AbstractType::None)
+			return DeployerRole::Factory;
+
+		if (pBld->IsBaseDefense)
+			return DeployerRole::Defense;
+
+		if (pBld->PowerBonus > pBld->PowerDrain)
+			return DeployerRole::Power;
+
+		auto const pBldExt = BuildingTypeExt::Fetch(const_cast<BuildingTypeClass*>(pBld));
+
+		if (pBld->Radar || pBld->SpySat || pBld->SuperWeapon != -1 || pBld->SuperWeapon2 != -1 || (pBldExt && !pBldExt->SuperWeapons.empty()))
+			return DeployerRole::Tech;
+
+		return DeployerRole::Support;
+	}
+
+	// A base building that packs back into the very vehicle it unfolds from (a mobile factory, the Iron
+	// Fist, a yard): it may flee and move again. Siege guns and slave miners have rules of their own.
+	bool IsReversibleBaseBuilding(const BuildingTypeClass* pBld)
+	{
+		return pBld && pBld->UndeploysInto && pBld->UndeploysInto->DeploysInto == pBld && !pBld->ResourceGatherer
+			&& pBld->Enslaves == nullptr && !IsDeployedSiegeBuildingType(const_cast<BuildingTypeClass*>(pBld))
+			&& IsTrueBaseStructureTarget(pBld);
+	}
+
+	// The legal deploy stand nearest originCell, within 28 rings, on requiredZone (-1: any): the building
+	// can stand there (CanCreateHere and every foundation cell), the deployer can stand on the cell, our
+	// exit corridors stay open and no other deployer or transport of ours is on the foundation. pAvoid:
+	// sites tried before; a candidate within 6 cells of one is passed over.
+	CellStruct FindDeployFoundationNear(HouseClass* pHouse, BuildingTypeClass* pBldType, const CellStruct& originCell, int requiredZone,
+		UnitClass* pDeployerUnit, const std::vector<CellStruct>* pAvoid = nullptr)
+	{
+		if (!pHouse || !pBldType || originCell == CellStruct::Empty)
+			return CellStruct::Empty;
+
+		const int w = pBldType->GetFoundationWidth();
+		const int h = pBldType->GetFoundationHeight(false);
+		const CellStruct deployOffset = (w > 2 || h > 2) ? CellStruct { -1, -1 } : CellStruct { 0, 0 };
+		const CellStruct curUnitCell = pDeployerUnit ? pDeployerUnit->GetMapCoords() : CellStruct::Empty;
+
+		for (int r = 0; r <= 28; ++r)
+		{
+			for (int dy = -r; dy <= r; ++dy)
+			{
+				for (int dx = -r; dx <= r; ++dx)
+				{
+					if (std::max(std::abs(dx), std::abs(dy)) != r)
+						continue;
+
+					const CellStruct cand { static_cast<short>(originCell.X + dx), static_cast<short>(originCell.Y + dy) };
+					const CellStruct topLeftCell = cand + deployOffset;
+
+					if (!MapClass::Instance.CoordinatesLegal(cand) || !MapClass::Instance.CoordinatesLegal(topLeftCell))
+						continue;
+
+					if (requiredZone >= 0 && MapClass::Instance.GetMovementZoneType(cand, MovementZone::Normal, false) != requiredZone)
+						continue;
+
+					if (pAvoid && std::any_of(pAvoid->begin(), pAvoid->end(), [&cand](const CellStruct& avoid)
+						{ return std::max(std::abs(avoid.X - cand.X), std::abs(avoid.Y - cand.Y)) <= 6; }))
+					{
+						continue;
+					}
+
+					if (pDeployerUnit && pDeployerUnit->Type && cand != curUnitCell)
+					{
+						auto const pStandCell = MapClass::Instance.TryGetCellAt(cand);
+
+						if (!pStandCell
+							|| !pStandCell->IsClearToMove(pDeployerUnit->Type->SpeedType, false, false, -1, pDeployerUnit->Type->MovementZone, -1, false))
+						{
+							continue;
+						}
+					}
+
+					if (!CellClearedOfExitCorridors(pHouse, pBldType, topLeftCell))
+						continue;
+
+					UnitExt::Deployer = pDeployerUnit;
+					bool canExist = pBldType->CanCreateHere(topLeftCell, pHouse);
+
+					if (canExist)
+					{
+						for (auto pFoundCell = pBldType->GetFoundationData(true); *pFoundCell != CellStruct { 0x7FFF, 0x7FFF }; ++pFoundCell)
+						{
+							const CellStruct fc = topLeftCell + *pFoundCell;
+							auto const pFC = MapClass::Instance.TryGetCellAt(fc);
+
+							if (!pFC || !pFC->CanThisExistHere(pBldType->SpeedType, pBldType, pHouse))
+							{
+								canExist = false;
+								break;
+							}
+
+							for (ObjectClass* pObj = pFC->FirstObject; pObj; pObj = pObj->NextObject)
+							{
+								if (pObj == pDeployerUnit)
+									continue;
+
+								if (auto const pOtherU = abstract_cast<UnitClass*>(pObj))
+								{
+									if (pOtherU->IsAlive && !pOtherU->InLimbo && pOtherU->Type
+										&& (pOtherU->Type->DeploysInto != nullptr || IsAmphibiousOrAirTransport(pOtherU->Type)))
+									{
+										canExist = false;
+										break;
+									}
+								}
+							}
+
+							if (!canExist)
+								break;
+						}
+					}
+
+					UnitExt::Deployer = nullptr;
+
+					if (canExist)
+						return cand;
+				}
+			}
+		}
+
+		return CellStruct::Empty;
+	}
+
+	// TEMP diagnostic (deployer orders, trips and pack-ups): DeployerLogLinesMost lines a match.
+	bool DeployerLogAllowed(HouseClass* pHouse)
+	{
+		auto& macro = GetMacroState(pHouse);
+
+		if (macro.DeployerLogLines >= DeployerLogLinesMost)
+			return false;
+
+		++macro.DeployerLogLines;
+		return true;
+	}
+
+	const char* PlacementGoalKindName(NeuralPlacementGoalKind kind)
+	{
+		switch (kind)
+		{
+		case NeuralPlacementGoalKind::OreField:
+			return "ore field";
+		case NeuralPlacementGoalKind::IslandHold:
+			return "island hold";
+		case NeuralPlacementGoalKind::AttackedBuilding:
+			return "attacked building";
+		case NeuralPlacementGoalKind::KeyAsset:
+			return "key asset";
+		case NeuralPlacementGoalKind::RouteSpot:
+			return "route spot";
+		case NeuralPlacementGoalKind::DefenseSector:
+			return "defense sector";
+		case NeuralPlacementGoalKind::Front:
+			return "front";
+		case NeuralPlacementGoalKind::AirSector:
+			return "air sector";
+		case NeuralPlacementGoalKind::Hub:
+			return "hub";
+		default:
+			return "base";
+		}
 	}
 
 	// Is this cell within the ground reach (+ margin cells) of a known enemy defense? Fog-fair:
@@ -714,6 +919,244 @@ namespace
 		macro.MobileFactoryWanted[pUnitType->ArrayIndex] = { now, wanted };
 
 		return wanted;
+	}
+
+	// Where would this house put this building, for a deployer of pDeployerType (pUnit when one asks,
+	// nullptr when the building pick does)? The factory spot of a land factory (FindMobileFactorySpot),
+	// else the role goal of the base placement search (NeuralPlacementGoal, by the expert in charge: the
+	// free field of a refinery; the island held, the building attacked, the key asset, the approach, the
+	// sector or the front of a defense; the hub missing a factory), else the cell of that search. A
+	// refinery with no free field left on our land takes the free field of another landmass
+	// (IslandExpansionField) when the deployer can be ferried there. A defense sent to the front stands
+	// at most DeployerFrontCells past our forward building, short of the known enemy defenses.
+	// outKind: why. Empty when the house has no ground of its own left.
+	CellStruct FindDeployerGoal(HouseClass* pHouse, BuildingTypeClass* pBld, UnitTypeClass* pDeployerType, UnitClass* pUnit,
+		NeuralPlacementGoalKind& outKind)
+	{
+		outKind = NeuralPlacementGoalKind::None;
+
+		if (!pHouse || !pBld)
+			return CellStruct::Empty;
+
+		auto& macro = GetMacroState(pHouse);
+		const int now = Unsorted::CurrentFrame;
+		const DeployerRole role = DeployedBuildingRole(pBld);
+		const CellStruct home = GetHouseHomeCell(pHouse);
+		const CellStruct from = pUnit ? pUnit->GetMapCoords() : home;
+		const int homeZone = home != CellStruct::Empty ? MapClass::Instance.GetMovementZoneType(home, MovementZone::Normal, false) : -1;
+		const int fromZone = pUnit ? ObjectZone(pUnit, MovementZone::Normal) : homeZone;
+		CellStruct goal = CellStruct::Empty;
+		CellStruct anchor = CellStruct::Empty;
+		NeuralPlacementGoalKind kind = NeuralPlacementGoalKind::None;
+
+		if (role == DeployerRole::Factory && IsLandFactoryBuilding(pBld) && from != CellStruct::Empty)
+		{
+			const MobileFactorySpot spot = FindMobileFactorySpot(pHouse, pBld, nullptr, from, fromZone, pUnit ? pUnit->UniqueID : 0xFFFFFFFFu);
+
+			if (spot.Reason != MobileFactoryReasonNone)
+			{
+				goal = spot.Cell;
+				kind = NeuralPlacementGoalKind::Hub;
+			}
+		}
+
+		// Run first: the search notes the goal it chose.
+		const CellStruct yardCell = CachedTetrisBuildCell(pHouse, pBld);
+
+		if (goal == CellStruct::Empty)
+		{
+			auto const itGoal = macro.PlacementGoals.find(pBld->ArrayIndex);
+
+			if (itGoal != macro.PlacementGoals.end() && itGoal->second.Kind != NeuralPlacementGoalKind::None
+				&& now >= itGoal->second.Frame && now - itGoal->second.Frame <= PlacementGoalFrames)
+			{
+				goal = itGoal->second.Cell;
+				anchor = itGoal->second.Anchor;
+				kind = itGoal->second.Kind;
+			}
+		}
+
+		if (role == DeployerRole::Refinery && kind != NeuralPlacementGoalKind::OreField && macro.IslandExpansionField != CellStruct::Empty
+			&& pDeployerType && CanHouseFerryTypeAcrossWater(pHouse, pDeployerType))
+		{
+			goal = macro.IslandExpansionField;
+			anchor = CellStruct::Empty;
+			kind = NeuralPlacementGoalKind::OreField;
+		}
+
+		if (kind == NeuralPlacementGoalKind::Front && anchor != CellStruct::Empty)
+		{
+			const int anchorZone = MapClass::Instance.GetMovementZoneType(anchor, MovementZone::Normal, false);
+			const double dist = anchor.DistanceFrom(goal);
+			CellStruct front = anchor;
+
+			for (int step = 2; step <= DeployerFrontCells && step < dist; step += 2)
+			{
+				const CellStruct c { static_cast<short>(anchor.X + static_cast<int>((goal.X - anchor.X) * step / dist)),
+					static_cast<short>(anchor.Y + static_cast<int>((goal.Y - anchor.Y) * step / dist)) };
+
+				if (!MapClass::Instance.CoordinatesLegal(c) || MapClass::Instance.GetMovementZoneType(c, MovementZone::Normal, false) != anchorZone
+					|| IsCellInKnownEnemyDefenseReach(pHouse, c, 2))
+				{
+					break;
+				}
+
+				front = c;
+			}
+
+			goal = front;
+		}
+
+		if (goal == CellStruct::Empty && yardCell != CellStruct::Empty)
+		{
+			const CellStruct standOffset = (pBld->GetFoundationWidth() > 2 || pBld->GetFoundationHeight(false) > 2)
+				? CellStruct { 1, 1 }
+				: CellStruct { 0, 0 };
+			goal = yardCell + standOffset;
+		}
+
+		if (goal == CellStruct::Empty)
+			goal = home;
+
+		outKind = goal != CellStruct::Empty ? kind : NeuralPlacementGoalKind::None;
+
+		return goal;
+	}
+
+	// The site of a deployer for that goal: the legal deploy stand nearest it on its ground (our home
+	// ground for a goal on no ground), no adjacency asked (FindDeployFoundationNear); for a building on
+	// water the nearest one the deployer reaches by its own moves.
+	CellStruct FindDeployerSiteNear(HouseClass* pHouse, BuildingTypeClass* pBld, UnitClass* pUnit, const CellStruct& goal,
+		const std::vector<CellStruct>* pAvoid)
+	{
+		if (!pHouse || !pBld || goal == CellStruct::Empty)
+			return CellStruct::Empty;
+
+		if (IsWaterBuildingType(pBld))
+		{
+			// A water site only where the deployer gets by itself.
+			const int ownMoveZone = pUnit ? ObjectZone(pUnit, pUnit->Type->MovementZone) : -1;
+			std::vector<CellStruct> avoid = pAvoid ? *pAvoid : std::vector<CellStruct> {};
+
+			for (int search = 0; search < DeployerWaterSiteTries; ++search)
+			{
+				const CellStruct cell = FindDeployFoundationNear(pHouse, pBld, goal, -1, pUnit, &avoid);
+
+				if (cell == CellStruct::Empty)
+					break;
+
+				if (!pUnit || MapClass::Instance.GetMovementZoneType(cell, pUnit->Type->MovementZone, false) == ownMoveZone)
+					return cell;
+
+				avoid.push_back(cell);
+			}
+
+			return CellStruct::Empty;
+		}
+
+		const int goalZone = MapClass::Instance.GetMovementZoneType(goal, MovementZone::Normal, false);
+		const CellStruct home = GetHouseHomeCell(pHouse);
+		const int homeZone = home != CellStruct::Empty ? MapClass::Instance.GetMovementZoneType(home, MovementZone::Normal, false) : -1;
+
+		return FindDeployFoundationNear(pHouse, pBld, goal, IsGroundZone(goalZone) ? goalZone : homeZone, pUnit, pAvoid);
+	}
+
+	// What a deployer risks on its way from `from` to `site`: the value of the known armed enemies near
+	// the site and halfway there, and DeployerTripRiskDefense when a known enemy defense reaches the site.
+	int DeployerTripRisk(HouseClass* pHouse, const CellStruct& from, const CellStruct& site)
+	{
+		if (!pHouse || from == CellStruct::Empty || site == CellStruct::Empty)
+			return 0;
+
+		const CellStruct mid { static_cast<short>((from.X + site.X) / 2), static_cast<short>((from.Y + site.Y) / 2) };
+		int risk = VisibleEnemyThreatNear(pHouse, site, 10) + VisibleEnemyThreatNear(pHouse, mid, 10);
+
+		if (IsCellInKnownEnemyDefenseReach(pHouse, site, 2))
+			risk += DeployerTripRiskDefense;
+
+		return risk;
+	}
+
+	// The way of a trip with enemies on it, weighed (user, 2026-11-21: the escort is the AI's choice):
+	// behind the next wave against alone, by the trip lesson of the house (DeployerTripWeight), the risk
+	// and the trained escort slot (scores[60]). Never a fixed rule.
+	bool DeployerTripFollowsWave(HouseClass* pHouse, int risk, int escortSlot)
+	{
+		if (!pHouse || risk <= 0)
+			return false;
+
+		auto const& weight = GetMacroState(pHouse).DeployerTripWeight;
+
+		return weight[1] + risk / 4 + escortSlot / 4 > weight[0] + DeployerEscortMargin;
+	}
+
+	// A weighed trip ended: the way it took gains when the building stands, loses when the deployer
+	// was lost on the way (the rule of the plan weights).
+	void NoteDeployerTripEnd(HouseClass* pHouse, bool behindWave, bool deployed)
+	{
+		if (!pHouse)
+			return;
+
+		auto& weight = GetMacroState(pHouse).DeployerTripWeight[behindWave ? 1 : 0];
+		weight = std::clamp(weight + (deployed ? DeployerTripGain : -DeployerTripLoss), DeployerTripWeightMin, DeployerTripWeightMax);
+	}
+
+	// Is this reversible building about to fall (the criteria of the last yard, ReversibleFlee*)?
+	// Attacked, an enemy unit we see within ReversibleFleeEnemyLeptons, and its health under
+	// ReversibleFleeHealth or falling from healthThen, framesSince ago, so fast it is gone within
+	// ReversibleFleeForecastFrames.
+	bool IsReversibleBuildingFalling(HouseClass* pHouse, BuildingClass* pBld, double healthThen, int framesSince)
+	{
+		if (!pHouse || !pBld || !pBld->HasBeenAttacked)
+			return false;
+
+		const double health = pBld->GetHealthPercentage();
+		bool falling = health < ReversibleFleeHealth;
+
+		if (!falling && framesSince > 0 && healthThen > health)
+		{
+			const double lossPerFrame = (healthThen - health) / framesSince;
+			falling = health < lossPerFrame * ReversibleFleeForecastFrames;
+		}
+
+		if (!falling)
+			return false;
+
+		bool enemyClose = false;
+
+		ForEachTechnoNear(pBld->GetMapCoords(), ReversibleFleeEnemyLeptons / Unsorted::LeptonsPerCell + 2, [&](TechnoClass* pTech) -> bool
+		{
+			if (!pTech->Owner || pTech->Owner == pHouse || pHouse->IsAlliedWith(pTech->Owner) || pTech->Owner->IsNeutral()
+				|| pTech->WhatAmI() == AbstractType::Building || !IsCellVisibleToAI(pHouse, pTech->GetCell()))
+			{
+				return true;
+			}
+
+			if (pBld->DistanceFrom(pTech) <= ReversibleFleeEnemyLeptons)
+				enemyClose = true;
+
+			return !enemyClose;
+		});
+
+		return enemyClose;
+	}
+
+	// The yard's anti-loop, for every reversible building: none packs up again within
+	// ReversibleRepackCells of the last pack-up of the house for ReversibleRepackFrames.
+	bool ReversiblePackAllowed(HouseClass* pHouse, const CellStruct& here)
+	{
+		auto const& macro = GetMacroState(pHouse);
+
+		return macro.LastReversiblePackCell == CellStruct::Empty || Unsorted::CurrentFrame < macro.LastReversiblePackFrame
+			|| Unsorted::CurrentFrame - macro.LastReversiblePackFrame >= ReversibleRepackFrames
+			|| here.DistanceFrom(macro.LastReversiblePackCell) > ReversibleRepackCells;
+	}
+
+	void NoteReversiblePack(HouseClass* pHouse, const CellStruct& here)
+	{
+		auto& macro = GetMacroState(pHouse);
+		macro.LastReversiblePackCell = here;
+		macro.LastReversiblePackFrame = Unsorted::CurrentFrame;
 	}
 
 } // namespace
