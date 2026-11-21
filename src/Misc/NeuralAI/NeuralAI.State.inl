@@ -904,7 +904,8 @@ namespace
 	};
 
 	// The order a base deployer carries out (NeuralAI.MobileFactory.inl): the building it becomes, the
-	// cell it deploys at, when it was picked and the role goal behind it, the refuge it goes to first
+	// cell it deploys at, when it was picked and the role goal behind it, since when a defense waits for
+	// the fight at its goal to end and whether it waited already, the refuge it goes to first
 	// and since when, its safe route there (the waypoints left, when it was planned, the health it had
 	// then, the danger of the route and of the straight way), whether its way was weighed (enemies on
 	// the way) and it follows the next wave there and since when it waits for one, when the order was
@@ -926,6 +927,8 @@ namespace
 		int StraightDanger { 0 };
 		CellStruct ProgressTarget { CellStruct::Empty };
 		NeuralPlacementGoalKind Kind { NeuralPlacementGoalKind::None };
+		int CombatWaitSince { -1 };
+		bool CombatWaited { false };
 		bool Weighed { false };
 		bool BehindWave { false };
 		int WaitSince { -1 };
@@ -3330,6 +3333,12 @@ namespace
 	// -DeployerTripLoss, within DeployerTripWeightMin..DeployerTripWeightMax (the rule of the plan weights).
 	constexpr int DeployerTripRiskDefense = 200;
 	constexpr int DeployerEscortMargin = 40;
+	// A defense sent to a building of ours under attack (user approved, 2026-11-21, «Sí, hazlo»; 45 matches
+	// of stamp f55f5f65d: 5 of 15 defense Nanocores deployed, most lost on their way into the fight they
+	// were sent to) waits where it stands while an enemy is in sight within DeployerCombatCells of its goal,
+	// DeployerCombatWaitFrames at most; then it asks again where it goes and goes, without a second wait.
+	constexpr int DeployerCombatCells = 10;
+	constexpr int DeployerCombatWaitFrames = 2700;
 	constexpr int DeployerEscortWaitFrames = 2700;
 	constexpr int DeployerEscortFollowFrames = 150;
 	constexpr int DeployerTripGain = 10;

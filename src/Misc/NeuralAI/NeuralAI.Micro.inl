@@ -1833,6 +1833,45 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 		}
 
+		// A defense sent to a building of ours under attack waits where it stands while an enemy is in sight
+		// within DeployerCombatCells of its goal, DeployerCombatWaitFrames at most: it would drive into the
+		// fight. Then it asks again where it goes and goes there, without a second wait.
+		if (pBld->IsBaseDefense && order.Kind == NeuralPlacementGoalKind::AttackedBuilding && !order.CombatWaited)
+		{
+			if (VisibleEnemyThreatNear(pHouse, order.Goal, DeployerCombatCells) <= 0)
+			{
+				order.CombatWaitSince = -1;
+			}
+			else if (order.CombatWaitSince < 0 || now < order.CombatWaitSince || now - order.CombatWaitSince < DeployerCombatWaitFrames)
+			{
+				if (order.CombatWaitSince < 0 || now < order.CombatWaitSince)
+				{
+					order.CombatWaitSince = now;
+
+					// TEMP diagnostic: a defense waiting for the fight at its goal to end.
+					if (DeployerLogAllowed(pHouse))
+					{
+						Debug::Log("[NeuralAI] House %d deployer waits: %s %u (%s) for the fight at its goal (%d,%d) to end, %d cells away, frame %d.\n",
+							pHouse->ArrayIndex, pType->ID, pUnit->UniqueID, buildingName, order.Goal.X, order.Goal.Y,
+							static_cast<int>(here.DistanceFrom(order.Goal)), now);
+					}
+				}
+
+				order.ProgressFrame = now;
+				return;
+			}
+			else
+			{
+				order.CombatWaited = true;
+				order.CombatWaitSince = -1;
+				order.Goal = CellStruct::Empty;
+				order.Site = CellStruct::Empty;
+				order.PickFrame = -1;
+				order.SitePicks = 0;
+				return;
+			}
+		}
+
 		// Behind the next wave sent toward its site, DeployerEscortFollowFrames after it; with none in
 		// DeployerEscortWaitFrames it goes alone, and that trip teaches nothing.
 		if (order.WaitSince >= 0)
