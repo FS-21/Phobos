@@ -801,8 +801,9 @@ namespace
 	// no special job.
 	bool IsFitPassengerSoldierType(InfantryTypeClass* pType)
 	{
+		// A harvesting slave belongs to its miner, and a jumpjet soldier boards no vehicle.
 		if (!pType || pType->Engineer || pType->Doggie || pType->Thief || pType->VehicleThief || pType->Ivan || pType->C4
-			|| IsSpyInfantryType(pType))
+			|| IsSpyInfantryType(pType) || pType->Slaved || pType->JumpJet)
 		{
 			return false;
 		}
@@ -827,13 +828,17 @@ namespace
 
 	bool OrderPlanSoldierAboard(FootClass* pSoldier, UnitClass* pVehicle);
 
-	// TEMP passenger diagnostic (P4): how the tracked boarding orders ended since the last check.
+	// The tracked boarding orders that ended since the last check, and the vehicles no soldier still walks
+	// to; TEMP passenger diagnostic (P4): how they ended.
 	void ResolvePassengerBoardTrack(HouseClass* pHouse)
 	{
 		auto& macro = GetMacroState(pHouse);
 
 		if (macro.PassengerBoardTrack.empty())
+		{
+			macro.PassengerAwaitedUntil.clear();
 			return;
+		}
 
 		const int now = Unsorted::CurrentFrame;
 		std::unordered_map<DWORD, InfantryClass*> soldiers;
@@ -932,6 +937,13 @@ namespace
 				}
 
 				return true;
+			});
+
+		// A vehicle waits while a soldier sent to it is still on the way.
+		std::erase_if(macro.PassengerAwaitedUntil, [&](const auto& entry)
+			{
+				return now >= entry.second || std::none_of(macro.PassengerBoardTrack.begin(), macro.PassengerBoardTrack.end(),
+					[&entry](const auto& track) { return track.second.first == entry.first; });
 			});
 	}
 
@@ -1066,6 +1078,7 @@ namespace
 				macro.WaveGoals.erase(pInf->UniqueID);
 				macro.PassengerBoardOrders++;
 				macro.PassengerBoardTrack[pInf->UniqueID] = { pVehicle->UniqueID, now };
+				macro.PassengerAwaitedUntil[pVehicle->UniqueID] = now + PassengerBoardWaitFrames;
 				macro.PassengerBoardStartCells[pInf->UniqueID] = static_cast<int>(pInf->GetMapCoords().DistanceFrom(pVehicle->GetMapCoords()));
 
 				if (group >= 0)
