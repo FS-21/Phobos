@@ -905,10 +905,12 @@ namespace
 
 	// The order a base deployer carries out (NeuralAI.MobileFactory.inl): the building it becomes, the
 	// cell it deploys at, when it was picked and the role goal behind it, the refuge it goes to first
-	// and since when, whether its way was weighed (enemies on the way) and it follows the next wave there
-	// and since when it waits for one, when the order was given and last run, the closest it got and
-	// when, the unpack orders on its site and the frame of the last one, since when it stands on or next
-	// to the site, how many sites it took for its goal and the ones that refused it.
+	// and since when, its safe route there (the waypoints left, when it was planned, the health it had
+	// then, the danger of the route and of the straight way), whether its way was weighed (enemies on
+	// the way) and it follows the next wave there and since when it waits for one, when the order was
+	// given and last run, the cell it was last sent to and the closest it got to it and when, the unpack
+	// orders on its site and the frame of the last one, since when it stands on or next to the site, how
+	// many sites it took for its goal and the ones that refused it.
 	struct NeuralDeployOrder
 	{
 		int BuildingType { -1 };
@@ -917,6 +919,12 @@ namespace
 		CellStruct Goal { CellStruct::Empty };
 		CellStruct Refuge { CellStruct::Empty };
 		int RefugeFrame { -1 };
+		std::vector<CellStruct> Route {};
+		int RouteFrame { -1 };
+		int RouteHealth { 0 };
+		int RouteDanger { 0 };
+		int StraightDanger { 0 };
+		CellStruct ProgressTarget { CellStruct::Empty };
 		NeuralPlacementGoalKind Kind { NeuralPlacementGoalKind::None };
 		bool Weighed { false };
 		bool BehindWave { false };

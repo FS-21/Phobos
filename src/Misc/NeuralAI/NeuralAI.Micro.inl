@@ -1653,6 +1653,60 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			CountDecision(NeuralDecision::DeployerSiteFailed, pHouse->ArrayIndex);
 		};
 
+		// The safe route to the site (user, 2026-11-21: waypoints as the transports have; PlanOpRoute: the
+		// cheapest way over the danger map of the known enemy defenses and units, on its own movement zone),
+		// kept while a new one is not OpRouteKeepPercent cheaper. False with none: straight there, or across
+		// water by a transport operation.
+		auto const planRoute = [&](bool fresh) -> bool
+		{
+			order.RouteFrame = now;
+			order.RouteHealth = pUnit->Health;
+			OpRoutePlan plan;
+			const std::vector<CellStruct> sites { order.Site };
+			const std::vector<int> noWalk { 0 };
+			const bool ownZone = MapClass::Instance.GetMovementZoneType(order.Site, pType->MovementZone, false)
+				== MapClass::Instance.GetMovementZoneType(here, pType->MovementZone, pUnit->OnBridge);
+
+			if (!ownZone || !PlanOpRoute(pHouse, pUnit, OpCarrier::Surface, sites, noWalk, plan))
+			{
+				order.Route.clear();
+				order.RouteDanger = 0;
+				order.StraightDanger = 0;
+				return false;
+			}
+
+			auto const& map = GetOpDangerMap(pHouse, false);
+
+			if (!fresh && static_cast<long long>(plan.Cost) * 100
+				> static_cast<long long>(OpRouteCost(map, here, order.Route, order.Site)) * OpRouteKeepPercent)
+			{
+				return true;
+			}
+
+			if (plan.Waypoints != order.Route)
+				order.BestDist = INT_MAX;
+
+			order.Route = plan.Waypoints;
+			order.RouteDanger = plan.Danger;
+			OpLineCost(map, here, order.Site, order.StraightDanger);
+			return true;
+		};
+
+		// What is left of the way: through the waypoints left to the site, straight between them.
+		auto const cellsLeft = [&]() -> int
+		{
+			double cells = 0.0;
+			CellStruct at = here;
+
+			for (auto const& waypoint : order.Route)
+			{
+				cells += at.DistanceFrom(waypoint);
+				at = waypoint;
+			}
+
+			return static_cast<int>(cells + at.DistanceFrom(order.Site));
+		};
+
 		// Caught packed by more than our forces around it: back to a quiet refuge, as a deployed one flees.
 		if (order.Refuge == CellStruct::Empty && now - order.StartFrame >= 150 && IsAITickWindow(90, 15))
 		{
@@ -1752,9 +1806,13 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				return;
 			}
 
-			// The first site: with enemies on the way, the way is weighed (alone or behind the next wave).
+			order.Route.clear();
+			const bool routed = planRoute(true);
+
+			// The first site: with enemies on the way (the danger of its safe route, else the known enemies
+			// near the site and halfway there), the way is weighed (alone or behind the next wave).
 			const bool firstSite = order.SitePicks == 1 && order.TryFrame < 0 && !order.Weighed;
-			const int risk = firstSite ? DeployerTripRisk(pHouse, here, order.Site) : 0;
+			const int risk = firstSite ? (routed ? order.RouteDanger : DeployerTripRisk(pHouse, here, order.Site)) : 0;
 
 			if (risk > 0)
 			{
@@ -1766,12 +1824,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			// TEMP diagnostic: each site a deployer takes.
 			if (DeployerLogAllowed(pHouse))
 			{
-				Debug::Log("[NeuralAI] House %d deployer site: %s %u -> %s at (%d,%d), %d cells away, %s goal (%d,%d), pick %d, risk %d, %s, "
-					"weights %d/%d, frame %d.\n",
+				Debug::Log("[NeuralAI] House %d deployer site: %s %u -> %s at (%d,%d), %d cells away, %s goal (%d,%d), pick %d, route %s%d waypoints "
+					"(danger %d against %d straight), risk %d, %s, weights %d/%d, frame %d.\n",
 					pHouse->ArrayIndex, pType->ID, pUnit->UniqueID, buildingName, order.Site.X, order.Site.Y,
 					static_cast<int>(here.DistanceFrom(order.Site)), PlacementGoalKindName(order.Kind), order.Goal.X, order.Goal.Y,
-					order.SitePicks, risk, order.BehindWave ? "behind the next wave" : "alone", macro.DeployerTripWeight[0],
-					macro.DeployerTripWeight[1], now);
+					order.SitePicks, routed ? "" : "none, ", static_cast<int>(order.Route.size()), order.RouteDanger, order.StraightDanger, risk,
+					order.BehindWave ? "behind the next wave" : "alone", macro.DeployerTripWeight[0], macro.DeployerTripWeight[1], now);
 			}
 		}
 
@@ -1800,11 +1858,34 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 		}
 
-		const double siteDist = here.DistanceFrom(order.Site);
-
-		if (static_cast<int>(siteDist) < order.BestDist)
+		// Along its safe route, as a transport of an operation: planned again every OpRouteReplanFrames,
+		// every OpRouteDangerReplanFrames inside a threat's reach, and when it lost OpRouteHitHealth of its
+		// strength (OpRouteHitReplanFrames apart at least); its waypoints in turn, then the site.
+		if (order.RouteFrame >= 0)
 		{
-			order.BestDist = static_cast<int>(siteDist);
+			const int sincePlan = now - order.RouteFrame;
+			const bool hit = order.RouteHealth - pUnit->Health >= static_cast<int>(OpRouteHitHealth * std::max(1, pType->Strength));
+			bool replan = sincePlan < 0 || sincePlan >= OpRouteReplanFrames || (hit && sincePlan >= OpRouteHitReplanFrames);
+
+			if (!replan && sincePlan >= OpRouteDangerReplanFrames)
+			{
+				auto const& map = GetOpDangerMap(pHouse, false);
+				replan = map.Danger[static_cast<size_t>(map.IndexOf(here))] > 0;
+			}
+
+			if (replan)
+				planRoute(false);
+		}
+
+		while (!order.Route.empty() && here.DistanceFrom(order.Route.front()) <= OpRouteReachCells)
+			order.Route.erase(order.Route.begin());
+
+		const double siteDist = here.DistanceFrom(order.Site);
+		const int wayLeft = cellsLeft();
+
+		if (wayLeft < order.BestDist)
+		{
+			order.BestDist = wayLeft;
 			order.ProgressFrame = now;
 		}
 
@@ -1870,7 +1951,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		}
 
 		order.NearSince = -1;
-		moveTo(order.Site, NeuralOrderPriority::Operation);
+		moveTo(order.Route.empty() ? order.Site : order.Route.front(), NeuralOrderPriority::Operation);
 	};
 	auto const islandGoalKindName = [&]() -> const char*
 	{
