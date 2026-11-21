@@ -458,13 +458,18 @@ namespace
 		sighting.OwnerIndex = pTechno->Owner ? pTechno->Owner->ArrayIndex : -1;
 		sighting.Type = pType;
 
-		// Attack route memory: the side this enemy unit reached our base from.
-		if (nearOurBase && !sighting.NearOurBase && sighting.Category != EnemyForceCategory::Air)
+		// Attack route memory: the side this enemy unit reached our base from, aircraft apart.
+		if (nearOurBase && !sighting.NearOurBase)
 		{
 			const int sector = AttackSectorOf(GetHouseHomeCell(pHouse), coords);
 
 			if (sector >= 0)
-				macro.AttackSectorWeight[sector] += sighting.Value;
+			{
+				if (sighting.Category == EnemyForceCategory::Air)
+					macro.AirAttackSectorWeight[sector] += sighting.Value;
+				else
+					macro.AttackSectorWeight[sector] += sighting.Value;
+			}
 		}
 
 		if (sighting.Category != EnemyForceCategory::Air && sighting.Category != EnemyForceCategory::Naval)
@@ -492,6 +497,9 @@ namespace
 			macro.AttackSectorDecayFrame = Unsorted::CurrentFrame;
 
 			for (auto& weight : macro.AttackSectorWeight)
+				weight = weight * 9 / 10;
+
+			for (auto& weight : macro.AirAttackSectorWeight)
 				weight = weight * 9 / 10;
 		}
 
@@ -933,6 +941,39 @@ namespace
 			return 0;
 
 		return GetMacroState(pHouse).AirThreatValue / 8;
+	}
+
+	// Guns that shoot up a key asset wants within CoverageDefenseCells against this enemy air value.
+	int AirCoverGunsPerAsset(int enemyAirValue)
+	{
+		return std::clamp(1 + enemyAirValue / AirCoverValuePerGun, 1, AirCoverMostPerAsset);
+	}
+
+	// Units of this anti-air type it takes to cover the remembered enemy air threat our anti-air
+	// (units, guns and aircraft that shoot up, OwnAACapacity) leaves uncovered; 0 without one.
+	int AntiAirUnitsMissing(HouseClass* pHouse, const TechnoTypeClass* pType)
+	{
+		auto const& macro = GetMacroState(pHouse);
+		const int uncovered = macro.AirThreatValue - macro.OwnAACapacity;
+		const int worth = GetCombatValueOfType(pType, true);
+
+		return uncovered > 0 && worth > 0 ? (uncovered + worth - 1) / worth : 0;
+	}
+
+	// The long ramp of an anti-air slot of the Expert priors on top of its short one (AirDeficitSlot*).
+	int AirDeficitSlotLongRamp(int airDeficit)
+	{
+		return std::clamp(airDeficit / AirDeficitSlotDivisor, 0, AirDeficitSlotLongMost);
+	}
+
+	// A building an air raid goes for: yards, factories, refineries, superweapons, ToProtect and
+	// captured tech or cash buildings.
+	bool IsAirCoverAssetType(const BuildingTypeClass* pType)
+	{
+		return pType && !pType->IsBaseDefense && !pType->InvisibleInGame
+			&& (pType->ConstructionYard || pType->Factory != AbstractType::None || pType->Refinery || pType->SuperWeapon != -1
+				|| pType->ToProtect || pType->ProduceCashAmount > 0 || pType->ProduceCashStartup > 0
+				|| (pType->Capturable && pType->NeedsEngineer));
 	}
 
 	// Value of the aircraft of each enemy this house has seen within EnemySightingMemoryFrames.

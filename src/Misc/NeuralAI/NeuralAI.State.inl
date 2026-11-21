@@ -1511,6 +1511,8 @@ namespace
 		// our base, by direction from home (8 sectors, see AttackSectorOf), decayed x0.9 every
 		// 2700 frames. Defense placement and pickets favor the sides we are really hit from.
 		std::array<int, 8> AttackSectorWeight {};
+		// The same for enemy aircraft seen arriving near our base: where the guns that shoot up go.
+		std::array<int, 8> AirAttackSectorWeight {};
 		int AttackSectorDecayFrame { 0 };
 
 		// Match style (DrawMatchStyle / ApplyMatchStyle): per-match offsets of the plan and macro
@@ -2063,6 +2065,7 @@ namespace
 			this->AllyDefenseUntilFrame = -1;
 			this->SurvivalNextSellFrame = 0;
 			this->AttackSectorWeight.fill(0);
+			this->AirAttackSectorWeight.fill(0);
 			this->AttackSectorDecayFrame = 0;
 			this->StyleOffset.fill(0);
 			this->Opening = 0;
@@ -2889,6 +2892,44 @@ namespace
 	constexpr int DefenseBaseValue[3] = { 70, 45, 25 };
 	constexpr int AntiAirBaseValue[3] = { 40, 25, 15 };
 	constexpr int DefenseMaxValue[3] = { 220, 150, 90 };
+	// Anti-air answer to an enemy air force (user, 2026-11-21, as the Advanced AI): the anti-air level
+	// of the base stops at DefenseMaxValue and the enemy air value seen comes on top of it, with no cap
+	// on the number of guns. While the guns are short of that value one more takes no penalty for
+	// those standing and gains AirDefenseMissingGunBonus per gun still missing, up to
+	// AirDefenseMissingGunMost.
+	constexpr int AirDefenseMissingGunBonus = 300;
+	constexpr int AirDefenseMissingGunMost = 2400;
+	// Each key asset (yards, factories, refineries, superweapons, ToProtect and captured buildings)
+	// wants one gun that shoots up within CoverageDefenseCells while the enemy has aircraft, one more
+	// per AirCoverValuePerGun of enemy air value, up to AirCoverMostPerAsset.
+	constexpr int AirCoverValuePerGun = 150;
+	constexpr int AirCoverMostPerAsset = 3;
+	// Anti-air units in proportion to the air threat our anti-air (units, guns, aircraft) leaves
+	// uncovered: that value over the worth of the unit, at most AntiAirUnitsMostPercent of the front
+	// line and AntiAirUnitsFloor at least. Each one missing adds AntiAirUnitMissingBonus to the unit,
+	// up to AntiAirUnitMissingMost. The anti-air slots of the Expert priors keep their short ramp and
+	// add a long one, the uncovered value over AirDeficitSlotDivisor up to AirDeficitSlotLongMost,
+	// so they keep growing with a big air force.
+	constexpr int AntiAirUnitsMostPercent = 50;
+	constexpr int AntiAirUnitsFloor = 4;
+	constexpr int AntiAirUnitMissingBonus = 250;
+	constexpr int AntiAirUnitMissingMost = 1500;
+	constexpr int AirDeficitSlotDivisor = 4;
+	constexpr int AirDeficitSlotLongMost = 1000;
+	// Defense sectors (user, 2026-11-21: place the defenses by where the enemy is near and where it
+	// attacked, as the Advanced AI did): a defense with no attack or key asset to answer goes to the
+	// sector of home (AttackSectorOf) with the most threat per defense of its kind standing there
+	// within DefenseSectorTowerCells of home. The threat is the remembered attacks
+	// (AttackSectorWeight, AirAttackSectorWeight for guns that shoot up) plus, per enemy,
+	// DefenseSectorProximityValue from its nearest known building at DefenseSectorNearCells or
+	// closer, falling with the distance past it; for guns that shoot up its nearest known air base,
+	// or its nearest building once its aircraft were seen.
+	constexpr int DefenseSectorProximityValue = 400;
+	constexpr int DefenseSectorNearCells = 30;
+	constexpr int DefenseSectorTowerCells = 24;
+	// A gun that shoots up loses this per cell from the point of its sector (ground towers keep the
+	// pull toward the enemy they had).
+	constexpr int DefenseSectorAirPullPerCell = 30;
 	constexpr int DefenseValuePerRefinery = 10;
 	constexpr int DefenseValuePerStructure = 5;
 	constexpr int DefenseValueExpansionPending = 25;

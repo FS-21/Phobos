@@ -1000,6 +1000,108 @@ namespace
 		return (sideClosed(x0 - lane, y0, x0 - 1, y1) && sideClosed(x1 + 1, y0, x1 + lane, y1))
 			|| (sideClosed(x0, y0 - lane, x1, y0 - 1) && sideClosed(x0, y1 + 1, x1, y1 + lane));
 	}
+
+	// The sector of home a defense with nothing else to answer goes to (DefenseSector*): the most
+	// threat per defense of its kind already standing there; -1 with no threat known.
+	int PickDefenseSector(HouseClass* pHouse, bool antiAir)
+	{
+		const CellStruct home = GetHouseHomeCell(pHouse);
+
+		if (home == CellStruct::Empty)
+			return -1;
+
+		auto const& macro = GetMacroState(pHouse);
+		std::array<int, 8> weights = antiAir ? macro.AirAttackSectorWeight : macro.AttackSectorWeight;
+		const std::array<int, 8> airValues = antiAir ? EnemyAirValueByOwner(pHouse) : std::array<int, 8> {};
+		std::array<int, 32> nearestDist {};
+		std::array<CellStruct, 32> nearestCell {};
+		std::array<bool, 32> nearestIsAirBase {};
+		nearestDist.fill(-1);
+
+		for (auto const& info : GetKnownEnemyBuildingCache(pHouse).Entries)
+		{
+			const int owner = info.Building->Owner->ArrayIndex;
+
+			if (owner < 0 || owner >= 32)
+				continue;
+
+			const bool isAirBase = info.Building->Type->Factory == AbstractType::AircraftType || info.Building->Type->Helipad;
+
+			// Guns that shoot up answer an enemy with air bases, or one whose aircraft were seen.
+			if (antiAir && !isAirBase && (owner >= 8 || airValues[static_cast<size_t>(owner)] <= 0))
+				continue;
+
+			const int dist = static_cast<int>(home.DistanceFrom(info.Coords));
+			const size_t i = static_cast<size_t>(owner);
+
+			// An air base comes before any other building of the same enemy.
+			if (nearestDist[i] < 0 || (antiAir && isAirBase && !nearestIsAirBase[i])
+				|| ((!antiAir || isAirBase == nearestIsAirBase[i]) && dist < nearestDist[i]))
+			{
+				nearestDist[i] = dist;
+				nearestCell[i] = info.Coords;
+				nearestIsAirBase[i] = isAirBase;
+			}
+		}
+
+		for (size_t i = 0; i < nearestDist.size(); ++i)
+		{
+			if (nearestDist[i] < 0)
+				continue;
+
+			const int sector = AttackSectorOf(home, nearestCell[i]);
+
+			if (sector >= 0)
+				weights[static_cast<size_t>(sector)] += DefenseSectorProximityValue * DefenseSectorNearCells / std::max(DefenseSectorNearCells, nearestDist[i]);
+		}
+
+		std::array<int, 8> defenses {};
+
+		for (auto const pOwnBld : pHouse->Buildings)
+		{
+			if (!pOwnBld || pOwnBld->InLimbo || !pOwnBld->IsAlive || !pOwnBld->Type || !pOwnBld->Type->IsBaseDefense
+				|| IsTunnelNetworkBuilding(pOwnBld->Type))
+			{
+				continue;
+			}
+
+			bool antiInf = false;
+			bool antiArmor = false;
+			bool shootsUp = false;
+			bool pureAA = false;
+			bool unarmedBunker = false;
+			GetDefenseCapabilities(pOwnBld->Type, antiInf, antiArmor, shootsUp, pureAA, unarmedBunker);
+
+			if (antiAir ? !shootsUp : (pureAA || unarmedBunker))
+				continue;
+
+			const CellStruct dc = pOwnBld->GetMapCoords();
+
+			if (home.DistanceFrom(dc) > DefenseSectorTowerCells)
+				continue;
+
+			const int sector = AttackSectorOf(home, dc);
+
+			if (sector >= 0)
+				defenses[static_cast<size_t>(sector)]++;
+		}
+
+		int best = -1;
+		int bestNeed = 0;
+
+		for (int s = 0; s < 8; ++s)
+		{
+			const int need = weights[static_cast<size_t>(s)] * 10 / (defenses[static_cast<size_t>(s)] + 1);
+
+			if (weights[static_cast<size_t>(s)] > 0 && need > bestNeed)
+			{
+				bestNeed = need;
+				best = s;
+			}
+		}
+
+		return best;
+	}
 }
 
 bool NeuralAI::IsCellClearedOfExitCorridors(HouseClass* pHouse, BuildingTypeClass* pType, CellStruct candidateCell)
@@ -2191,6 +2293,8 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 	// Undefended Key Assets / Vulnerable Power Plant Clusters (3+ plants grouped)
 	CellStruct directionalAttackedBld = CellStruct::Empty;
 	CellStruct directionalAttacker = CellStruct::Empty;
+	// What set the attack vector (TEMP placement diagnostic).
+	const char* directionalSource = "none";
 	CellStruct undefendedKeyAssetCell = CellStruct::Empty;
 	int totalOwnedDefensesCount = 0;
 	std::vector<CellStruct> ownMatchingDefCells;
@@ -2220,6 +2324,7 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 		{
 			directionalAttackedBld = macroState.FrontlineThreatBuildingCoords;
 			directionalAttacker = macroState.FrontlineThreatCoords;
+			directionalSource = "frontline";
 		}
 		else if (!macroState.AttackedBuildingsLIFO.empty())
 		{
@@ -2260,6 +2365,7 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 				directionalAttackedBld = macroState.AttackedBuildingsLIFO[chosenIdx].BuildingCoords;
 
 				directionalAttacker = macroState.AttackedBuildingsLIFO[chosenIdx].AttackerCoords;
+				directionalSource = "attacked";
 			}
 		}
 
@@ -2274,6 +2380,7 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 			{
 				directionalAttackedBld = needAsset;
 				directionalAttacker = needThreat;
+				directionalSource = "expert7";
 				Debug::Log("[NeuralAI] House %d Expert 7: %s guards (%d,%d) against (%d,%d)\n", pHouse->ArrayIndex,
 					pBuildingType->ID, needAsset.X, needAsset.Y, needThreat.X, needThreat.Y);
 			}
@@ -2319,9 +2426,11 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 						// & Expansion Refineries!
 			}
 			else if (pOT->ConstructionYard || pOT->Factory == AbstractType::UnitType || pOT->SuperWeapon != -1
-				|| pOT->Refinery || std::find(offensiveStones.begin(), offensiveStones.end(), pOwnBld->UniqueID) != offensiveStones.end())
+				|| pOT->Refinery || std::find(offensiveStones.begin(), offensiveStones.end(), pOwnBld->UniqueID) != offensiveStones.end()
+				|| (isPureAA && IsAirCoverAssetType(pOT)))
 			{
-				// A stone of the offensive crawl is a key asset too (user): the front it holds.
+				// A stone of the offensive crawl is a key asset too (user): the front it holds. A gun
+				// that shoots up covers every building a raid goes for (IsAirCoverAssetType).
 				priorityAssetCells.push_back(bc);
 			}
 		}
@@ -2345,8 +2454,11 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 		// defense (or has < 2 ground defenses when we already have >= 3 total defenses)
 		// An asset with no defense at all comes before a second one next to an asset already
 		// covered: production asks for cover while any asset has none (a house stood 54 ground
-		// towers as placement kept doubling the first assets, match #10523).
-		const int minDefsPerKeyAsset = (!isPureAA && ownMatchingDefCells.size() >= 3) ? 2 : 1;
+		// towers as placement kept doubling the first assets, match #10523). A gun that shoots up
+		// counts AirCoverGunsPerAsset per asset, as production asks for them.
+		const int minDefsPerKeyAsset = isPureAA
+			? AirCoverGunsPerAsset(CalculateEnemyAircraftValue(pHouse))
+			: (ownMatchingDefCells.size() >= 3 ? 2 : 1);
 
 		for (int wantedDefs = 1; wantedDefs <= minDefsPerKeyAsset && undefendedKeyAssetCell == CellStruct::Empty; ++wantedDefs)
 		{
@@ -2441,6 +2553,7 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 						bestChokeScore = sc;
 						directionalAttackedBld = bc;
 						directionalAttacker = closestThreat;
+						directionalSource = "proximity";
 					}
 				}
 			}
@@ -2637,6 +2750,23 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 
 	// Route heat spot this ground tower is anchored to cover (Empty: none).
 	CellStruct routeDefenseSpot = CellStruct::Empty;
+	// The point of the defense sector (PickDefenseSector) a defense with nothing else to answer faces.
+	CellStruct defenseSectorCell = CellStruct::Empty;
+	// The side enemy aircraft come from, for a gun that shoots up next to a key asset too.
+	CellStruct airSectorCell = CellStruct::Empty;
+
+	if (isCombatDefense && isPureAA)
+	{
+		const CellStruct airHome = GetHouseHomeCell(pHouse);
+		const int airSector = airHome != CellStruct::Empty ? PickDefenseSector(pHouse, true) : -1;
+
+		if (airSector >= 0)
+		{
+			const int reach = (AttackSectorDX[airSector] != 0 && AttackSectorDY[airSector] != 0) ? 10 : 14;
+			airSectorCell = CellStruct { static_cast<short>(airHome.X + AttackSectorDX[airSector] * reach),
+				static_cast<short>(airHome.Y + AttackSectorDY[airSector] * reach) };
+		}
+	}
 
 	// Island Hold (UpdateStrategicPlans): a defense the island yard still lacks goes next to it, on
 	// a cell the plan counts (its radius, its landmass), whatever else asks for a tower. An attack
@@ -2657,7 +2787,14 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 	{
 		auto const& planMacro = GetMacroState(pHouse);
 
-		const int mainAttackSector = isCombatDefense ? GetMainAttackSector(pHouse) : -1;
+		// With no attack and no key asset to answer, the defense sector: the side with the most
+		// threat (enemy nearby, attacks remembered) per defense of this kind (DefenseSector*); with a
+		// key asset to cover, the side we are mostly attacked from, as before.
+		const bool picksDefenseSector = isCombatDefense && directionalAttackedBld == CellStruct::Empty
+			&& undefendedKeyAssetCell == CellStruct::Empty;
+		const int anchorSector = picksDefenseSector
+			? PickDefenseSector(pHouse, isPureAA)
+			: (isCombatDefense ? GetMainAttackSector(pHouse) : -1);
 
 		// Route heat: the hottest approach our towers do not cover yet (chokepoints first) is a
 		// better target than the side we were attacked from. Only spots this tower can reach from
@@ -2689,7 +2826,7 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 			center = captureSiteCell;
 			targetExpansionZone = -1;
 		}
-		else if ((pRouteSpot || mainAttackSector >= 0) && directionalAttackedBld == CellStruct::Empty
+		else if ((pRouteSpot || anchorSector >= 0) && directionalAttackedBld == CellStruct::Empty
 			&& center.DistanceFrom(GetHouseHomeCell(pHouse)) <= 24.0) // Forward turret creep keeps its own anchor.
 		{
 			// Attack route memory: fortify the route the enemy really takes (else the side we have
@@ -2704,9 +2841,12 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 			}
 			else
 			{
-				const int reach = (AttackSectorDX[mainAttackSector] != 0 && AttackSectorDY[mainAttackSector] != 0) ? 10 : 14;
-				routePoint = CellStruct { static_cast<short>(home.X + AttackSectorDX[mainAttackSector] * reach),
-					static_cast<short>(home.Y + AttackSectorDY[mainAttackSector] * reach) };
+				const int reach = (AttackSectorDX[anchorSector] != 0 && AttackSectorDY[anchorSector] != 0) ? 10 : 14;
+				routePoint = CellStruct { static_cast<short>(home.X + AttackSectorDX[anchorSector] * reach),
+					static_cast<short>(home.Y + AttackSectorDY[anchorSector] * reach) };
+
+				if (picksDefenseSector)
+					defenseSectorCell = routePoint;
 			}
 
 			const int homeZoneForRoute = MapClass::Instance.GetMovementZoneType(home, MovementZone::Normal, false);
@@ -3471,6 +3611,36 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 				pHouse->ArrayIndex, pBuildingType->ID, chosen.X, chosen.Y);
 		}
 
+		// TEMP diagnostic: what chose the cell of a defense and where it stands against home, the
+		// nearest known enemy building and the newest attack remembered.
+		if (isCombatDefense && chosen != CellStruct::Empty)
+		{
+			const char* mode = directionalAttackedBld != CellStruct::Empty ? directionalSource
+				: undefendedKeyAssetCell != CellStruct::Empty ? "key asset"
+				: routeDefenseSpot != CellStruct::Empty ? "route"
+				: defenseSectorCell != CellStruct::Empty ? "sector"
+				: holdingIsland ? "island"
+				: isPureAA ? "ring" : "enemy side";
+			const CellStruct home = GetHouseHomeCell(pHouse);
+			int nearestEnemyCells = -1;
+
+			for (auto const& info : GetKnownEnemyBuildingCache(pHouse).Entries)
+			{
+				const int d = static_cast<int>(chosen.DistanceFrom(info.Coords));
+
+				if (nearestEnemyCells < 0 || d < nearestEnemyCells)
+					nearestEnemyCells = d;
+			}
+
+			auto const& attacks = GetMacroState(pHouse).AttackedBuildingsLIFO;
+			const int lastAttackCells = attacks.empty() ? -1 : static_cast<int>(chosen.DistanceFrom(attacks.back().AttackerCoords));
+
+			Debug::Log("[NeuralAI] House %d defense placement DIAG: %s at (%d,%d) by %s, sector %d, %d cells from home, nearest known enemy building %d, newest attack %d, frame %d.\n",
+				pHouse->ArrayIndex, pBuildingType->ID, chosen.X, chosen.Y, mode,
+				home != CellStruct::Empty ? AttackSectorOf(home, chosen) : -1, home != CellStruct::Empty ? static_cast<int>(chosen.DistanceFrom(home)) : -1,
+				nearestEnemyCells, lastAttackCells, Unsorted::CurrentFrame);
+		}
+
 		return chosen;
 	};
 	std::vector<int> strategicWaterZones;
@@ -4193,19 +4363,25 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 						if (distToAsset >= 4 && distToAsset <= 9)
 							spatialScore += 280;
 
-						if (enemyTargetCell != CellStruct::Empty)
+						// A gun that shoots up leans toward the side the enemy aircraft come from.
+						const CellStruct leanCell = isPureAA && airSectorCell != CellStruct::Empty ? airSectorCell : enemyTargetCell;
+
+						if (leanCell != CellStruct::Empty)
 						{
 							const int distToEnemy
-								= std::abs(candidate.X - enemyTargetCell.X) + std::abs(candidate.Y - enemyTargetCell.Y);
+								= std::abs(candidate.X - leanCell.X) + std::abs(candidate.Y - leanCell.Y);
 
 							spatialScore -= distToEnemy * 16;
 						}
 					}
 					else if (isGroundDefense && enemyTargetCell != CellStruct::Empty && routeDefenseSpot == CellStruct::Empty)
 					{
-						// Priority 3: Frontline perimeter facing the enemy
+						// Priority 3: Frontline perimeter facing the enemy, or the defense sector
+						// (PickDefenseSector) when one was picked: every enemy and every side we were
+						// hit from gets its share of towers, not only the main enemy's side.
+						const CellStruct faceCell = defenseSectorCell != CellStruct::Empty ? defenseSectorCell : enemyTargetCell;
 						const int distToEnemy
-							= std::abs(candidate.X - enemyTargetCell.X) + std::abs(candidate.Y - enemyTargetCell.Y);
+							= std::abs(candidate.X - faceCell.X) + std::abs(candidate.Y - faceCell.Y);
 
 						const int enemyPull = std::clamp(38 + (turretCreepBias / 10), 20, 80);
 
@@ -4217,9 +4393,13 @@ CellStruct NeuralAI::FindSpatialTetrisBuildCell(HouseClass* pHouse, BuildingType
 					else if (isPureAA)
 					{
 						// Spread AA defenses around mid-ring (radius 5..11) to cover both
-						// ConYard/Tech/Power clusters and frontline
+						// ConYard/Tech/Power clusters and frontline, toward the side the enemy
+						// aircraft come from (PickDefenseSector) when one is known.
 						if (radius >= 5 && radius <= 11)
 							spatialScore += 180;
+
+						if (defenseSectorCell != CellStruct::Empty)
+							spatialScore -= (std::abs(candidate.X - defenseSectorCell.X) + std::abs(candidate.Y - defenseSectorCell.Y)) * DefenseSectorAirPullPerCell;
 					}
 
 					// Route heat: cover the approaches the enemy really takes, above all the chosen spot.
