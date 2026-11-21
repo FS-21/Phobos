@@ -1323,6 +1323,11 @@ namespace
 		int DeployerLogLines { 0 };
 		CellStruct LastReversiblePackCell { CellStruct::Empty };
 		int LastReversiblePackFrame { -100000 };
+		// War factories of ours with a finished production waiting in their unload mission (building ->
+		// since when, and the step taken: 0 none, 1 the vehicle sent past the exit), and the TEMP lines of
+		// that watchdog written this match (FactoryExit*).
+		std::unordered_map<DWORD, std::pair<int, int>> FactoryExitStuck;
+		int FactoryExitLines { 0 };
 		// Packed MCVs the idle watchdog follows (unit -> NeuralMcvIdle).
 		std::unordered_map<DWORD, NeuralMcvIdle> McvIdle;
 		// Watched MCVs unfolding by another rule's order (unit -> NeuralMcvIdleUnfold, TEMP diagnostic).
@@ -2050,6 +2055,8 @@ namespace
 			this->DeployerLogLines = 0;
 			this->LastReversiblePackCell = CellStruct::Empty;
 			this->LastReversiblePackFrame = -100000;
+			this->FactoryExitStuck.clear();
+			this->FactoryExitLines = 0;
 			this->McvIdle.clear();
 			this->McvIdleUnfolds.clear();
 			this->McvFallbacks.clear();
@@ -3342,6 +3349,16 @@ namespace
 	constexpr double ReversibleFleeRefugeCells = 16.0;
 	constexpr int ReversibleRepackFrames = 3600;
 	constexpr double ReversibleRepackCells = 8.0;
+	// A war factory whose finished production stays inside (user approved, 2026-11-21, «las 4 letras x
+	// favor»; match #13444: a GDIMCV for 55800 frames, the house fell from 10 vehicles to 1): every
+	// FactoryDoorClearFrames an idle vehicle of ours on its door row (IsFactoryDoorCell) steps to a free
+	// cell FactoryDoorStepCells past the exit or more. After FactoryExitStuckFrames still unloading, the
+	// vehicle it unloads is sent there too; after twice that the factory drops the link and goes back on
+	// guard, so the finished one comes out (TEMP lines: FactoryExitLogLines a match).
+	constexpr int FactoryDoorClearFrames = 90;
+	constexpr int FactoryDoorStepCells = 3;
+	constexpr int FactoryExitStuckFrames = 900;
+	constexpr int FactoryExitLogLines = 60;
 	// Idle MCV watchdog (user, match #11562 Fort Urban Square: two expansion MCVs of houses with a
 	// yard stood packed for thousands of frames, 227 path failures of their type, no fallback ever
 	// reached): an MCV that stays within McvIdleDriftCells of one spot for McvIdleFrames without
@@ -4855,6 +4872,22 @@ namespace
 
 	bool IsPlanMember(HouseClass* pHouse, DWORD uid);
 
+	// A vehicle a war factory of ours is still unloading (user approved, 2026-11-21, «las 4 letras x
+	// favor»; match #13444 and matches #13624..#13641: the factory waited for a vehicle two cells away that
+	// the tank guard, a plan or a scout had given another order, and nothing else it built came out): in
+	// radio contact with a weapons factory of its owner in its unload mission. The engine and Phobos
+	// (BuildingClass_Mission_Unload_CheckStuck) take it out; no order of ours touches it until it has gone.
+	bool IsLeavingItsFactory(const FootClass* pFoot)
+	{
+		if (!pFoot || pFoot->WhatAmI() != AbstractType::Unit || !pFoot->HasAnyLink())
+			return false;
+
+		auto const pFactory = abstract_cast<BuildingClass*>(pFoot->GetNthLink(0));
+
+		return pFactory && pFactory->Type && pFactory->Type->WeaponsFactory && pFactory->Owner == pFoot->Owner
+			&& pFactory->GetCurrentMission() == Mission::Unload;
+	}
+
 	// Whether the code at file:line may give pFoot an order toward goal now. An order to board (boarding:
 	// OrderFootToEnter) passes a lease of its own priority too: it mostly ends the way its own code sent
 	// the unit along (a pickup beach, then the transport there), and held to the line it waited out the
@@ -4863,6 +4896,23 @@ namespace
 	{
 		if (!pFoot || !pFoot->Owner || pFoot->Owner->ArrayIndex < 0 || pFoot->Owner->ArrayIndex >= 32)
 			return true;
+
+		// A vehicle its war factory still unloads takes no order of ours, whatever its priority.
+		if (IsLeavingItsFactory(pFoot))
+		{
+			CountDecision(NeuralDecision::OrderLeaseRefused, pFoot->Owner->ArrayIndex);
+
+			if (NeuralAI::HeadlessMode)
+			{
+				auto& refusals = LeaseRefusals[pFoot->Owner->ArrayIndex];
+				char key[128];
+				std::snprintf(key, sizeof(key), "leaving its factory > %s:%d", OrderCallerBaseName(file) ? OrderCallerBaseName(file) : "?", line);
+				refusals.Pairs[key]++;
+				refusals.Total++;
+			}
+
+			return false;
+		}
 
 		// A unit of a strategic plan or of its follow-up attack takes its orders from the plan alone until the
 		// plan lets it go (missions last until they end, PlanCombat*); an operation or survival order still

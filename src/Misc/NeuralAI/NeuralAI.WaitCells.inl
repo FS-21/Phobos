@@ -15,7 +15,8 @@ namespace
 	// WaitNotBeach; WaitNotRock; WaitZone: the asker's movement zone; WaitLevelNear: within LevelSpan
 	// levels of RefLevel; WaitClearIgnoringUnits, WaitClearIgnoringInfantry, WaitClearOfUnits: the
 	// three ways the finders ask IsClearToMove; WaitNoObject: nothing stands on it; WaitOffDeck: no
-	// bridge or tube cell; WaitOffMouth: no passage mouth (IsPassageMouthCell); WaitOffNarrow: no
+	// bridge or tube cell; WaitOffMouth: no passage mouth (IsPassageMouthCell) nor war factory door row
+	// (IsFactoryDoorCell); WaitOffNarrow: no
 	// narrow passage (IsNarrowPassage, the dearest check, made last).
 	enum NeuralWaitRule : uint32_t
 	{
@@ -98,7 +99,8 @@ namespace
 		if ((rules & WaitOffDeck) && IsBridgeOrTubeCell(pCell))
 			return false;
 
-		if ((rules & WaitOffMouth) && IsPassageMouthCell(cell))
+		// Off the mouths of bridges and tunnels, and off the door row of a war factory (IsFactoryDoorCell).
+		if ((rules & WaitOffMouth) && (IsPassageMouthCell(cell) || IsFactoryDoorCell(cell)))
 			return false;
 
 		if ((rules & WaitZone) && MapClass::Instance.GetMovementZoneType(cell,
