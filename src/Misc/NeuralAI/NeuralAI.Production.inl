@@ -5742,16 +5742,31 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			}
 		}
 
-		if (ownedForLimit >= targetFleet || idleEmptyForLimit > 0)
-			return -1500;
+		// An idle empty transport keeps a new one from being built while the fleet carries what waits in
+		// its planned trips; with far more waiting than that (FerryFleetFarShortTimes) and the money for
+		// it, the fleet grows anyway: the idle one may be parked across the water, and three hovercraft
+		// left 100 robots waiting for each of them while the house sat on 45000 credits (match #13844,
+		// user 2026-11-21).
+		const bool fleetFarShort = fittingDemandSize > std::max(1, ownedCapForLimit * OpTripsPlanned) * FerryFleetFarShortTimes
+			&& money >= pCandidate->GetActualCost(pHouse) * 2;
+		int ferryScore = -900;
 
-		if (ownedForLimit == 0)
-			return std::max(static_cast<int>(scores[28]), 0) + (fittingDemandSize > 0 ? 1100 : 600) - crossingPenalty;
+		if (ownedForLimit >= targetFleet || (idleEmptyForLimit > 0 && !fleetFarShort))
+			ferryScore = -1500;
+		else if (ownedForLimit == 0)
+			ferryScore = std::max(static_cast<int>(scores[28]), 0) + (fittingDemandSize > 0 ? 1100 : 600) - crossingPenalty;
+		else if (fittingDemandSize > ownedCapForLimit * OpTripsPlanned)
+			ferryScore = std::max(static_cast<int>(scores[28]), 0) + 900 - crossingPenalty;
 
-		if (fittingDemandSize > ownedCapForLimit * OpTripsPlanned)
-			return std::max(static_cast<int>(scores[28]), 0) + 900 - crossingPenalty;
+		if (fittingDemandSize > 0 && IsAITickWindow(900, 0))
+		{
+			Debug::Log("[NeuralAI] House %d ferry fleet DIAG: %s waiting %d (unfit %d), owned %d of %d wanted, capacity %d, idle empty %d, "
+				"far short %d, crossing penalty %d, score %d, money %d, frame %d.\n", pHouse->ArrayIndex, pCandidate->ID, fittingDemandSize,
+				unfitDemandSize, ownedForLimit, targetFleet, ownedCapForLimit, idleEmptyForLimit, fleetFarShort ? 1 : 0, crossingPenalty,
+				ferryScore, money, Unsorted::CurrentFrame);
+		}
 
-		return -900;
+		return ferryScore;
 	};
 
 	// Exceptions to the economy unit cap for real harvesters, computed once per tick: a refinery

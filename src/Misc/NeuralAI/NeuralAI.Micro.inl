@@ -8611,6 +8611,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		}
 	}
 
+	// Soldiers that fight and also carry Sensors (a mod may give them to whole infantry lines) on the
+	// detector duties of this tick (DetectorPatrolCombatMost).
+	int combatSensorsOnDuty = 0;
+
 	for (auto const pInf : InfantryClass::Array)
 	{
 		// Slaves work for their slave master, which overrides any order given to them.
@@ -9648,7 +9652,23 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// Slot 61 (Guard Dogs & Counter-Spy Detectors - Multi-Infiltrator Interception):
 		// Distribute Dogs/Detectors across all detected enemy Spies, Engineers, Thieves,
 		// Hijackers, or Commandos approaching our base!
-		if ((pInf->Type->Doggie || pInf->Type->DetectDisguise || pInf->Type->Sensors) && isIdle)
+		// A fighting soldier with Sensors takes the detector duties only up to DetectorPatrolCombatMost
+		// a tick: the rest go with the waves. With three infantry lines carrying Sensors a whole army
+		// patrolled around the home buildings and its patrol leases turned down the wave orders (match
+		// #13844: 5441 wave orders refused, user 2026-11-21).
+		bool detectorDuty = pInf->Type->Doggie || pInf->Type->DetectDisguise;
+
+		if (!detectorDuty && pInf->Type->Sensors && isIdle)
+		{
+			auto const pDutyWeapon = pInf->Type->GetWeapon(0) ? pInf->Type->GetWeapon(0)->WeaponType : nullptr;
+			const bool fights = pDutyWeapon && pDutyWeapon->Damage > 0;
+			detectorDuty = !fights || combatSensorsOnDuty < DetectorPatrolCombatMost;
+
+			if (detectorDuty && fights)
+				++combatSensorsOnDuty;
+		}
+
+		if (detectorDuty && isIdle)
 		{
 			if (detectedInfiltratorCount > 0)
 			{
@@ -12905,6 +12925,13 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				continue;
 			}
 
+			// Held by another code for its own goal (order leases): not part of this wave and not counted
+			// in it. A wave of 40 refused soldiers was logged as launched every tick (match #13844).
+			constexpr int waveInfOrderLine = __LINE__;
+
+			if (!MayOrderUnit(pI, pInfWaveGoal->MapCoords, __FILE__, waveInfOrderLine))
+				continue;
+
 			if (!infKeepsEarlierGoal && (pInfWaveGoal == pWaveTargetCell || pInfWaveGoal == pSecondaryWaveTargetCell))
 				waveMacro.WaveGoals[pI->UniqueID] = { pInfWaveGoal->MapCoords, infGoalZone, Unsorted::CurrentFrame };
 
@@ -12920,7 +12947,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 			else
 			{
-				OrderFootToAttackMove(pI, pInfWaveGoal);
+				OrderFootToAttackMove(pI, pInfWaveGoal, __FILE__, waveInfOrderLine);
 			}
 
 			NoteExpertCommand(pHouse, pI, CreditSourceWave);
