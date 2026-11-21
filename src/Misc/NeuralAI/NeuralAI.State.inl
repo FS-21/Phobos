@@ -1611,15 +1611,29 @@ namespace
 		// The same for enemy aircraft seen arriving near our base: where the guns that shoot up go.
 		std::array<int, 8> AirAttackSectorWeight {};
 		// Passenger fill (PassengerFill*): seated fighting vehicles held at home to fill, by UniqueID
-		// with the frame the hold began, and the ones whose hold is over.
+		// with the frame the hold began, and the ones whose last hold is over, with the frame it ended.
 		std::unordered_map<DWORD, int> PassengerFillHolds {};
-		std::unordered_set<DWORD> PassengerFillDone {};
+		std::unordered_map<DWORD, int> PassengerFillDone {};
 		int PassengerFillFrame { -1 };
 		// Seats the held vehicles still have (the infantry pick reads it).
 		int PassengerSeatsWanted { 0 };
-		// TEMP passenger diagnostic: when it last logged, and the boarding orders given since.
+		// TEMP passenger diagnostic: when it last logged, and the boarding orders given since (of them to
+		// vehicles of a plan, and the holds again at home).
 		int PassengerLogFrame { -1 };
 		int PassengerBoardOrders { 0 };
+		int PassengerPlanBoardOrders { 0 };
+		int PassengerReholds { 0 };
+		// TEMP passenger diagnostic (user, 2026-11-21, P4): each boarding order, by soldier, with its
+		// vehicle and frame, until it ends; how they ended, and the code that gave a diverted soldier its
+		// next order.
+		std::unordered_map<DWORD, std::pair<DWORD, int>> PassengerBoardTrack {};
+		int PassengerBoardAboard { 0 };
+		int PassengerBoardElsewhere { 0 };
+		int PassengerBoardSoldierLost { 0 };
+		int PassengerBoardVehicleLost { 0 };
+		int PassengerBoardTimedOut { 0 };
+		int PassengerBoardDiverted { 0 };
+		std::map<std::string, int> PassengerDivertCallers {};
 		int AttackSectorDecayFrame { 0 };
 
 		// Match style (DrawMatchStyle / ApplyMatchStyle): per-match offsets of the plan and macro
@@ -2196,6 +2210,16 @@ namespace
 			this->PassengerSeatsWanted = 0;
 			this->PassengerLogFrame = -1;
 			this->PassengerBoardOrders = 0;
+			this->PassengerPlanBoardOrders = 0;
+			this->PassengerReholds = 0;
+			this->PassengerBoardTrack.clear();
+			this->PassengerBoardAboard = 0;
+			this->PassengerBoardElsewhere = 0;
+			this->PassengerBoardSoldierLost = 0;
+			this->PassengerBoardVehicleLost = 0;
+			this->PassengerBoardTimedOut = 0;
+			this->PassengerBoardDiverted = 0;
+			this->PassengerDivertCallers.clear();
 			this->AttackSectorDecayFrame = 0;
 			this->StyleOffset.fill(0);
 			this->Opening = 0;
@@ -3184,15 +3208,21 @@ namespace
 	// Passenger fill (user, 2026-11-21: «sin tropas son muy inservibles», P1 and P2): a seated fighting
 	// vehicle (open-topped with seats, a Battle Fortress; or a gunner vehicle, an IFV) built with seats
 	// left within PassengerFillHomeCells of home stays out of the waves for PassengerFillHoldFrames at
-	// most, once per vehicle, while our nearest fit soldiers within PassengerFillReachCells of it on its
-	// ground board it (checked every PassengerFillCheckFrames). A fit soldier has a gun that hits from
-	// PassengerGunMinRange or farther and no special job (engineer, dog, thief, spy). While held
-	// vehicles have seats, a fit soldier gains PassengerSeatInfantryBonus per seat in the infantry
-	// pick, up to PassengerSeatInfantryMost. In a wave that stands (gathering at its staging point),
-	// a vehicle with seats left takes fit soldiers of the wave standing within
-	// PassengerStagingReachCells. TEMP "passenger DIAG" every PassengerLogFrames.
+	// most, while our nearest fit soldiers within PassengerFillReachCells of it on its ground board it
+	// (checked every PassengerFillCheckFrames). Back home standing with seats left, no plan member, it
+	// is held again once PassengerFillReholdFrames have gone since its last hold, when fit soldiers are
+	// within reach (user, 2026-11-21: the Overlords went empty 32% of the time). A fit soldier has a
+	// gun that hits from PassengerGunMinRange or farther and no special job (engineer, dog, thief,
+	// spy). While held vehicles have seats, a fit soldier gains PassengerSeatInfantryBonus per seat in
+	// the infantry pick, up to PassengerSeatInfantryMost. A vehicle of a wave or of a plan that stands
+	// (gathering at its staging point) with seats left takes the fit soldiers of its own wave or plan
+	// standing or walking within PassengerStagingReachCells; a plan counts its soldiers aboard its
+	// vehicles in its strength. TEMP "passenger DIAG" every PassengerLogFrames, with the end of each
+	// boarding order (a soldier not aboard after PassengerBoardTrackFrames timed out).
 	constexpr int PassengerFillHomeCells = 20;
 	constexpr int PassengerFillHoldFrames = 1200;
+	constexpr int PassengerFillReholdFrames = 900;
+	constexpr int PassengerBoardTrackFrames = 900;
 	constexpr int PassengerFillReachCells = 16;
 	constexpr int PassengerFillCheckFrames = 90;
 	constexpr int PassengerGunMinRange = 384;
