@@ -853,6 +853,8 @@ namespace
 
 		auto const& callers = LastOrderCaller[std::clamp(pHouse->ArrayIndex, 0, 31)];
 
+		std::erase_if(macro.PassengerBoardStartCells, [&macro](const auto& entry) { return !macro.PassengerBoardTrack.contains(entry.first); });
+
 		std::erase_if(macro.PassengerBoardTrack, [&](const auto& entry)
 			{
 				auto const itSoldier = soldiers.find(entry.first);
@@ -904,6 +906,31 @@ namespace
 				}
 
 				macro.PassengerDivertCallers[caller]++;
+
+				// Given up with no other order since ours: the soldier and its vehicle as they stand now.
+				const bool givenUp = itCaller == callers.end() || itCaller->second.Frame <= entry.second.second;
+
+				if (givenUp && macro.PassengerGiveUpLogCount < PassengerGiveUpLogMost)
+				{
+					macro.PassengerGiveUpLogCount++;
+					auto const itStart = macro.PassengerBoardStartCells.find(entry.first);
+					const MovementZone soldierZoneType = pInf->Type->MovementZone;
+					const int doorZoneVehicle = MapClass::Instance.GetMovementZoneType(pVehicle->LastMapCoords, soldierZoneType, false);
+					const int doorZoneSoldier = MapClass::Instance.GetMovementZoneType(pInf->LastMapCoords, soldierZoneType, false);
+					const char* destination = !pInf->Destination ? "none"
+						: pInf->Destination == pVehicle ? "vehicle"
+						: pInf->Destination->WhatAmI() == AbstractType::Cell ? "cell" : "other";
+					Debug::Log("[NeuralAI] TEMP boarding given up: house %d soldier %s %u mission %d queued %d destination %s, %d cells from %s %u "
+						"(%d when ordered, %d frames ago); vehicle mission %d moving %d destination %d target %d passengers %d/%d links %d "
+						"linked to soldier %d deactivated %d, door zones %d/%d, frame %d.\n", pHouse->ArrayIndex, pInf->Type->ID, pInf->UniqueID,
+						static_cast<int>(pInf->CurrentMission), static_cast<int>(pInf->QueuedMission), destination,
+						static_cast<int>(pInf->GetMapCoords().DistanceFrom(pVehicle->GetMapCoords())), pVehicle->Type->ID, pVehicle->UniqueID,
+						itStart != macro.PassengerBoardStartCells.end() ? itStart->second : -1, now - entry.second.second,
+						static_cast<int>(pVehicle->CurrentMission), pVehicle->Locomotor->Is_Moving() ? 1 : 0, pVehicle->Destination ? 1 : 0,
+						pVehicle->Target ? 1 : 0, pVehicle->Passengers.NumPassengers, pVehicle->Type->Passengers, pVehicle->HasAnyLink() ? 1 : 0,
+						pVehicle->ContainsLink(pInf) ? 1 : 0, pVehicle->Deactivated ? 1 : 0, doorZoneVehicle, doorZoneSoldier, now);
+				}
+
 				return true;
 			});
 	}
@@ -1039,6 +1066,7 @@ namespace
 				macro.WaveGoals.erase(pInf->UniqueID);
 				macro.PassengerBoardOrders++;
 				macro.PassengerBoardTrack[pInf->UniqueID] = { pVehicle->UniqueID, now };
+				macro.PassengerBoardStartCells[pInf->UniqueID] = static_cast<int>(pInf->GetMapCoords().DistanceFrom(pVehicle->GetMapCoords()));
 
 				if (group >= 0)
 					macro.PassengerPlanBoardOrders++;

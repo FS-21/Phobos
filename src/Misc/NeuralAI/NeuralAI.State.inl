@@ -1631,6 +1631,9 @@ namespace
 		// vehicle and frame, until it ends; how they ended, and the code that gave a diverted soldier its
 		// next order.
 		std::unordered_map<DWORD, std::pair<DWORD, int>> PassengerBoardTrack {};
+		// The soldier's distance to its vehicle when ordered, in cells, and the given-up boardings logged.
+		std::unordered_map<DWORD, int> PassengerBoardStartCells {};
+		int PassengerGiveUpLogCount { 0 };
 		int PassengerBoardAboard { 0 };
 		int PassengerBoardElsewhere { 0 };
 		int PassengerBoardSoldierLost { 0 };
@@ -2217,6 +2220,8 @@ namespace
 			this->PassengerPlanBoardOrders = 0;
 			this->PassengerReholds = 0;
 			this->PassengerBoardTrack.clear();
+			this->PassengerBoardStartCells.clear();
+			this->PassengerGiveUpLogCount = 0;
 			this->PassengerBoardAboard = 0;
 			this->PassengerBoardElsewhere = 0;
 			this->PassengerBoardSoldierLost = 0;
@@ -3237,6 +3242,9 @@ namespace
 	constexpr int PassengerFillHoldFrames = 1200;
 	constexpr int PassengerFillReholdFrames = 900;
 	constexpr int PassengerBoardTrackFrames = 900;
+	// TEMP: the boardings given up with no other order (the soldier left its Enter by itself) logged in
+	// detail, at most this many per house and match.
+	constexpr int PassengerGiveUpLogMost = 12;
 	constexpr int PassengerFillReachCells = 16;
 	constexpr int PassengerFillCheckFrames = 90;
 	constexpr int PassengerGunMinRange = 384;
