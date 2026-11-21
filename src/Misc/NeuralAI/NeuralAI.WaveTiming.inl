@@ -780,4 +780,214 @@ namespace
 		return std::clamp(WaveTimingStates[std::clamp(houseIndex, 0, 31)].AdvantageRatio - 120, -200, 150);
 	}
 
+	// A seated fighting vehicle (PassengerFill*): open-topped with seats, whose passengers fire from it,
+	// or a gunner vehicle, whose weapon comes from its passenger; one we may load ourselves.
+	bool IsSeatedFightingVehicleType(const TechnoTypeClass* pType)
+	{
+		return pType && pType->WhatAmI() == AbstractType::UnitType && !pType->Naval
+			&& ((pType->OpenTopped && pType->Passengers > 0) || pType->Gunner)
+			&& !HasNoManualEnter(pType) && !HasNoManualUnload(pType);
+	}
+
+	// Seats a seated fighting vehicle still has: a gunner vehicle takes one passenger.
+	int SeatedFightingVehicleSeatsLeft(const UnitClass* pUnit)
+	{
+		const int taken = pUnit->Passengers.NumPassengers;
+
+		return pUnit->Type->Gunner ? (taken == 0 ? 1 : 0) : std::max(0, pUnit->Type->Passengers - taken);
+	}
+
+	// A soldier worth a seat (PassengerFill*): a gun that hits from PassengerGunMinRange or farther and
+	// no special job.
+	bool IsFitPassengerSoldierType(InfantryTypeClass* pType)
+	{
+		if (!pType || pType->Engineer || pType->Doggie || pType->Thief || pType->VehicleThief || pType->Ivan || pType->C4
+			|| IsSpyInfantryType(pType))
+		{
+			return false;
+		}
+
+		for (int i = 0; i < 2; ++i)
+		{
+			auto const pWS = pType->GetWeapon(i);
+			auto const pWeapon = pWS ? pWS->WeaponType : nullptr;
+
+			if (pWeapon && pWeapon->Damage > 0 && pWeapon->Range >= PassengerGunMinRange)
+				return true;
+		}
+
+		return false;
+	}
+
+	// Held to fill at home (PassengerFill*): the waves leave it out.
+	bool IsPassengerFillHeld(HouseClass* pHouse, DWORD uid)
+	{
+		return GetMacroState(pHouse).PassengerFillHolds.contains(uid);
+	}
+
+	// Seated fighting vehicles take soldiers before they go (user, 2026-11-21, P1 and P2): a new one at
+	// home is held out of the waves until full or PassengerFillHoldFrames have gone, and our nearest fit
+	// soldiers board it; one in a wave standing at its gathering point takes the fit soldiers of the
+	// wave standing by it. Runs before the tactical micro, so the wave dispatch reads the holds.
+	void UpdatePassengerFill(HouseClass* pHouse)
+	{
+		auto& macro = GetMacroState(pHouse);
+		const int now = Unsorted::CurrentFrame;
+
+		if (macro.PassengerFillFrame >= 0 && now >= macro.PassengerFillFrame && now - macro.PassengerFillFrame < PassengerFillCheckFrames)
+			return;
+
+		macro.PassengerFillFrame = now;
+		const CellStruct home = GetHouseHomeCell(pHouse);
+		int seatsWanted = 0;
+		int vehicles = 0;
+		int full = 0;
+		int partly = 0;
+		int empty = 0;
+		int emptyInWave = 0;
+
+		// Soldiers on their way aboard a vehicle, by vehicle.
+		auto const boardingFor = [pHouse](UnitClass* pVehicle)
+		{
+			int count = 0;
+
+			for (auto const pInf : InfantryClass::Array)
+			{
+				if (pInf && pInf->Owner == pHouse && pInf->IsAlive && !pInf->InLimbo
+					&& (pInf->CurrentMission == Mission::Enter || pInf->QueuedMission == Mission::Enter) && pInf->Destination == pVehicle)
+				{
+					count++;
+				}
+			}
+
+			return count;
+		};
+
+		// The fit soldiers within reach of a vehicle, nearest first; waveOnly: standing soldiers of a wave.
+		auto const soldiersFor = [&](UnitClass* pVehicle, double reachCells, bool waveOnly)
+		{
+			std::vector<std::pair<int, InfantryClass*>> found;
+			const int zone = ObjectZone(pVehicle, MovementZone::Normal);
+
+			for (auto const pInf : InfantryClass::Array)
+			{
+				if (!pInf || pInf->Owner != pHouse || !pInf->IsAlive || pInf->InLimbo || pInf->Transporter || !IsFitPassengerSoldierType(pInf->Type)
+					|| pInf->Target || pInf->HasAnyLink() || pInf->CurrentMission == Mission::Enter || pInf->QueuedMission == Mission::Enter
+					|| IsInTransportOp(pHouse, pInf->UniqueID) || IsPlanMember(pHouse, pInf->UniqueID))
+				{
+					continue;
+				}
+
+				const Mission mission = pInf->CurrentMission;
+				const bool standing = mission == Mission::Guard || mission == Mission::Area_Guard || mission == Mission::Sleep;
+				const bool inWave = macro.WaveGoals.contains(pInf->UniqueID);
+
+				if (waveOnly ? !(inWave && standing) : !(standing || (inWave && (mission == Mission::Move || mission == Mission::AttackMove))))
+					continue;
+
+				const int distance = pInf->DistanceFrom(pVehicle);
+
+				if (distance > static_cast<int>(reachCells * Unsorted::LeptonsPerCell) || ObjectZone(pInf, MovementZone::Normal) != zone)
+					continue;
+
+				if (!CanPassengerFitInTransport(pVehicle, pInf->Type))
+					continue;
+
+				found.push_back({ distance, pInf });
+			}
+
+			std::stable_sort(found.begin(), found.end(), [](const auto& a, const auto& b)
+				{ return a.first < b.first || (a.first == b.first && a.second->UniqueID < b.second->UniqueID); });
+
+			return found;
+		};
+
+		auto const board = [&](UnitClass* pVehicle, int seats, double reachCells, bool waveOnly)
+		{
+			for (auto const& [distance, pInf] : soldiersFor(pVehicle, reachCells, waveOnly))
+			{
+				if (seats <= 0)
+					break;
+
+				macro.WaveGoals.erase(pInf->UniqueID);
+				OrderFootToEnter(pInf, pVehicle);
+				macro.PassengerBoardOrders++;
+				seats--;
+			}
+		};
+
+		for (auto const pUnit : UnitClass::Array)
+		{
+			if (!pUnit || pUnit->Owner != pHouse || !pUnit->IsAlive || pUnit->InLimbo || !IsSeatedFightingVehicleType(pUnit->Type))
+				continue;
+
+			const DWORD uid = pUnit->UniqueID;
+			const int seatsLeft = SeatedFightingVehicleSeatsLeft(pUnit);
+			const bool inWave = macro.WaveGoals.contains(uid);
+			vehicles++;
+			(seatsLeft == 0 ? full : (pUnit->Passengers.NumPassengers > 0 ? partly : empty))++;
+
+			if (seatsLeft > 0 && pUnit->Passengers.NumPassengers == 0 && inWave)
+				emptyInWave++;
+
+			auto const itHold = macro.PassengerFillHolds.find(uid);
+
+			if (itHold != macro.PassengerFillHolds.end())
+			{
+				// The hold ends once full or after PassengerFillHoldFrames, for good.
+				if (seatsLeft == 0 || now - itHold->second >= PassengerFillHoldFrames || now < itHold->second)
+				{
+					macro.PassengerFillHolds.erase(itHold);
+					macro.PassengerFillDone.insert(uid);
+					continue;
+				}
+			}
+			else if (seatsLeft > 0 && !inWave && !macro.PassengerFillDone.contains(uid) && !IsInTransportOp(pHouse, uid)
+				&& home != CellStruct::Empty && pUnit->GetMapCoords().DistanceFrom(home) <= PassengerFillHomeCells)
+			{
+				macro.PassengerFillHolds[uid] = now;
+			}
+			else if (seatsLeft > 0 && inWave && !IsInTransportOp(pHouse, uid)
+				&& (pUnit->CurrentMission == Mission::Guard || pUnit->CurrentMission == Mission::Area_Guard))
+			{
+				// A wave standing at its gathering point.
+				const int seats = seatsLeft - boardingFor(pUnit);
+
+				if (seats > 0)
+					board(pUnit, seats, PassengerStagingReachCells, true);
+
+				continue;
+			}
+			else
+			{
+				continue;
+			}
+
+			const int seats = seatsLeft - boardingFor(pUnit);
+			seatsWanted += std::max(0, seats);
+
+			if (seats > 0)
+				board(pUnit, seats, PassengerFillReachCells, false);
+		}
+
+		// Holds of vehicles gone (destroyed, sold, taken).
+		std::erase_if(macro.PassengerFillHolds, [pHouse](const auto& entry)
+			{
+				return std::none_of(UnitClass::Array.begin(), UnitClass::Array.end(), [pHouse, &entry](const UnitClass* pUnit)
+					{ return pUnit && pUnit->UniqueID == entry.first && pUnit->Owner == pHouse && pUnit->IsAlive; });
+			});
+
+		macro.PassengerSeatsWanted = seatsWanted;
+
+		// TEMP diagnostic: the seated fighting vehicles and how full they go.
+		if (vehicles > 0 && (macro.PassengerLogFrame < 0 || now < macro.PassengerLogFrame || now - macro.PassengerLogFrame >= PassengerLogFrames))
+		{
+			macro.PassengerLogFrame = now;
+			Debug::Log("[NeuralAI] House %d passenger DIAG: seated fighting vehicles %d (full %d, partly %d, empty %d; empty in a wave %d), held %zu, "
+				"seats wanted %d, boarding orders %d since the last line, frame %d.\n", pHouse->ArrayIndex, vehicles, full, partly, empty, emptyInWave,
+				macro.PassengerFillHolds.size(), seatsWanted, macro.PassengerBoardOrders, now);
+			macro.PassengerBoardOrders = 0;
+		}
+	}
+
 } // namespace
