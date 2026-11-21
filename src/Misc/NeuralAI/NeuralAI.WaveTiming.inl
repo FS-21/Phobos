@@ -825,6 +825,8 @@ namespace
 		return GetMacroState(pHouse).PassengerFillHolds.contains(uid);
 	}
 
+	bool OrderPlanSoldierAboard(FootClass* pSoldier, UnitClass* pVehicle);
+
 	// TEMP passenger diagnostic (P4): how the tracked boarding orders ended since the last check.
 	void ResolvePassengerBoardTrack(HouseClass* pHouse)
 	{
@@ -1030,8 +1032,11 @@ namespace
 				if (seats <= 0)
 					break;
 
+				// A soldier no code may order now (order leases) stays where it is, in its wave.
+				if (!(group >= 0 ? OrderPlanSoldierAboard(pInf, pVehicle) : OrderFootToEnter(pInf, pVehicle)))
+					continue;
+
 				macro.WaveGoals.erase(pInf->UniqueID);
-				OrderFootToEnter(pInf, pVehicle);
 				macro.PassengerBoardOrders++;
 				macro.PassengerBoardTrack[pInf->UniqueID] = { pVehicle->UniqueID, now };
 
@@ -1057,7 +1062,10 @@ namespace
 				emptyInWave++;
 
 			auto const itHold = macro.PassengerFillHolds.find(uid);
-			const bool vehicleStanding = pUnit->CurrentMission == Mission::Guard || pUnit->CurrentMission == Mission::Area_Guard;
+			// Standing still with no destination: a transport on its way turns its passengers away (the
+			// docking request is refused while it moves or has a destination, and they give up boarding).
+			const bool vehicleStanding = (pUnit->CurrentMission == Mission::Guard || pUnit->CurrentMission == Mission::Area_Guard)
+				&& !pUnit->Destination && !pUnit->Locomotor->Is_Moving();
 			const int vehiclePlan = IsPlanMember(pHouse, uid) ? planOf(uid) : -1;
 
 			// Held at home: the first time it is there with seats left; again, standing out of the plans
