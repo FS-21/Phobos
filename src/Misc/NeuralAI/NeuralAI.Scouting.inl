@@ -1154,7 +1154,7 @@ namespace
 	}
 
 	// Ground scouts switch to the move at once: a queued move left an idle soldier on area guard
-	// (the AI's idle mission) where it stood.
+	// (the AI's idle mission) where it stood. Never one its war factory still unloads (IsLeavingItsFactory).
 	void OrderScoutMove(FootClass* pFoot, CellClass* pCell, bool air)
 	{
 		if (air)
@@ -1163,6 +1163,9 @@ namespace
 			IssueMoveOrder(pFoot, pCell, 0.0);
 			return;
 		}
+
+		if (IsLeavingItsFactory(pFoot))
+			return;
 
 		pFoot->SetTarget(nullptr);
 		pFoot->SetDestination(pCell, true);

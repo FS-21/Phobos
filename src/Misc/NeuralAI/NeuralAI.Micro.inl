@@ -4558,6 +4558,154 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		}
 	}
 
+	// War factory exits (user approved, 2026-11-21, «las 4 letras x favor»; FactoryDoor*, FactoryExit*): an
+	// idle vehicle of ours on the door row of one of our war factories steps to a free cell past the exit,
+	// where Phobos does not link it back to the factory (IsFactoryDoorCell). A finished production that waits
+	// FactoryExitStuckFrames in the unload mission sends the vehicle being unloaded there too; after twice
+	// that the factory drops the link and goes back on guard, so the finished one comes out.
+	if (IsAITickWindow(FactoryDoorClearFrames, 0))
+	{
+		auto& exitMacro = GetMacroState(pHouse);
+		const int now = Unsorted::CurrentFrame;
+		std::vector<CellStruct> doorRow;
+
+		if (exitMacro.FactoryExitStuck.size() > 32)
+			std::erase_if(exitMacro.FactoryExitStuck, [now](const auto& entry) { return now - entry.second.first > 20000; });
+
+		// A free cell FactoryDoorStepCells or more past the exit of the factory, off every door row, on the
+		// ground of the vehicle.
+		auto const freeCellPastExit = [](BuildingClass* pFactoryBld, FootClass* pFoot) -> CellClass*
+		{
+			CoordStruct exit = CoordStruct::Empty;
+			pFactoryBld->GetExitCoords(&exit, 0);
+			const CellStruct exitCell = CellClass::Coord2Cell(exit);
+			auto const pFootType = pFoot->GetTechnoType();
+			const int zone = ObjectZone(pFoot, pFootType->MovementZone);
+
+			for (int r = FactoryDoorStepCells; r <= FactoryDoorStepCells + 4; ++r)
+			{
+				for (int dy = -r; dy <= r; ++dy)
+				{
+					for (int dx = -r; dx <= r; ++dx)
+					{
+						if (std::max(std::abs(dx), std::abs(dy)) != r)
+							continue;
+
+						const CellStruct c { static_cast<short>(exitCell.X + dx), static_cast<short>(exitCell.Y + dy) };
+						auto const pCell = MapClass::Instance.TryGetCellAt(c);
+
+						if (pCell && !IsFactoryDoorCell(c) && MapClass::Instance.GetMovementZoneType(c, pFootType->MovementZone, false) == zone
+							&& pCell->IsClearToMove(pFootType->SpeedType, false, false, -1, pFootType->MovementZone, -1, false))
+						{
+							return pCell;
+						}
+					}
+				}
+			}
+
+			return nullptr;
+		};
+
+		auto const stepOff = [](FootClass* pFoot, CellClass* pCell)
+		{
+			const NeuralOrderPriorityScope orderPriority { NeuralOrderPriority::Survival };
+			pFoot->SetTarget(nullptr);
+			pFoot->SetDestination(pCell, true);
+			pFoot->ForceMission(Mission::Move);
+			NoteOrderCaller(pFoot, "move");
+		};
+
+		for (auto const pBld : pHouse->Buildings)
+		{
+			if (!pBld || !pBld->IsAlive || pBld->InLimbo || !pBld->Type || !pBld->Type->WeaponsFactory || pBld->Type->Naval)
+				continue;
+
+			GetFactoryDoorCells(pBld, doorRow);
+
+			for (auto const& doorCell : doorRow)
+			{
+				auto const pDoorCell = MapClass::Instance.TryGetCellAt(doorCell);
+
+				for (ObjectClass* pObj = pDoorCell ? pDoorCell->FirstObject : nullptr; pObj; pObj = pObj->NextObject)
+				{
+					auto const pIdle = abstract_cast<UnitClass*>(pObj);
+
+					if (!pIdle || pIdle->Owner != pHouse || !pIdle->IsAlive || pIdle->InLimbo || pIdle->IsDeploying || IsLeavingItsFactory(pIdle)
+						|| pIdle->Destination != nullptr
+						|| (pIdle->CurrentMission != Mission::Guard && pIdle->CurrentMission != Mission::Area_Guard
+							&& pIdle->CurrentMission != Mission::Sleep && pIdle->CurrentMission != Mission::None))
+					{
+						continue;
+					}
+
+					if (auto const pFree = freeCellPastExit(pBld, pIdle))
+						stepOff(pIdle, pFree);
+				}
+			}
+
+			// The finished production waiting in the unload mission.
+			auto const pFactory = pBld->Factory;
+			const bool waiting = pFactory && pFactory->Object && pFactory->Object->WhatAmI() == AbstractType::Unit && pFactory->IsDone()
+				&& pBld->GetCurrentMission() == Mission::Unload;
+
+			if (!waiting)
+			{
+				exitMacro.FactoryExitStuck.erase(pBld->UniqueID);
+				continue;
+			}
+
+			auto& stuck = exitMacro.FactoryExitStuck.try_emplace(pBld->UniqueID, now, 0).first->second;
+			const int stuckFor = now - stuck.first;
+
+			if (stuckFor < FactoryExitStuckFrames)
+				continue;
+
+			FootClass* pContact = nullptr;
+
+			for (int i = 0; !pContact && pBld->RadioLinks.IsAllocated && i < pBld->RadioLinks.Capacity; ++i)
+				pContact = abstract_cast<FootClass*>(pBld->GetNthLink(i));
+
+			auto const pDoneType = pFactory->Object->GetTechnoType();
+			const bool log = exitMacro.FactoryExitLines < FactoryExitLogLines;
+
+			if (stuck.second == 0 && stuckFor < 2 * FactoryExitStuckFrames)
+			{
+				stuck.second = 1;
+				auto const pFree = pContact ? freeCellPastExit(pBld, pContact) : nullptr;
+
+				if (pFree)
+					stepOff(pContact, pFree);
+
+				// TEMP diagnostic: the first step of the stuck exit watchdog.
+				if (log)
+				{
+					exitMacro.FactoryExitLines++;
+					Debug::Log("[NeuralAI] House %d stuck exit: %s %u has kept %s inside for %d frames, unloading %s %u, sent to (%d,%d), frame %d.\n",
+						pHouse->ArrayIndex, pBld->Type->ID, pBld->UniqueID, pDoneType ? pDoneType->ID : "?", stuckFor,
+						pContact ? pContact->GetTechnoType()->ID : "nothing", pContact ? pContact->UniqueID : 0u,
+						pFree ? pFree->MapCoords.X : -1, pFree ? pFree->MapCoords.Y : -1, now);
+				}
+			}
+			else if (stuckFor >= 2 * FactoryExitStuckFrames)
+			{
+				if (pContact)
+					pBld->SendCommand(RadioCommand::NotifyUnlink, pContact);
+
+				pBld->ForceMission(Mission::Guard);
+				stuck = { now, 0 };
+
+				// TEMP diagnostic: the second step of the stuck exit watchdog.
+				if (log)
+				{
+					exitMacro.FactoryExitLines++;
+					Debug::Log("[NeuralAI] House %d stuck exit: %s %u has kept %s inside for %d frames, drops the link to %s %u and goes back on "
+						"guard, frame %d.\n", pHouse->ArrayIndex, pBld->Type->ID, pBld->UniqueID, pDoneType ? pDoneType->ID : "?", stuckFor,
+						pContact ? pContact->GetTechnoType()->ID : "nothing", pContact ? pContact->UniqueID : 0u, now);
+				}
+			}
+		}
+	}
+
 	for (auto const pUnit : UnitClass::Array)
 	{
 		if (!pUnit || pUnit->Owner != pHouse || pUnit->InLimbo || !pUnit->IsAlive)
@@ -4600,11 +4748,13 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 						continue;
 					}
 
-					if (pUnit->CurrentMission == Mission::Move && pUnit->Destination != nullptr)
-					{
-						continue; // Never interrupt a vehicle's short exit move while still
-								// linked to its War Factory / Shipyard bib!
-					}
+					// Never interrupt a vehicle's short exit move while still linked to its war factory or
+					// shipyard bib. One its war factory still unloads is the engine's and Phobos's to take out
+					// (IsLeavingItsFactory): pushed aside every tick it went where Phobos did not send it, and
+					// the factory waited for it with the next production inside (match #13444). One linked to
+					// a factory that no longer unloads it steps aside.
+					if (IsLeavingItsFactory(pUnit) || (pUnit->CurrentMission == Mission::Move && pUnit->Destination != nullptr))
+						continue;
 
 					pUnit->Scatter(CoordStruct::Empty, true, false);
 					continue;

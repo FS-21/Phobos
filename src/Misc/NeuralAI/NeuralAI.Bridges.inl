@@ -152,6 +152,56 @@ namespace
 			&& PassageMouthGrid[BridgeCellIndex(cell)] != 0;
 	}
 
+	// The door row of a war factory (user approved, 2026-11-21, «las 4 letras x favor»): from its door to
+	// its exit cell and one past it, the row where Phobos links an idle vehicle of the owner back to the
+	// factory after each unload (BuildingExt::KickOutStuckUnits) and unloads it again, so the next
+	// production waits (matches #13624..#13641).
+	void GetFactoryDoorCells(const BuildingClass* pBld, std::vector<CellStruct>& cells)
+	{
+		cells.clear();
+
+		if (!pBld || !pBld->Type || !pBld->Type->WeaponsFactory || pBld->Type->Naval)
+			return;
+
+		CoordStruct exit = CoordStruct::Empty;
+		pBld->GetExitCoords(&exit, 0);
+		const CellStruct exitCell = CellClass::Coord2Cell(exit);
+		const short door = static_cast<short>(pBld->Location.X / Unsorted::LeptonsPerCell + pBld->Type->GetFoundationWidth() - 2);
+		const short from = std::min(door, exitCell.X);
+		const short to = static_cast<short>(std::max(door, exitCell.X) + 1);
+
+		for (short x = from; x <= to; ++x)
+			cells.push_back(CellStruct { x, exitCell.Y });
+	}
+
+	// Whether a cell is in the door row of a war factory standing on the map (GetFactoryDoorCells), from
+	// one list per frame.
+	bool IsFactoryDoorCell(const CellStruct& cell)
+	{
+		static std::vector<CellStruct> doorCells;
+		static int doorFrame = -1;
+		static int doorSerial = -1;
+
+		if (doorFrame != Unsorted::CurrentFrame || doorSerial != NeuralMatchSerial)
+		{
+			doorFrame = Unsorted::CurrentFrame;
+			doorSerial = NeuralMatchSerial;
+			doorCells.clear();
+			std::vector<CellStruct> row;
+
+			for (auto const pBld : BuildingClass::Array)
+			{
+				if (!pBld || !pBld->IsAlive || pBld->InLimbo || !pBld->Type || !pBld->Type->WeaponsFactory || pBld->Type->Naval)
+					continue;
+
+				GetFactoryDoorCells(pBld, row);
+				doorCells.insert(doorCells.end(), row.begin(), row.end());
+			}
+		}
+
+		return std::find(doorCells.begin(), doorCells.end(), cell) != doorCells.end();
+	}
+
 	bool IsFootprintOnPassageMouth(const CellStruct& topLeft, int width, int height)
 	{
 		if (PassageMouthGrid.empty())
