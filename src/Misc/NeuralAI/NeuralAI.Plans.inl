@@ -2473,6 +2473,8 @@ namespace
 			}
 		}
 
+		// The members' strength; the soldiers of the plan aboard its seated fighting vehicles
+		// (UpdatePassengerFill) count, out of sight in the vehicle.
 		auto memberValue = [&](const NeuralPlanInstance& plan) -> int
 		{
 			int value = 0;
@@ -2480,9 +2482,23 @@ namespace
 			for (const DWORD uid : plan.Members)
 			{
 				if (auto const it = ownFoots.find(uid); it != ownFoots.end())
+				{
 					value += GetCombatValueOfType(it->second->GetTechnoType(), false);
+
+					if (IsSeatedFightingVehicleType(it->second->GetTechnoType()))
+					{
+						for (FootClass* pPass = it->second->Passengers.GetFirstPassenger(); pPass != nullptr;
+							pPass = abstract_cast<FootClass*>(pPass->NextObject))
+						{
+							if (std::find(plan.Members.begin(), plan.Members.end(), pPass->UniqueID) != plan.Members.end())
+								value += GetCombatValueOfType(pPass->GetTechnoType(), false);
+						}
+					}
+				}
 				else if (auto const itBld = ownSiegeBuildings.find(uid); itBld != ownSiegeBuildings.end())
+				{
 					value += GetCombatValueOfType(itBld->second->Type, false);
+				}
 			}
 
 			return value;

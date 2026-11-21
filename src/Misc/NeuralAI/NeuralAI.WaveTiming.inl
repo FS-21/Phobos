@@ -825,10 +825,92 @@ namespace
 		return GetMacroState(pHouse).PassengerFillHolds.contains(uid);
 	}
 
+	// TEMP passenger diagnostic (P4): how the tracked boarding orders ended since the last check.
+	void ResolvePassengerBoardTrack(HouseClass* pHouse)
+	{
+		auto& macro = GetMacroState(pHouse);
+
+		if (macro.PassengerBoardTrack.empty())
+			return;
+
+		const int now = Unsorted::CurrentFrame;
+		std::unordered_map<DWORD, InfantryClass*> soldiers;
+		std::unordered_map<DWORD, UnitClass*> vehicles;
+
+		for (auto const pInf : InfantryClass::Array)
+		{
+			if (pInf && pInf->Owner == pHouse && pInf->IsAlive)
+				soldiers[pInf->UniqueID] = pInf;
+		}
+
+		for (auto const pUnit : UnitClass::Array)
+		{
+			if (pUnit && pUnit->Owner == pHouse && pUnit->IsAlive && !pUnit->InLimbo)
+				vehicles[pUnit->UniqueID] = pUnit;
+		}
+
+		auto const& callers = LastOrderCaller[std::clamp(pHouse->ArrayIndex, 0, 31)];
+
+		std::erase_if(macro.PassengerBoardTrack, [&](const auto& entry)
+			{
+				auto const itSoldier = soldiers.find(entry.first);
+
+				if (itSoldier == soldiers.end())
+				{
+					macro.PassengerBoardSoldierLost++;
+					return true;
+				}
+
+				auto const pInf = itSoldier->second;
+
+				if (pInf->Transporter)
+				{
+					(pInf->Transporter->UniqueID == entry.second.first ? macro.PassengerBoardAboard : macro.PassengerBoardElsewhere)++;
+					return true;
+				}
+
+				auto const itVehicle = vehicles.find(entry.second.first);
+
+				if (itVehicle == vehicles.end())
+				{
+					macro.PassengerBoardVehicleLost++;
+					return true;
+				}
+
+				auto const pVehicle = itVehicle->second;
+				const bool entering = (pInf->CurrentMission == Mission::Enter || pInf->QueuedMission == Mission::Enter)
+					&& (pInf->Destination == pVehicle || pInf->ArchiveTarget == pVehicle || pInf->ContainsLink(pVehicle)
+						|| (pInf->Destination && CellClass::Coord2Cell(pInf->Destination->GetCoords()).DistanceFrom(pVehicle->GetMapCoords()) <= 3.5));
+
+				if (entering)
+				{
+					if (now - entry.second.second < PassengerBoardTrackFrames && now >= entry.second.second)
+						return false;
+
+					macro.PassengerBoardTimedOut++;
+					return true;
+				}
+
+				macro.PassengerBoardDiverted++;
+				auto const itCaller = callers.find(entry.first);
+				std::string caller = "engine";
+
+				if (itCaller != callers.end() && itCaller->second.Frame >= entry.second.second && itCaller->second.File)
+				{
+					caller = std::string(itCaller->second.Kind ? itCaller->second.Kind : "?") + " " + itCaller->second.File + ":"
+						+ std::to_string(itCaller->second.Line);
+				}
+
+				macro.PassengerDivertCallers[caller]++;
+				return true;
+			});
+	}
+
 	// Seated fighting vehicles take soldiers before they go (user, 2026-11-21, P1 and P2): a new one at
 	// home is held out of the waves until full or PassengerFillHoldFrames have gone, and our nearest fit
-	// soldiers board it; one in a wave standing at its gathering point takes the fit soldiers of the
-	// wave standing by it. Runs before the tactical micro, so the wave dispatch reads the holds.
+	// soldiers board it; back home empty it is held again (PassengerFillReholdFrames). One of a wave or
+	// of a plan standing at its gathering point takes the fit soldiers of its wave or plan by it. Runs
+	// before the tactical micro, so the wave dispatch reads the holds.
 	void UpdatePassengerFill(HouseClass* pHouse)
 	{
 		auto& macro = GetMacroState(pHouse);
@@ -838,7 +920,27 @@ namespace
 			return;
 
 		macro.PassengerFillFrame = now;
+		ResolvePassengerBoardTrack(pHouse);
 		const CellStruct home = GetHouseHomeCell(pHouse);
+
+		// The active plan of each plan member, by UniqueID.
+		std::unordered_map<DWORD, int> memberPlan;
+
+		for (int planIndex = 0; planIndex < static_cast<int>(macro.Plans.size()); ++planIndex)
+		{
+			if (macro.Plans[planIndex].Active)
+			{
+				for (const DWORD uid : macro.Plans[planIndex].Members)
+					memberPlan.emplace(uid, planIndex);
+			}
+		}
+
+		auto const planOf = [&memberPlan](DWORD uid)
+		{
+			auto const it = memberPlan.find(uid);
+
+			return it != memberPlan.end() ? it->second : -1;
+		};
 		int seatsWanted = 0;
 		int vehicles = 0;
 		int full = 0;
@@ -863,8 +965,14 @@ namespace
 			return count;
 		};
 
-		// The fit soldiers within reach of a vehicle, nearest first; waveOnly: standing soldiers of a wave.
-		auto const soldiersFor = [&](UnitClass* pVehicle, double reachCells, bool waveOnly)
+		// The fit soldiers within reach of a vehicle, nearest first. group: PassengerGroupHome for the
+		// home fill (standing soldiers out of the plans, or wave soldiers on their way),
+		// PassengerGroupWave for the soldiers of a wave, or a plan index for that plan's soldiers, these
+		// standing or walking.
+		constexpr int PassengerGroupHome = -2;
+		constexpr int PassengerGroupWave = -1;
+
+		auto const soldiersFor = [&](UnitClass* pVehicle, double reachCells, int group)
 		{
 			std::vector<std::pair<int, InfantryClass*>> found;
 			const int zone = ObjectZone(pVehicle, MovementZone::Normal);
@@ -873,17 +981,30 @@ namespace
 			{
 				if (!pInf || pInf->Owner != pHouse || !pInf->IsAlive || pInf->InLimbo || pInf->Transporter || !IsFitPassengerSoldierType(pInf->Type)
 					|| pInf->Target || pInf->HasAnyLink() || pInf->CurrentMission == Mission::Enter || pInf->QueuedMission == Mission::Enter
-					|| IsInTransportOp(pHouse, pInf->UniqueID) || IsPlanMember(pHouse, pInf->UniqueID))
+					|| IsInTransportOp(pHouse, pInf->UniqueID))
 				{
 					continue;
 				}
 
 				const Mission mission = pInf->CurrentMission;
 				const bool standing = mission == Mission::Guard || mission == Mission::Area_Guard || mission == Mission::Sleep;
+				const bool walking = mission == Mission::Move || mission == Mission::AttackMove;
 				const bool inWave = macro.WaveGoals.contains(pInf->UniqueID);
+				const int soldierPlan = IsPlanMember(pHouse, pInf->UniqueID) ? planOf(pInf->UniqueID) : -1;
 
-				if (waveOnly ? !(inWave && standing) : !(standing || (inWave && (mission == Mission::Move || mission == Mission::AttackMove))))
+				if (group >= 0)
+				{
+					if (soldierPlan != group || !(standing || walking))
+						continue;
+				}
+				else if (IsPlanMember(pHouse, pInf->UniqueID))
+				{
 					continue;
+				}
+				else if (group == PassengerGroupWave ? !(inWave && (standing || walking)) : !(standing || (inWave && walking)))
+				{
+					continue;
+				}
 
 				const int distance = pInf->DistanceFrom(pVehicle);
 
@@ -902,9 +1023,9 @@ namespace
 			return found;
 		};
 
-		auto const board = [&](UnitClass* pVehicle, int seats, double reachCells, bool waveOnly)
+		auto const board = [&](UnitClass* pVehicle, int seats, double reachCells, int group)
 		{
-			for (auto const& [distance, pInf] : soldiersFor(pVehicle, reachCells, waveOnly))
+			for (auto const& [distance, pInf] : soldiersFor(pVehicle, reachCells, group))
 			{
 				if (seats <= 0)
 					break;
@@ -912,6 +1033,11 @@ namespace
 				macro.WaveGoals.erase(pInf->UniqueID);
 				OrderFootToEnter(pInf, pVehicle);
 				macro.PassengerBoardOrders++;
+				macro.PassengerBoardTrack[pInf->UniqueID] = { pVehicle->UniqueID, now };
+
+				if (group >= 0)
+					macro.PassengerPlanBoardOrders++;
+
 				seats--;
 			}
 		};
@@ -931,30 +1057,52 @@ namespace
 				emptyInWave++;
 
 			auto const itHold = macro.PassengerFillHolds.find(uid);
+			const bool vehicleStanding = pUnit->CurrentMission == Mission::Guard || pUnit->CurrentMission == Mission::Area_Guard;
+			const int vehiclePlan = IsPlanMember(pHouse, uid) ? planOf(uid) : -1;
+
+			// Held at home: the first time it is there with seats left; again, standing out of the plans
+			// with fit soldiers within reach, PassengerFillReholdFrames after its last hold.
+			auto const mayHoldAtHome = [&]()
+			{
+				auto const itDone = macro.PassengerFillDone.find(uid);
+
+				if (itDone == macro.PassengerFillDone.end())
+					return true;
+
+				if (IsPlanMember(pHouse, uid) || !vehicleStanding || pUnit->Target
+					|| (now - itDone->second < PassengerFillReholdFrames && now >= itDone->second))
+				{
+					return false;
+				}
+
+				return seatsLeft - boardingFor(pUnit) > 0 && !soldiersFor(pUnit, PassengerFillReachCells, PassengerGroupHome).empty();
+			};
 
 			if (itHold != macro.PassengerFillHolds.end())
 			{
-				// The hold ends once full or after PassengerFillHoldFrames, for good.
+				// The hold ends once full or after PassengerFillHoldFrames.
 				if (seatsLeft == 0 || now - itHold->second >= PassengerFillHoldFrames || now < itHold->second)
 				{
 					macro.PassengerFillHolds.erase(itHold);
-					macro.PassengerFillDone.insert(uid);
+					macro.PassengerFillDone[uid] = now;
 					continue;
 				}
 			}
-			else if (seatsLeft > 0 && !inWave && !macro.PassengerFillDone.contains(uid) && !IsInTransportOp(pHouse, uid)
-				&& home != CellStruct::Empty && pUnit->GetMapCoords().DistanceFrom(home) <= PassengerFillHomeCells)
+			else if (seatsLeft > 0 && !inWave && !IsInTransportOp(pHouse, uid)
+				&& home != CellStruct::Empty && pUnit->GetMapCoords().DistanceFrom(home) <= PassengerFillHomeCells && mayHoldAtHome())
 			{
+				if (macro.PassengerFillDone.contains(uid))
+					macro.PassengerReholds++;
+
 				macro.PassengerFillHolds[uid] = now;
 			}
-			else if (seatsLeft > 0 && inWave && !IsInTransportOp(pHouse, uid)
-				&& (pUnit->CurrentMission == Mission::Guard || pUnit->CurrentMission == Mission::Area_Guard))
+			else if (seatsLeft > 0 && (inWave || vehiclePlan >= 0) && !IsInTransportOp(pHouse, uid) && vehicleStanding)
 			{
-				// A wave standing at its gathering point.
+				// A wave or a plan standing at its gathering point.
 				const int seats = seatsLeft - boardingFor(pUnit);
 
 				if (seats > 0)
-					board(pUnit, seats, PassengerStagingReachCells, true);
+					board(pUnit, seats, PassengerStagingReachCells, inWave ? PassengerGroupWave : vehiclePlan);
 
 				continue;
 			}
@@ -967,7 +1115,7 @@ namespace
 			seatsWanted += std::max(0, seats);
 
 			if (seats > 0)
-				board(pUnit, seats, PassengerFillReachCells, false);
+				board(pUnit, seats, PassengerFillReachCells, PassengerGroupHome);
 		}
 
 		// Holds of vehicles gone (destroyed, sold, taken).
@@ -979,14 +1127,40 @@ namespace
 
 		macro.PassengerSeatsWanted = seatsWanted;
 
-		// TEMP diagnostic: the seated fighting vehicles and how full they go.
+		// TEMP diagnostic: the seated fighting vehicles and how full they go, and how the boarding orders
+		// ended (P4), with the codes that gave the diverted soldiers their next order, most first.
 		if (vehicles > 0 && (macro.PassengerLogFrame < 0 || now < macro.PassengerLogFrame || now - macro.PassengerLogFrame >= PassengerLogFrames))
 		{
 			macro.PassengerLogFrame = now;
+			std::vector<std::pair<int, std::string>> divertCallers;
+
+			for (auto const& [caller, count] : macro.PassengerDivertCallers)
+				divertCallers.push_back({ count, caller });
+
+			std::stable_sort(divertCallers.begin(), divertCallers.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
+			std::string callerText;
+
+			for (size_t i = 0; i < divertCallers.size() && i < 4; ++i)
+				callerText += (i ? ", " : "") + divertCallers[i].second + " x" + std::to_string(divertCallers[i].first);
+
 			Debug::Log("[NeuralAI] House %d passenger DIAG: seated fighting vehicles %d (full %d, partly %d, empty %d; empty in a wave %d), held %zu, "
-				"seats wanted %d, boarding orders %d since the last line, frame %d.\n", pHouse->ArrayIndex, vehicles, full, partly, empty, emptyInWave,
-				macro.PassengerFillHolds.size(), seatsWanted, macro.PassengerBoardOrders, now);
+				"seats wanted %d, boarding orders %d since the last line (%d to a plan vehicle, held again %d), frame %d.\n", pHouse->ArrayIndex, vehicles,
+				full, partly, empty, emptyInWave, macro.PassengerFillHolds.size(), seatsWanted, macro.PassengerBoardOrders,
+				macro.PassengerPlanBoardOrders, macro.PassengerReholds, now);
+			Debug::Log("[NeuralAI] House %d passenger boarding DIAG: aboard %d, in another vehicle %d, soldier lost %d, vehicle lost %d, timed out %d, "
+				"diverted %d (%s), still going %zu, frame %d.\n", pHouse->ArrayIndex, macro.PassengerBoardAboard, macro.PassengerBoardElsewhere,
+				macro.PassengerBoardSoldierLost, macro.PassengerBoardVehicleLost, macro.PassengerBoardTimedOut, macro.PassengerBoardDiverted,
+				callerText.empty() ? "-" : callerText.c_str(), macro.PassengerBoardTrack.size(), now);
 			macro.PassengerBoardOrders = 0;
+			macro.PassengerPlanBoardOrders = 0;
+			macro.PassengerReholds = 0;
+			macro.PassengerBoardAboard = 0;
+			macro.PassengerBoardElsewhere = 0;
+			macro.PassengerBoardSoldierLost = 0;
+			macro.PassengerBoardVehicleLost = 0;
+			macro.PassengerBoardTimedOut = 0;
+			macro.PassengerBoardDiverted = 0;
+			macro.PassengerDivertCallers.clear();
 		}
 	}
 
