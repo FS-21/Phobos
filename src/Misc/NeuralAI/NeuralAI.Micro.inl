@@ -248,6 +248,25 @@ namespace
 		return goal;
 	}
 
+	// The cell a carryall sets a vehicle down on when the drop rules give the wave target: a loaded APC goes
+	// there, its passengers take the target; any other vehicle goes to the wave's forward staging point
+	// while the wave keeps one (WaveStagingFreshFrames), out of the enemy base.
+	CellClass* WaveDropCellFor(HouseClass* pHouse, UnitClass* pCargo, CellClass* pWaveTarget)
+	{
+		if (!pWaveTarget || !pCargo || !pCargo->Type || (pCargo->Type->Passengers >= 3 && pCargo->Passengers.NumPassengers >= 1))
+			return pWaveTarget;
+
+		auto const& macro = GetMacroState(pHouse);
+		const int age = Unsorted::CurrentFrame - macro.WaveStagingFrame;
+
+		if (macro.WaveStagingCell == CellStruct::Empty || age < 0 || age > WaveStagingFreshFrames)
+			return pWaveTarget;
+
+		auto const pStage = MapClass::Instance.TryGetCellAt(macro.WaveStagingCell);
+
+		return pStage ? pStage : pWaveTarget;
+	}
+
 	// The real pickup order of a carryall went out (AdvanceRoutedPickup): its job counts the frame, and the
 	// order helpers leave the vehicle where it is until it is aboard (AirliftCargoHolds). The vehicle drops
 	// its attack-move, which the engine would take up again after the carryall told it to hold still.
@@ -11030,6 +11049,13 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			continue;
 		}
 
+		// A unit carryall slinging a vehicle, or on its way to one, works for the carryall logic.
+		if (IsUnitCarryallAtWork(pUnit))
+		{
+			++notIdleBusy;
+			continue;
+		}
+
 		// A damaged unit sits out the waves while it repairs (on a trip, bound for or standing on a
 		// station, a trip ordered lately) or near home, where it guards the base. Out in the field
 		// with no repair it can take (the station too far for the trip to pay, none at all) it fights
@@ -14942,6 +14968,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 						carryMacro.CarryallDropSince.erase(pTrans->UniqueID);
 						carryMacro.CarryallDropTried.erase(pTrans->UniqueID);
 						carryMacro.CarryallDropFailed.erase(pTrans->UniqueID);
+						carryMacro.CarryallDropFailCount.erase(pTrans->UniqueID);
+						carryMacro.CarryallLastState.erase(pTrans->UniqueID);
 					}
 
 					if (pCarryExt->CarryallCargo && pCarryExt->CarryallCargo->IsAlive)
@@ -14977,7 +15005,48 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 								? pIslandGoalCell
 								: (pIslandTechGoalCell
 										? pIslandTechGoalCell
-										: (pIslandResourceGoalCell ? pIslandResourceGoalCell : pWaveTargetCell));
+										: (pIslandResourceGoalCell ? pIslandResourceGoalCell : WaveDropCellFor(pHouse, pCarriedUnit, pWaveTargetCell)));
+						}
+
+						auto& carryMacro = GetMacroState(pHouse);
+
+						// TEMP diagnostic: a descent with the cargo that turned back up (the cargo still on, no longer
+						// coming down), with what may have broken it.
+						{
+							auto& lastState = carryMacro.CarryallLastState[pTrans->UniqueID];
+							const auto state = pCarryExt->CarryallState;
+
+							if (lastState == JumpjetCarryallState::DescendingToDrop
+								&& (state == JumpjetCarryallState::AscendingWithCargo || state == JumpjetCarryallState::Carrying))
+							{
+								static int brokenLogSerial = -1;
+								static int brokenLogCount = 0;
+
+								if (brokenLogSerial != NeuralMatchSerial)
+								{
+									brokenLogSerial = NeuralMatchSerial;
+									brokenLogCount = 0;
+								}
+
+								if (brokenLogCount++ < CarryallDropBrokenLogLines)
+								{
+									auto const& callers = LastOrderCaller[std::clamp(pHouse->ArrayIndex, 0, 31)];
+									auto const itCaller = callers.find(pTrans->UniqueID);
+									const NeuralOrderCaller caller = itCaller != callers.end() ? itCaller->second : NeuralOrderCaller {};
+									auto const pTargetObj = abstract_cast<ObjectClass*>(pTrans->Target);
+									auto const pDestCell = pTrans->Destination ? CellClass::Coord2Cell(pTrans->Destination->GetCoords()) : CellStruct::Empty;
+
+									Debug::Log("[NeuralAI] House %d carryall drop broken (TEMP): %s %u at (%d,%d) with %s, state %d, mission %d, target %s, "
+										"destination (%d,%d), last order %s by %s:%d at frame %d, frame %d.\n", pHouse->ArrayIndex, pTrans->Type->ID,
+										pTrans->UniqueID, pTrans->GetMapCoords().X, pTrans->GetMapCoords().Y, pCarriedUnit->Type ? pCarriedUnit->Type->ID : "-",
+										static_cast<int>(state), static_cast<int>(pTrans->CurrentMission),
+										pTargetObj && pTargetObj->GetType() ? pTargetObj->GetType()->ID : "-", pDestCell.X, pDestCell.Y,
+										caller.Kind ? caller.Kind : "-", caller.File ? caller.File : "-", caller.Line, itCaller != callers.end() ? caller.Frame : -1,
+										Unsorted::CurrentFrame);
+								}
+							}
+
+							lastState = state;
 						}
 
 						if (pDropCell && pCarryExt->CarryallState == JumpjetCarryallState::Carrying)
@@ -15011,6 +15080,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 									dropFailed.erase(dropFailed.begin());
 
 								dropFailed.emplace_back(itTried->second, now + CarryallDropFailFrames);
+								carryMacro.CarryallDropFailCount[pTrans->UniqueID]++;
 
 								static int failLogSerial = -1;
 								static int failLogCount = 0;
@@ -15032,10 +15102,15 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 								dropTried.erase(itTried);
 							}
 
-							auto const isFailedDrop = [&dropFailed, now](const CellStruct& cell)
+							// After CarryallDropSpreadFails failed unloads with this cargo the cells next to the failed
+							// ones are out as well: it tries a spot nearby instead of the cell beside the last one.
+							auto const itFailCount = carryMacro.CarryallDropFailCount.find(pTrans->UniqueID);
+							const bool spreadDrops = itFailCount != carryMacro.CarryallDropFailCount.end()
+								&& itFailCount->second >= CarryallDropSpreadFails;
+							auto const isFailedDrop = [&dropFailed, now, spreadDrops](const CellStruct& cell)
 							{
-								return std::any_of(dropFailed.begin(), dropFailed.end(),
-									[&cell, now](const auto& entry) { return entry.first == cell && now < entry.second; });
+								return std::any_of(dropFailed.begin(), dropFailed.end(), [&cell, now, spreadDrops](const auto& entry)
+									{ return now < entry.second && (entry.first == cell || (spreadDrops && entry.first.DistanceFrom(cell) < CarryallDropSpreadCells)); });
 							};
 
 							auto const itChosen = dropCells.find(pTrans->UniqueID);
@@ -15045,8 +15120,22 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 							const int dropSearchCells = CarryallDropSearchCells
 								+ CarryallDropRingCells * std::min(CarryallDropMaxRings, stuckFrames / CarryallDropStuckFrames);
 
+							// An armed carryall sets the cargo down out of the reach of the known enemies; the area is
+							// checked once, and only a contested area has its cells checked.
+							const int carrierReachCells = GroundRangeOf(pTrans->Type) / Unsorted::LeptonsPerCell;
+							const bool contestedArea = carrierReachCells > 0
+								&& (VisibleEnemyThreatNear(pHouse, pDropCell->MapCoords, carrierReachCells + CarryallDropEnemyMarginCells + dropSearchCells) > 0
+									|| IsCellInKnownEnemyDefenseReach(pHouse, pDropCell->MapCoords, CarryallDropEnemyMarginCells + dropSearchCells));
+							auto const isContestedDrop = [&](const CellStruct& cell)
+							{
+								return contestedArea
+									&& (VisibleEnemyThreatNear(pHouse, cell, carrierReachCells + CarryallDropEnemyMarginCells) > 0
+										|| IsCellInKnownEnemyDefenseReach(pHouse, cell, CarryallDropEnemyMarginCells));
+							};
+
 							if (pChosen && (!pCarryExt->CarryallCanDropAt(pChosen) || isFailedDrop(pChosen->MapCoords)
-								|| pChosen->MapCoords.DistanceFrom(pDropCell->MapCoords) > dropSearchCells + CarryallDropZoneCells))
+								|| pChosen->MapCoords.DistanceFrom(pDropCell->MapCoords) > dropSearchCells + CarryallDropZoneCells
+								|| isContestedDrop(pChosen->MapCoords)))
 							{
 								dropCells.erase(pTrans->UniqueID);
 								pChosen = nullptr;
@@ -15059,7 +15148,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 							// The clock since when it looks for a cell (dropSince) runs on until the cargo is down, so the
 							// search reaches farther when the engine does not set it down where it was told to.
 							if ((inDropZone || nearChosen) && pCarryExt->CarryallCanDropAt(pTrans->GetCell())
-								&& !isFailedDrop(pTrans->GetMapCoords()))
+								&& !isFailedDrop(pTrans->GetMapCoords()) && !isContestedDrop(pTrans->GetMapCoords()))
 							{
 								if (pTrans->CurrentMission != Mission::Unload)
 									CountDecision(NeuralDecision::AirliftDrop, pHouse->ArrayIndex);
@@ -15093,7 +15182,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 										auto const pCell = MapClass::Instance.TryGetCellAt(cell);
 										const double dist = cell.DistanceFrom(centre);
 
-										if (pCell && dist < bestDist && pCarryExt->CarryallCanDropAt(pCell) && !isFailedDrop(cell))
+										if (pCell && dist < bestDist && pCarryExt->CarryallCanDropAt(pCell) && !isFailedDrop(cell)
+											&& !isContestedDrop(cell))
 										{
 											bestDist = dist;
 											pBest = pCell;
@@ -15115,8 +15205,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 							else if (pTrans->CurrentMission == Mission::Guard
 								|| pTrans->CurrentMission == Mission::Area_Guard || (IsAITickWindow(90, 25)))
 							{
-								// Fly around known enemy anti-air when a safer lane exists.
+								// Fly around known enemy anti-air when a safer lane exists. The order helpers refuse
+								// other code's orders to a carryall at work, not this one's.
+								CarryallOrdersOpen = true;
 								IssueMoveOrder(pTrans, GetSafeAirHop(pHouse, pTrans, pDropCell), 3.0);
+								CarryallOrdersOpen = false;
 							}
 						}
 
@@ -17426,7 +17519,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				pDropCell = pIslandGoalCell
 					? pIslandGoalCell
 					: (pIslandTechGoalCell ? pIslandTechGoalCell
-										: (pIslandResourceGoalCell ? pIslandResourceGoalCell : pWaveTargetCell));
+										: (pIslandResourceGoalCell ? pIslandResourceGoalCell : WaveDropCellFor(pHouse, pCarriedUnit, pWaveTargetCell)));
 			}
 
 			if (pDropCell)
