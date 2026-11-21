@@ -1530,6 +1530,11 @@ namespace
 		// (CarryallDropFailFrames), by carryall UniqueID (key access only). Cleared when the cargo is down.
 		std::unordered_map<DWORD, CellStruct> CarryallDropTried {};
 		std::unordered_map<DWORD, std::vector<std::pair<CellStruct, int>>> CarryallDropFailed {};
+		// How often a unit carryall left the unload with its cargo still on, and the carryall phase it was
+		// in at the last AI tick (TEMP: a broken descent), by carryall UniqueID (key access only). Cleared
+		// when the cargo is down.
+		std::unordered_map<DWORD, int> CarryallDropFailCount {};
+		std::unordered_map<DWORD, JumpjetCarryallState> CarryallLastState {};
 		// Since when a loaded transport on its pickup shore has had no landmass to go to, by
 		// transport UniqueID (key access only).
 		std::unordered_map<DWORD, int> FerryNoGoalSince {};
@@ -2152,6 +2157,8 @@ namespace
 			this->CarryallDropSince.clear();
 			this->CarryallDropTried.clear();
 			this->CarryallDropFailed.clear();
+			this->CarryallDropFailCount.clear();
+			this->CarryallLastState.clear();
 			this->FerryNoGoalSince.clear();
 			this->ParkedFerries.clear();
 			this->ProductionBanUntil.clear();
@@ -2519,6 +2526,20 @@ namespace
 	// (cohesion for stragglers); a carryall uses the point WaveStagingFreshFrames after the wave set it.
 	constexpr double WaveStragglerCells = 30.0;
 	constexpr int WaveStagingFreshFrames = 2700;
+
+	// Whether a unit carryall slings a vehicle or is on its way to one (any carryall phase but Idle): the
+	// carryall logic leads it, the idle army leaves it out and the order helpers refuse other code
+	// (MayOrderUnit). A new destination makes the unit carryall drop its pickup or its descent with the cargo.
+	bool IsUnitCarryallAtWork(const FootClass* pFoot)
+	{
+		auto const pUnit = abstract_cast<const UnitClass*>(pFoot);
+		auto const pExt = pUnit ? UnitExt::Fetch(const_cast<UnitClass*>(pUnit)) : nullptr;
+
+		return pExt && (pExt->CarryallCargo || pExt->CarryallState != JumpjetCarryallState::Idle);
+	}
+
+	// True while the unit carryall logic gives its own orders through the helpers (a safe air hop).
+	bool CarryallOrdersOpen = false;
 
 	// Whether a carryall of ours comes for the vehicle now: the real pickup order went out at most
 	// CarryallPickupTimeoutFrames ago and the vehicle is not aboard yet.
@@ -3220,6 +3241,16 @@ namespace
 	// A cell where a loaded carryall left the unload with its cargo still on stays out of its drop
 	// choices for CarryallDropFailFrames; it keeps the last CarryallDropFailCells of them.
 	constexpr int CarryallDropFailFrames = 1800;
+	// After CarryallDropSpreadFails such unloads with the same cargo it tries a cell at least
+	// CarryallDropSpreadCells from every one of those cells: a nearby spot, not the next cell.
+	constexpr int CarryallDropSpreadFails = 3;
+	constexpr double CarryallDropSpreadCells = 4.0;
+	// An armed unit carryall sets its cargo down out of the reach of the known enemies: its own weapon
+	// reach plus CarryallDropEnemyMarginCells from armed enemy units in sight, and the reach of known
+	// enemy defenses plus that margin.
+	constexpr int CarryallDropEnemyMarginCells = 2;
+	// TEMP diagnostic: the broken drop descents logged per match.
+	constexpr int CarryallDropBrokenLogLines = 40;
 	// Captures of enemy buildings (IsEnemyBuildingUnguarded): an engineer goes for one only out of the
 	// known reach of enemy defenses (by CaptureUnguardedDefenseMargin cells) and with no armed enemy seen
 	// within CaptureUnguardedThreatCells. An enemy expansion (IsKnownEnemyExpansion: no other known
@@ -4948,8 +4979,13 @@ namespace
 		}
 
 		// A carryall of ours comes for it: it waits for the ride, which only a survival order overrides, so
-		// the rules it belongs to do not drive it away from under the carryall.
-		if (CurrentOrderPriority < NeuralOrderPriority::Survival && IsAwaitingAirlift(pFoot))
+		// the rules it belongs to do not drive it away from under the carryall. A unit carryall at work takes
+		// orders from the carryall logic alone likewise, unless a transport operation or a plan leads it.
+		const bool awaitsAirlift = IsAwaitingAirlift(pFoot);
+		const bool carryallAtWork = !CarryallOrdersOpen && IsUnitCarryallAtWork(pFoot)
+			&& !IsInTransportOp(pFoot->Owner, pFoot->UniqueID) && !IsPlanMember(pFoot->Owner, pFoot->UniqueID);
+
+		if (CurrentOrderPriority < NeuralOrderPriority::Survival && (awaitsAirlift || carryallAtWork))
 		{
 			CountDecision(NeuralDecision::OrderLeaseRefused, pFoot->Owner->ArrayIndex);
 
@@ -4957,7 +4993,8 @@ namespace
 			{
 				auto& refusals = LeaseRefusals[pFoot->Owner->ArrayIndex];
 				char key[128];
-				std::snprintf(key, sizeof(key), "airlift > %s:%d", OrderCallerBaseName(file) ? OrderCallerBaseName(file) : "?", line);
+				std::snprintf(key, sizeof(key), "%s > %s:%d", awaitsAirlift ? "airlift" : "carryall at work",
+					OrderCallerBaseName(file) ? OrderCallerBaseName(file) : "?", line);
 				refusals.Pairs[key]++;
 				refusals.Total++;
 			}
