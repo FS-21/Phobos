@@ -18099,7 +18099,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			// after the house's last pack-up, it moves when its spot is elsewhere: for a factory the front moved
 			// 30+ cells past it (leapfrog, only with an idle queue), the main base needs hidden production, or a
 			// known enemy defense now reaches it (FindMobileFactorySpot); for another building the goal of its
-			// role moved as far (FindDeployerGoal). The MCVRedeploy option only concerns ConYards.
+			// role moved as far (FindDeployerGoal). A mobile sensor array only flees: the lookouts of the
+			// scouting move it. The MCVRedeploy option only concerns ConYards.
 			if (!handledConYardAction && IsReversibleBaseBuilding(pOwnBld->Type) && !pOwnBld->Type->ConstructionYard
 				&& pOwnBld->CurrentMission != Mission::Construction && pOwnBld->CurrentMission != Mission::Selling
 				&& IsAITickWindow(90, 20))
@@ -18147,8 +18148,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 						packUp(retreat, MobileFactoryReasonNone, "flees");
 					}
 				}
-				else if (VisibleEnemyThreatNear(pHouse, fc, 10) == 0 && stoodFor >= MobileFactoryDwellFrames
-					&& now - mobileMacro.MobileFactoryLastPackFrame >= MobileFactoryPackCooldownFrames)
+				else if ((isFactory || IsBaseDeployerUnit(pVehicle)) && VisibleEnemyThreatNear(pHouse, fc, 10) == 0
+					&& stoodFor >= MobileFactoryDwellFrames && now - mobileMacro.MobileFactoryLastPackFrame >= MobileFactoryPackCooldownFrames)
 				{
 					const bool inDefenseReach = IsCellInKnownEnemyDefenseReach(pHouse, fc, 1);
 					MobileFactorySpot spot {};
