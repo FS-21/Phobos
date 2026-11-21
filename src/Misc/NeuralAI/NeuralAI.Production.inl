@@ -7570,6 +7570,63 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				"docks %d with %d aircraft that need one, frame %d.\n", pHouse->ArrayIndex, pDoneType ? pDoneType->ID : "?",
 				static_cast<int>(pFactory->Object->WhatAmI()), pFactory->OnHold ? 1 : 0, pFactory->IsSuspended ? 1 : 0,
 				pHouse->AirportDocks, dockingAircraft, Unsorted::CurrentFrame);
+
+			// TEMP diagnostic (match #13444, 2026-11-21: a GDIMCV finished in the only war factory stayed in it for
+			// 55800 frames, the house fell from 10 vehicles to 1): every finished production is suspended (the
+			// factory stops at step 54), so what keeps it in is the exit. A war factory still in its unload mission
+			// answers busy (0x4444A0) until the unit it unloads has gone: the building, its mission and step, the
+			// unit it is in radio contact with (where, mission, destination, plan, last order) and the free
+			// factories of its type that could take the exit over.
+			if (pFactory->Object->WhatAmI() == AbstractType::Unit)
+			{
+				for (auto const pFactoryBld : pHouse->Buildings)
+				{
+					if (!pFactoryBld || pFactoryBld->Factory != pFactory || !pFactoryBld->Type)
+						continue;
+
+					const CellStruct fc = pFactoryBld->GetMapCoords();
+					int freeSameType = 0;
+
+					for (auto const pOther : pHouse->Buildings)
+					{
+						if (pOther && pOther != pFactoryBld && pOther->Type == pFactoryBld->Type && !pOther->Factory
+							&& pOther->GetCurrentMission() == Mission::Guard)
+						{
+							freeSameType++;
+						}
+					}
+
+					FootClass* pContact = nullptr;
+
+					for (int i = 0; !pContact && pFactoryBld->RadioLinks.IsAllocated && i < pFactoryBld->RadioLinks.Capacity; ++i)
+						pContact = abstract_cast<FootClass*>(pFactoryBld->GetNthLink(i));
+
+					char contactText[256] = "none";
+
+					if (pContact)
+					{
+						auto const pContactType = pContact->GetTechnoType();
+						const CellStruct cc = pContact->GetMapCoords();
+						const CellStruct dest = pContact->Destination ? CellClass::Coord2Cell(pContact->Destination->GetCoords()) : CellStruct { -1, -1 };
+						auto const& callers = LastOrderCaller[std::clamp(pHouse->ArrayIndex, 0, 31)];
+						auto const itCaller = callers.find(pContact->UniqueID);
+
+						std::snprintf(contactText, sizeof(contactText), "%s %u at (%d,%d) %d cells away, mission %d queued %d, limbo %d, destination (%d,%d), "
+							"plan %d, transport op %d, last order %s %s:%d at frame %d",
+							pContactType ? pContactType->ID : "?", pContact->UniqueID, cc.X, cc.Y, static_cast<int>(cc.DistanceFrom(fc)),
+							static_cast<int>(pContact->CurrentMission), static_cast<int>(pContact->QueuedMission), pContact->InLimbo ? 1 : 0,
+							dest.X, dest.Y, IsPlanMember(pHouse, pContact->UniqueID) ? 1 : 0, IsInTransportOp(pHouse, pContact->UniqueID) ? 1 : 0,
+							itCaller != callers.end() && itCaller->second.Kind ? itCaller->second.Kind : "-",
+							itCaller != callers.end() && itCaller->second.File ? itCaller->second.File : "-",
+							itCaller != callers.end() ? itCaller->second.Line : 0, itCaller != callers.end() ? itCaller->second.Frame : -1);
+					}
+
+					Debug::Log("[NeuralAI] House %d stuck exit DIAG: %s %u at (%d,%d), mission %d step %d, power %d, retry %d frames, contact %s, "
+						"free %s %d, frame %d.\n", pHouse->ArrayIndex, pFactoryBld->Type->ID, pFactoryBld->UniqueID, fc.X, fc.Y,
+						static_cast<int>(pFactoryBld->GetCurrentMission()), pFactoryBld->MissionStatus, pFactoryBld->IsPowerOnline() ? 1 : 0,
+						pFactoryBld->FactoryRetryTimer.GetTimeLeft(), contactText, pFactoryBld->Type->ID, freeSameType, Unsorted::CurrentFrame);
+				}
+			}
 		}
 	}
 
