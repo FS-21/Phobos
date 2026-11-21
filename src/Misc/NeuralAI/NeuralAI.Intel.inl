@@ -83,6 +83,45 @@ namespace
 		return pWeapon->Damage * std::max(1, pWeapon->Burst) * 60 / std::max(1, pWeapon->ROF);
 	}
 
+	// Firepower of a weapon for the vehicle pick (Firepower*): damage per 60 frames, times its mean
+	// Verses over the first FirepowerArmorCount armors, more with area damage, times its range.
+	int WeaponFirepowerOf(WeaponTypeClass* pWeapon)
+	{
+		const int rate = GetWeaponThreatRate(pWeapon);
+
+		if (rate <= 0 || !pWeapon->Warhead)
+			return 0;
+
+		int versesSum = 0;
+
+		for (int armor = 0; armor < FirepowerArmorCount; ++armor)
+		{
+			const double verses = GeneralUtils::GetWarheadVersusArmor(pWeapon->Warhead, static_cast<Armor>(armor));
+			versesSum += std::clamp(static_cast<int>(verses * 100.0 + 0.5), 0, 300);
+		}
+
+		const long long verses = versesSum / FirepowerArmorCount;
+		const long long area = 100 + std::clamp(static_cast<int>(pWeapon->Warhead->CellSpread * 35.0f), 0, 70);
+		const long long range = std::clamp(pWeapon->Range * 100 / (FirepowerRangeRefCells * Unsorted::LeptonsPerCell),
+			FirepowerRangeMinPercent, FirepowerRangeMostPercent);
+
+		return static_cast<int>(rate * verses * area * range / 1000000);
+	}
+
+	// The firepower bonus of a vehicle type in the pick: its best weapon (Firepower*).
+	int VehicleFirepowerScore(TechnoTypeClass* pType)
+	{
+		int best = 0;
+
+		for (int i = 0; i < 2; ++i)
+		{
+			auto const pWS = pType ? pType->GetWeapon(i) : nullptr;
+			best = std::max(best, pWS ? WeaponFirepowerOf(pWS->WeaponType) : 0);
+		}
+
+		return std::min(FirepowerScoreMost, best * FirepowerScorePerPoint);
+	}
+
 	// A main battle tank: a ground vehicle the rules call an armored fighting vehicle (Category=AFV)
 	// whose first weapon fights head on: it hits the ground, is no suicide (MainTankMinRangeCells),
 	// parasite, mind control or berserk gas, and does not wither against heavy armor (MainTankHeavyVersus); a

@@ -1513,6 +1513,16 @@ namespace
 		std::array<int, 8> AttackSectorWeight {};
 		// The same for enemy aircraft seen arriving near our base: where the guns that shoot up go.
 		std::array<int, 8> AirAttackSectorWeight {};
+		// Passenger fill (PassengerFill*): seated fighting vehicles held at home to fill, by UniqueID
+		// with the frame the hold began, and the ones whose hold is over.
+		std::unordered_map<DWORD, int> PassengerFillHolds {};
+		std::unordered_set<DWORD> PassengerFillDone {};
+		int PassengerFillFrame { -1 };
+		// Seats the held vehicles still have (the infantry pick reads it).
+		int PassengerSeatsWanted { 0 };
+		// TEMP passenger diagnostic: when it last logged, and the boarding orders given since.
+		int PassengerLogFrame { -1 };
+		int PassengerBoardOrders { 0 };
 		int AttackSectorDecayFrame { 0 };
 
 		// Match style (DrawMatchStyle / ApplyMatchStyle): per-match offsets of the plan and macro
@@ -2069,6 +2079,12 @@ namespace
 			this->SurvivalNextSellFrame = 0;
 			this->AttackSectorWeight.fill(0);
 			this->AirAttackSectorWeight.fill(0);
+			this->PassengerFillHolds.clear();
+			this->PassengerFillDone.clear();
+			this->PassengerFillFrame = -1;
+			this->PassengerSeatsWanted = 0;
+			this->PassengerLogFrame = -1;
+			this->PassengerBoardOrders = 0;
 			this->AttackSectorDecayFrame = 0;
 			this->StyleOffset.fill(0);
 			this->Opening = 0;
@@ -2959,6 +2975,36 @@ namespace
 	constexpr int GroundCoverPointsPerTower = 100;
 	constexpr int GroundCoverMostPerAsset = 3;
 	constexpr int ToProtectCoverCells = 7;
+	// Passenger fill (user, 2026-11-21: «sin tropas son muy inservibles», P1 and P2): a seated fighting
+	// vehicle (open-topped with seats, a Battle Fortress; or a gunner vehicle, an IFV) built with seats
+	// left within PassengerFillHomeCells of home stays out of the waves for PassengerFillHoldFrames at
+	// most, once per vehicle, while our nearest fit soldiers within PassengerFillReachCells of it on its
+	// ground board it (checked every PassengerFillCheckFrames). A fit soldier has a gun that hits from
+	// PassengerGunMinRange or farther and no special job (engineer, dog, thief, spy). While held
+	// vehicles have seats, a fit soldier gains PassengerSeatInfantryBonus per seat in the infantry
+	// pick, up to PassengerSeatInfantryMost. In a wave that stands (gathering at its staging point),
+	// a vehicle with seats left takes fit soldiers of the wave standing within
+	// PassengerStagingReachCells. TEMP "passenger DIAG" every PassengerLogFrames.
+	constexpr int PassengerFillHomeCells = 20;
+	constexpr int PassengerFillHoldFrames = 1200;
+	constexpr int PassengerFillReachCells = 16;
+	constexpr int PassengerFillCheckFrames = 90;
+	constexpr int PassengerGunMinRange = 384;
+	constexpr int PassengerSeatInfantryBonus = 200;
+	constexpr int PassengerSeatInfantryMost = 1000;
+	constexpr int PassengerStagingReachCells = 8;
+	constexpr int PassengerLogFrames = 2700;
+	// Firepower in the vehicle pick (user, 2026-11-21, P3: the Prism Tank tied with a Grizzly and lost
+	// to an empty Battle Fortress, its base counting cost and strength only): the best weapon's damage
+	// per 60 frames, times its mean Verses over the first FirepowerArmorCount armors, more with area
+	// damage (CellSpread), times its range against FirepowerRangeRefCells (FirepowerRangeMinPercent to
+	// FirepowerRangeMostPercent); FirepowerScorePerPoint per point, up to FirepowerScoreMost.
+	constexpr int FirepowerArmorCount = 9;
+	constexpr int FirepowerRangeRefCells = 6;
+	constexpr int FirepowerRangeMinPercent = 50;
+	constexpr int FirepowerRangeMostPercent = 200;
+	constexpr int FirepowerScorePerPoint = 12;
+	constexpr int FirepowerScoreMost = 1500;
 	// Defense sectors (user, 2026-11-21: place the defenses by where the enemy is near and where it
 	// attacked, as the Advanced AI did): a defense with no attack or key asset to answer goes to the
 	// sector of home (AttackSectorOf) with the most threat per defense of its kind standing there

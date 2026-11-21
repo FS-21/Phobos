@@ -674,7 +674,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		const NeuralSectionTimer sectionTimer { pHouse->ArrayIndex, NeuralSection::Micro };
 		UpdateArmyLedger(pHouse);
 		UpdateRepairTrips(pHouse);
-		TraceParkedFerries(pHouse->ArrayIndex, "army ledger and repair trips");
+		// Seated fighting vehicles fill before the wave dispatch reads who is free.
+		UpdatePassengerFill(pHouse);
+		TraceParkedFerries(pHouse->ArrayIndex, "army ledger, repair trips and passenger fill");
 		NeuralAI::ExecuteTacticalAndSpecOpsMicro(pHouse, scores);
 		TraceParkedFerries(pHouse->ArrayIndex, "tactical micro");
 	}
@@ -6089,7 +6091,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			}
 		}
 
-		int score = (pUnit->Cost / 4) + (pUnit->Strength / 3);
+		// Cost and strength, and what its weapon does (VehicleFirepowerScore).
+		const int unitFirepower = VehicleFirepowerScore(pUnit);
+		int score = (pUnit->Cost / 4) + (pUnit->Strength / 3) + unitFirepower;
 		score -= std::min(1200, ownedUnitWithConv * 55);
 		if (!hasActiveUnitIncome)
 		{
@@ -6482,7 +6486,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					: (isTransportClass ? 'P'
 						: ((isUnarmedSupportVehicle || IsRepairerUnitType(pUnit)) ? 'S'
 							: (isAA ? 'A' : (isArtillery ? 'G' : (isMainTank ? 'T' : 'L')))))));
-				const int diagBase = pUnit->Cost / 4 + pUnit->Strength / 3;
+				const int diagBase = pUnit->Cost / 4 + pUnit->Strength / 3 + unitFirepower;
 				const int diagPenalty = std::min(1200, ownedUnitWithConv * 55);
 				unitPickDiags.push_back({ pUnit, diagClass, diagBase, diagPenalty, diagCounter, diagPostClass - diagPreClass,
 					score - diagPostClass + (diagPreClass - diagBase + diagPenalty - diagCounter), score });
@@ -6989,6 +6993,12 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			[pInf](const std::pair<int, int>& entry) { return entry.first == pInf->ArrayIndex; });
 		const int garrisonedOfType = itGarrisoned != garrisonedByType.end() ? itGarrisoned->second : 0;
 		score -= std::min(600, std::max(0, pHouse->CountOwnedNow(pInf) - garrisonedOfType) * 20);
+
+		// Seats waiting in our seated fighting vehicles (UpdatePassengerFill) ask for fit soldiers.
+		const int passengerSeatsWanted = GetMacroState(pHouse).PassengerSeatsWanted;
+
+		if (passengerSeatsWanted > 0 && IsFitPassengerSoldierType(pInf))
+			score += std::min(PassengerSeatInfantryMost, passengerSeatsWanted * PassengerSeatInfantryBonus);
 
 		const auto pWpnStruct = pInf->GetWeapon(0);
 		const auto pWpn = pWpnStruct ? pWpnStruct->WeaponType : nullptr;
