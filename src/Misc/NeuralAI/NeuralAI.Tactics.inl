@@ -2863,6 +2863,55 @@ namespace
 
 		macro.OffensiveStoneCells = std::move(stillPending);
 
+		// Bridgeheads (BridgeheadEnemyCells): a building of ours taken from an enemy near a known building
+		// of an enemy, one to build around, becomes a stone of the offensive crawl.
+		for (auto const pB : BuildingClass::Array)
+		{
+			if (!pB || !pB->IsAlive || pB->InLimbo || !pB->Type || !pB->Type->Capturable || !pB->Owner)
+				continue;
+
+			const int owner = pB->Owner->IsNeutral() ? -1 : pB->Owner->ArrayIndex;
+			auto const [it, inserted] = macro.CapturableOwners.try_emplace(pB->UniqueID, owner);
+			const int previous = it->second;
+			it->second = owner;
+
+			if (inserted || previous == owner || pB->Owner != pHouse || previous < 0 || previous >= HouseClass::Array.Count)
+				continue;
+
+			auto const pFormer = HouseClass::Array.GetItem(previous);
+			auto const pType = pB->Type;
+
+			if (!pFormer || pFormer == pHouse || pHouse->IsAlliedWith(pFormer)
+				|| !(pType->BaseNormal || pType->ConstructionYard || pType->Factory != AbstractType::None || BuildingTypeExt::IsAIBaseNormal(pType))
+				|| std::find(macro.OffensiveStones.begin(), macro.OffensiveStones.end(), pB->UniqueID) != macro.OffensiveStones.end())
+			{
+				continue;
+			}
+
+			const CellStruct bc = pB->GetMapCoords();
+			const BuildingClass* pNearEnemy = nullptr;
+
+			for (auto const pEB : BuildingClass::Array)
+			{
+				if (pEB && pEB != pB && pEB->IsAlive && !pEB->InLimbo && pEB->Type && !pEB->Type->Insignificant && pEB->Owner
+					&& pEB->Owner != pHouse && !pHouse->IsAlliedWith(pEB->Owner) && !pEB->Owner->IsNeutral()
+					&& pEB->GetMapCoords().DistanceFrom(bc) <= BridgeheadEnemyCells && IsEnemyBuildingKnown(pHouse, pEB))
+				{
+					pNearEnemy = pEB;
+					break;
+				}
+			}
+
+			if (!pNearEnemy)
+				continue;
+
+			macro.OffensiveStones.push_back(pB->UniqueID);
+			CountDecision(NeuralDecision::CrawlStoneForward, pHouse->ArrayIndex);
+			Debug::Log("[NeuralAI] House %d bridgehead (TEMP): %s at (%d,%d) taken from house %d, %s of house %d %d cells away, frame %d.\n",
+				pHouse->ArrayIndex, pType->ID, bc.X, bc.Y, previous, pNearEnemy->Type->ID, pNearEnemy->Owner->ArrayIndex,
+				static_cast<int>(pNearEnemy->GetMapCoords().DistanceFrom(bc)), now);
+		}
+
 		std::vector<DWORD> alive;
 
 		for (const DWORD id : macro.OffensiveStones)

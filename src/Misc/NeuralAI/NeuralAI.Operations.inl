@@ -1564,6 +1564,31 @@ namespace
 		// Its post is where it stands now, not the gathering spot on the land it left.
 		pFoot->SetArchiveTarget(pFoot->GetCell());
 
+		// A back door's engineer enters the building it was carried to while that is still an enemy's
+		// to take; otherwise it is let go to the captures of SpecOps.
+		auto const pEngineerInf = abstract_cast<InfantryClass*>(pFoot);
+
+		if (member.Client == NeuralOpClient::Strike && pEngineerInf && pEngineerInf->Type && pEngineerInf->Type->Engineer)
+		{
+			auto const pCell = MapClass::Instance.TryGetCellAt(member.Target);
+			auto const pBld = pCell ? pCell->GetBuilding() : nullptr;
+
+			if (pBld && pBld->IsAlive && !pBld->InLimbo && pBld->Type && pBld->Type->Capturable && pBld->Owner && pBld->Owner != pHouse
+				&& !pHouse->IsAlliedWith(pBld->Owner))
+			{
+				OrderFootToEnter(pFoot, pBld);
+				Debug::Log("[NeuralAI] House %d back door: engineer %u set down, enters %s at (%d,%d), frame %d.\n", pHouse->ArrayIndex,
+					member.UniqueID, pBld->Type->ID, member.Target.X, member.Target.Y, Unsorted::CurrentFrame);
+
+				return;
+			}
+
+			GetMacroState(pHouse).EngineerCaptureTargets.erase(member.UniqueID);
+			pFoot->SetDestination(nullptr, true);
+
+			return;
+		}
+
 		// A back door's member attacks the building it was carried to; kept as a wave goal, the wave
 		// dispatch does not send it elsewhere.
 		if (member.Client == NeuralOpClient::Wave || member.Client == NeuralOpClient::Strike)
@@ -2309,9 +2334,9 @@ namespace
 
 				// Engineer claims (EngineerClaim*): an engineer whose claimed building is no longer to take
 				// (gone, ours or an ally's, no longer capturable) or that an engineer ahead of it goes for
-				// stays home: let go before it boards.
-				if (member.Client == NeuralOpClient::Economy && pFoot->WhatAmI() == AbstractType::Infantry
-					&& EngineerClaimWanted(pHouse, member.UniqueID) == 0)
+				// stays home: let go before it boards. So does a back door's engineer.
+				if ((member.Client == NeuralOpClient::Economy || member.Client == NeuralOpClient::Strike)
+					&& pFoot->WhatAmI() == AbstractType::Infantry && EngineerClaimWanted(pHouse, member.UniqueID) == 0)
 				{
 					Debug::Log("[NeuralAI] House %d transport op %d lets %s %u go: its capture is no longer to make, frame %d.\n", houseIndex,
 						op.Id, pFoot->GetTechnoType()->ID, member.UniqueID, now);
@@ -4408,11 +4433,38 @@ namespace
 			return;
 		}
 
-		// The front: the target of the house's latest wave, on the house's own ground, with defenses.
+		// The front: the target of the house's latest wave, on the house's own ground, with defenses. It
+		// stays live while the wave still fights there (BackdoorLiveFront*).
 		const CellStruct front = macro.LastWaveTargetCell;
 		const CellStruct home = pHouse->GetBaseCenter();
+		const int waveAge = now - macro.LastWaveDispatchFrame;
+		bool liveFront = front != CellStruct::Empty && home != CellStruct::Empty && waveAge >= 0 && waveAge <= BackdoorFrontFrames;
 
-		if (front == CellStruct::Empty || home == CellStruct::Empty || now - macro.LastWaveDispatchFrame > BackdoorFrontFrames)
+		if (!liveFront && front != CellStruct::Empty && home != CellStruct::Empty && waveAge >= 0 && waveAge <= BackdoorLiveFrontFrames)
+		{
+			int fighting = 0;
+
+			for (auto const pFoot : FootClass::Array)
+			{
+				if (!pFoot || pFoot->Owner != pHouse || pFoot->InLimbo || !pFoot->IsAlive
+					|| (pFoot->WhatAmI() != AbstractType::Unit && pFoot->WhatAmI() != AbstractType::Infantry))
+				{
+					continue;
+				}
+
+				auto const pFootType = pFoot->GetTechnoType();
+				auto const pFootWeapon = pFootType ? pFootType->GetWeapon(0, false).WeaponType : nullptr;
+
+				if (pFootWeapon && pFootWeapon->Damage > 0 && pFoot->GetMapCoords().DistanceFrom(front) <= BackdoorFrontCells
+					&& ++fighting >= BackdoorLiveFrontUnits)
+				{
+					liveFront = true;
+					break;
+				}
+			}
+		}
+
+		if (!liveFront)
 		{
 			stop(NoFront);
 			return;
@@ -4426,9 +4478,35 @@ namespace
 			return;
 		}
 
-		const int frontDefenses = CountKnownEnemyDefensesNear(pHouse, front, BackdoorFrontCells, false);
+		// Idle engineers of ours at home on its ground, unclaimed: they may ride to take the target.
+		auto const isIdleHomeEngineer = [&](FootClass* pFoot) -> bool
+		{
+			auto const pInf = abstract_cast<InfantryClass*>(pFoot);
 
-		if (frontDefenses < BackdoorMinDefenses)
+			if (!pInf || pInf->Owner != pHouse || pInf->InLimbo || !pInf->IsAlive || pInf->Transporter || !pInf->Type || !pInf->Type->Engineer)
+				return false;
+
+			const Mission mission = pInf->CurrentMission;
+
+			return (mission == Mission::Guard || mission == Mission::Area_Guard || mission == Mission::Sleep) && !pInf->Target
+				&& !pInf->Destination && !IsPlanMember(pHouse, pInf->UniqueID) && !IsInTransportOp(pHouse, pInf->UniqueID)
+				&& !macro.EngineerCaptureTargets.contains(pInf->UniqueID) && pInf->GetMapCoords().DistanceFrom(home) <= BackdoorHomeCells
+				&& OpFootGroundZone(pInf) == homeZone;
+		};
+
+		int idleEngineers = 0;
+
+		for (auto const pInf : InfantryClass::Array)
+		{
+			if (isIdleHomeEngineer(pInf))
+				idleEngineers++;
+		}
+
+		// With engineers to take the target, a front with few defenses is no reason to wait.
+		const int frontDefenses = CountKnownEnemyDefensesNear(pHouse, front, BackdoorFrontCells, false);
+		const bool fewFrontDefenses = frontDefenses < BackdoorMinDefenses;
+
+		if (fewFrontDefenses && idleEngineers == 0)
 		{
 			stop(FewDefenses);
 			return;
@@ -4472,11 +4550,14 @@ namespace
 		};
 
 		// The building: known, of that house, worth a strike (a factory, a construction yard, a power plant,
-		// a refinery, a superweapon), far enough from the wave's target, with a safe landing by it.
+		// a refinery, a superweapon, a ToProtect one), far enough from the wave's target, with a safe
+		// landing by it. One our engineers can take comes first (BackdoorCaptureScore), and the only one
+		// when the front has few defenses.
 		BuildingClass* pTarget = nullptr;
 		CellStruct landing = CellStruct::Empty;
 		int landingDanger = 0;
 		int bestScore = INT_MIN;
+		bool targetToCapture = false;
 
 		for (auto const pBld : BuildingClass::Array)
 		{
@@ -4486,10 +4567,17 @@ namespace
 			auto const pType = pBld->Type;
 
 			if (pType->Factory == AbstractType::None && !pType->ConstructionYard && pType->PowerBonus <= 0 && !pType->Refinery
-				&& pType->SuperWeapon == -1)
+				&& pType->SuperWeapon == -1 && !pType->ToProtect)
 			{
 				continue;
 			}
+
+			const bool toCapture = idleEngineers > 0 && pType->Capturable
+				&& (pType->ConstructionYard || pType->Factory != AbstractType::None || pType->SuperWeapon != -1 || pType->ToProtect)
+				&& !IsCaptureClaimedByOther(pHouse, pBld, 0, false);
+
+			if (fewFrontDefenses && !toCapture)
+				continue;
 
 			const CellStruct bc = pBld->GetMapCoords();
 			const double gap = bc.DistanceFrom(front);
@@ -4499,7 +4587,7 @@ namespace
 				continue;
 
 			const int guards = CountKnownEnemyDefensesNear(pHouse, bc, BackdoorGuardCells, false);
-			const int score = static_cast<int>(gap) * 10 - guards * 100;
+			const int score = static_cast<int>(gap) * 10 - guards * 100 + (toCapture ? BackdoorCaptureScore : 0);
 
 			if (score <= bestScore)
 				continue;
@@ -4514,6 +4602,7 @@ namespace
 			landing = here;
 			landingDanger = danger;
 			bestScore = score;
+			targetToCapture = toCapture;
 		}
 
 		if (!pTarget)
@@ -4634,12 +4723,46 @@ namespace
 			return;
 		}
 
+		// The engineers that take the target ride with the team, the nearest to the base first; the first
+		// one claims the building (a second claim would let the second go before it boards).
+		int engineersTaken = 0;
+
+		if (targetToCapture)
+		{
+			std::vector<std::pair<double, FootClass*>> engineers;
+
+			for (auto const pInf : InfantryClass::Array)
+			{
+				if (isIdleHomeEngineer(pInf) && canCarry(pInf->Type, pInf->GetMapCoords()))
+					engineers.push_back({ pInf->GetMapCoords().DistanceFrom(home), pInf });
+			}
+
+			std::stable_sort(engineers.begin(), engineers.end(), [](const auto& a, const auto& b)
+				{
+					return a.first < b.first || (a.first == b.first && a.second->UniqueID < b.second->UniqueID);
+				});
+
+			for (auto const& [distance, pEngineer] : engineers)
+			{
+				if (engineersTaken >= BackdoorEngineers)
+					break;
+
+				if (!RequestStrikeTransport(pHouse, pEngineer, landing, pTarget->GetMapCoords()))
+					continue;
+
+				if (engineersTaken == 0)
+					macro.EngineerCaptureTargets[pEngineer->UniqueID] = { pTarget->UniqueID, now };
+
+				engineersTaken++;
+			}
+		}
+
 		stop(Started);
 		macro.BackdoorRetryUntil = now + BackdoorRetryFrames;
-		Debug::Log("[NeuralAI] House %d back door: %d units to %s at (%d,%d) of house %d, landing (%d,%d) danger %d, %d cells from the wave's "
-			"target (%d,%d) with %d defenses, frame %d.\n", pHouse->ArrayIndex, taken, pTarget->Type->ID, pTarget->GetMapCoords().X,
-			pTarget->GetMapCoords().Y, pVictim->ArrayIndex, landing.X, landing.Y, landingDanger,
-			static_cast<int>(pTarget->GetMapCoords().DistanceFrom(front)), front.X, front.Y, frontDefenses, now);
+		Debug::Log("[NeuralAI] House %d back door: %d units and %d engineers to %s at (%d,%d) of house %d, landing (%d,%d) danger %d, %d cells "
+			"from the wave's target (%d,%d) with %d defenses, wave sent %d frames ago, frame %d.\n", pHouse->ArrayIndex, taken, engineersTaken,
+			pTarget->Type->ID, pTarget->GetMapCoords().X, pTarget->GetMapCoords().Y, pVictim->ArrayIndex, landing.X, landing.Y, landingDanger,
+			static_cast<int>(pTarget->GetMapCoords().DistanceFrom(front)), front.X, front.Y, frontDefenses, waveAge, now);
 	}
 
 	// Runs the house's transport operations once per AI tick, after every other part of the tick
