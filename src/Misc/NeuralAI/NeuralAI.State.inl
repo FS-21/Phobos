@@ -2916,6 +2916,26 @@ namespace
 	constexpr int AntiAirUnitMissingMost = 1500;
 	constexpr int AirDeficitSlotDivisor = 4;
 	constexpr int AirDeficitSlotLongMost = 1000;
+	// Ground defenses as the anti-air (user, 2026-11-21: «yo lo haría como en el aire, más adaptativo
+	// según amenazas»): the ground level stops at DefenseMaxValue and the enemy ground and naval
+	// forces that came at our base come on top of it (EnemyGroundThreatValue: the remembered
+	// sightings that reached our buildings, their combat value over GroundThreatValuePerPoint, fading
+	// with their age). While that threat stands and the towers are short of the value, one more takes
+	// no count penalty and gains GroundDefenseMissingTowerBonus per tower missing, up to
+	// GroundDefenseMissingTowerMost. Each key asset wants one tower, one more per
+	// GroundCoverPointsPerTower of that threat, up to GroundCoverMostPerAsset; a ToProtect one counts
+	// the towers within ToProtectCoverCells, as the Advanced AI protects it, the rest within
+	// CoverageDefenseCells.
+	constexpr int GroundThreatValuePerPoint = 10;
+	// Enemy forces seen this close to home, not yet at our buildings, count at this percent (a blitz
+	// asks for its towers before it arrives).
+	constexpr int GroundThreatWatchCells = 36;
+	constexpr int GroundThreatApproachPercent = 50;
+	constexpr int GroundDefenseMissingTowerBonus = 250;
+	constexpr int GroundDefenseMissingTowerMost = 2000;
+	constexpr int GroundCoverPointsPerTower = 100;
+	constexpr int GroundCoverMostPerAsset = 3;
+	constexpr int ToProtectCoverCells = 7;
 	// Defense sectors (user, 2026-11-21: place the defenses by where the enemy is near and where it
 	// attacked, as the Advanced AI did): a defense with no attack or key asset to answer goes to the
 	// sector of home (AttackSectorOf) with the most threat per defense of its kind standing there

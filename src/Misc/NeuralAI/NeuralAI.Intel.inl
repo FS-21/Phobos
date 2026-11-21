@@ -949,6 +949,53 @@ namespace
 		return std::clamp(1 + enemyAirValue / AirCoverValuePerGun, 1, AirCoverMostPerAsset);
 	}
 
+	// Enemy ground and naval forces that came at our base (seen within reach of our buildings) and,
+	// at GroundThreatApproachPercent, those seen within GroundThreatWatchCells of home: a blitz
+	// asks for its towers before it reaches the base. Remembered for EnemySightingMemoryFrames,
+	// fading with age, in ground defense points.
+	int EnemyGroundThreatValue(HouseClass* pHouse)
+	{
+		const CellStruct home = GetHouseHomeCell(pHouse);
+		int value = 0;
+
+		for (auto const& [uid, sighting] : GetMacroState(pHouse).EnemySightings)
+		{
+			const int age = Unsorted::CurrentFrame - sighting.LastSeenFrame;
+
+			if (sighting.Category == EnemyForceCategory::Air || age < 0 || age > EnemySightingMemoryFrames || !sighting.Type)
+				continue;
+
+			// Harvesters and other unarmed units ask for no tower (TechnoTypeClass::GetWeapon is not const-qualified in YRpp).
+			auto const pSeenType = const_cast<TechnoTypeClass*>(sighting.Type);
+			auto const pW0 = pSeenType->GetWeapon(0);
+			auto const pW1 = pSeenType->GetWeapon(1);
+
+			if (!(pW0 && pW0->WeaponType) && !(pW1 && pW1->WeaponType))
+				continue;
+
+			const int weighted = sighting.Value * (EnemySightingMemoryFrames - age) / EnemySightingMemoryFrames;
+
+			if (sighting.NearOurBase)
+				value += weighted;
+			else if (home != CellStruct::Empty && sighting.LastCoords.DistanceFrom(home) <= GroundThreatWatchCells)
+				value += weighted * GroundThreatApproachPercent / 100;
+		}
+
+		return value / GroundThreatValuePerPoint;
+	}
+
+	// Ground towers a key asset wants within its cover against this ground threat (points).
+	int GroundCoverTowersPerAsset(int groundThreat)
+	{
+		return std::clamp(1 + groundThreat / GroundCoverPointsPerTower, 1, GroundCoverMostPerAsset);
+	}
+
+	// Reach within which the towers of a key asset count as its cover.
+	int GroundCoverCellsFor(const BuildingTypeClass* pType)
+	{
+		return pType && pType->ToProtect ? ToProtectCoverCells : CoverageDefenseCells;
+	}
+
 	// Units of this anti-air type it takes to cover the remembered enemy air threat our anti-air
 	// (units, guns and aircraft that shoot up, OwnAACapacity) leaves uncovered; 0 without one.
 	int AntiAirUnitsMissing(HouseClass* pHouse, const TechnoTypeClass* pType)
