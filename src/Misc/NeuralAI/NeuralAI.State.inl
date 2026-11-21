@@ -1603,6 +1603,9 @@ namespace
 		// Back door (UpdateBackdoor): the last check, and no new one before this frame.
 		int BackdoorCheckFrame { -1 };
 		int BackdoorRetryUntil { -1 };
+		// Bridgeheads (UpdateOffensiveStones): the last owner seen of each capturable building (-1
+		// neutral), so a building of ours taken from an enemy is told from one we built.
+		std::unordered_map<DWORD, int> CapturableOwners {};
 		// Crossings shut after an operation ended with no transport (OpNoTransportRetryFrames): the
 		// frame they open again, by CrossingBlockKey (client and the two lands).
 		std::unordered_map<long long, int> CrossingBlockedUntil;
@@ -2113,6 +2116,7 @@ namespace
 			this->ShuttleRetryUntil = -1;
 			this->BackdoorCheckFrame = -1;
 			this->BackdoorRetryUntil = -1;
+			this->CapturableOwners.clear();
 			this->CrossingBlockedUntil.clear();
 			this->ShuttleNoRideLogFrame = -1;
 			this->ShuttleCreditsTotal = 0;
@@ -2738,6 +2742,25 @@ namespace
 	constexpr double BackdoorDeliverCells = 12.0;
 	constexpr int BackdoorLandingCandidateCells = 8;
 	constexpr int BackdoorRetryFrames = 5400;
+	// Back door with engineers and bridgeheads (user, 2026-11-21: «acepto tus propuestas B1 a B3»; 1 back
+	// door in 40 matches, 4777 of its checks found no front, 903 too few defenses there; 0 enemy yards
+	// taken):
+	// - The front stays live past BackdoorFrontFrames while BackdoorLiveFrontUnits or more armed ground
+	//   units of ours stand within BackdoorFrontCells of the wave's target, up to BackdoorLiveFrontFrames
+	//   after its dispatch: the strike falls on the far side while the wave keeps the base busy.
+	// - With idle engineers of ours at home, a capturable target worth taking (a construction yard, a
+	//   factory, a superweapon, a ToProtect building) gains BackdoorCaptureScore in the choice, and with
+	//   one the front needs no defenses. Up to BackdoorEngineers of them ride with the team (the first
+	//   claims the building, EngineerCaptureTargets) and enter it once set down; one whose building is
+	//   gone or no longer to take is let go to the captures of SpecOps.
+	// - A building of ours taken from an enemy (not neutral) within BridgeheadEnemyCells of a known
+	//   building of an enemy becomes a stone of the offensive crawl (OffensiveStones): towers cover it
+	//   as a key asset, the front factories and the crawl anchor on it.
+	constexpr int BackdoorLiveFrontUnits = 3;
+	constexpr int BackdoorLiveFrontFrames = 9000;
+	constexpr int BackdoorCaptureScore = 400;
+	constexpr int BackdoorEngineers = 2;
+	constexpr double BridgeheadEnemyCells = 20.0;
 	// Capture barracks (user): a house with buildings of its own on a land where a tech it would take
 	// stands (neutral, or one an enemy took: oil derricks, tech buildings) and no barracks of its own
 	// there builds a barracks next to that tech, so its engineer walks a few cells instead of crossing
