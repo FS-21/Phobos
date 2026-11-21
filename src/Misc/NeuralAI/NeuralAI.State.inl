@@ -2469,6 +2469,9 @@ namespace
 		int Frame { -1 };
 		int OrderFrame { -1 };
 		bool Lifted { false };
+		// The engine took the pickup (the vehicle linked to the carryall), and how often it was sent again.
+		bool Accepted { false };
+		int Retries { 0 };
 	};
 
 	std::unordered_map<DWORD, NeuralAirliftJob> AirliftJobs;
@@ -2484,6 +2487,8 @@ namespace
 
 	constexpr int CarryallPickupTimeoutFrames = 900;
 	constexpr int CarryallRefusedPickupFrames = 1800;
+	// A pickup the engine took and then dropped is sent again up to CarryallPickupRetries times.
+	constexpr int CarryallPickupRetries = 2;
 	constexpr int CarryallRefusalLogLines = 40;
 	// A carryall takes a vehicle of ours where it is going (an expansion deployer to its site, a wave
 	// vehicle far behind the forward staging point to that point) when the trip is AirliftGoalMinCells

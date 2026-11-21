@@ -249,7 +249,8 @@ namespace
 	}
 
 	// The real pickup order of a carryall went out (AdvanceRoutedPickup): its job counts the frame, and the
-	// order helpers leave the vehicle where it is until it is aboard (AirliftCargoHolds).
+	// order helpers leave the vehicle where it is until it is aboard (AirliftCargoHolds). The vehicle drops
+	// its attack-move, which the engine would take up again after the carryall told it to hold still.
 	void NoteAirliftPickupOrder(AircraftClass* pCarryall, UnitClass* pCargo)
 	{
 		auto& job = AirliftJobs[pCarryall->UniqueID];
@@ -259,6 +260,9 @@ namespace
 
 		job.OrderFrame = Unsorted::CurrentFrame;
 		AirliftCargoHolds[pCargo->UniqueID] = pCarryall->UniqueID;
+
+		if (pCargo->MegaMission == Mission::AttackMove)
+			pCargo->ClearMegaMissionData();
 	}
 
 	// Ends the airlift job of a carryall (AirliftJobs) and frees its vehicle. A pickup that went wrong (how
@@ -16921,7 +16925,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// when the pickup went wrong: the engine turned the ride down (the carryall is back on Guard with no
 		// destination) or the vehicle was not aboard CarryallPickupTimeoutFrames after the pickup order.
 		// Once that order is out the carryall is left alone: over the vehicle it reads as idle, and an order
-		// given again starts its landing over.
+		// given again starts its landing over. On its way down it flies to the landing cell, so only Guard
+		// says the pickup was dropped. A vehicle that moved off its cell before the landing makes the engine
+		// ask again, and it turns down a vehicle tethered to the carryall: a pickup the engine had taken is
+		// sent again (CarryallPickupRetries) while the vehicle stands still.
 		if (pAir->Type->Carryall)
 		{
 			if (auto const itJob = AirliftJobs.find(pAir->UniqueID); itJob != AirliftJobs.end())
@@ -16950,12 +16957,15 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					const int sinceOrder = Unsorted::CurrentFrame - job.OrderFrame;
 					auto const pDestUnit = abstract_cast<UnitClass*>(pAir->Destination);
 					const bool timedOut = sinceOrder < 0 || sinceOrder > CarryallPickupTimeoutFrames;
+					const bool onItsWay = pDestUnit && pDestUnit->UniqueID == job.CargoID;
+					const bool backOnGuard = pAir->CurrentMission == Mission::Guard || pAir->CurrentMission == Mission::Area_Guard
+						|| pAir->CurrentMission == Mission::Sleep;
 
-					if (!timedOut && ((pDestUnit && pDestUnit->UniqueID == job.CargoID) || pAir->QueuedMission == Mission::Move
-						|| !isAirIdle || sinceOrder == 0))
-					{
+					if (onItsWay && pDestUnit->ContainsLink(pAir))
+						job.Accepted = true;
+
+					if (!timedOut && (onItsWay || pAir->QueuedMission == Mission::Move || !backOnGuard || sinceOrder == 0))
 						continue;
-					}
 
 					// A pickup that ran out of time is called off: lifted later with no job, the vehicle would be
 					// set down by the rules of the other airlifts.
@@ -16966,18 +16976,33 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					}
 
 					// The vehicle still ours and on the ground: the pickup went wrong, else it is simply gone.
-					bool cargoThere = false;
+					UnitClass* pJobCargo = nullptr;
 
 					for (auto const pUnit : UnitClass::Array)
 					{
 						if (pUnit && pUnit->UniqueID == job.CargoID)
 						{
-							cargoThere = pUnit->IsAlive && !pUnit->InLimbo && pUnit->Owner == pHouse;
+							if (pUnit->IsAlive && !pUnit->InLimbo && pUnit->Owner == pHouse)
+								pJobCargo = pUnit;
+
 							break;
 						}
 					}
 
-					EndAirliftJob(pHouse, pAir, cargoThere ? (timedOut ? "not aboard in time" : "turned down") : nullptr);
+					if (!timedOut && pJobCargo && job.Accepted && job.Retries < CarryallPickupRetries
+						&& CanCarryallLiftUnit(pAir, pJobCargo) && CarryallRideAccepted(pJobCargo, pAir))
+					{
+						job.Retries++;
+						job.Accepted = false;
+						job.OrderFrame = -1;
+
+						if (AdvanceRoutedPickup(pHouse, pAir, pJobCargo))
+							NoteAirliftPickupOrder(pAir, pJobCargo);
+
+						continue;
+					}
+
+					EndAirliftJob(pHouse, pAir, pJobCargo ? (timedOut ? "not aboard in time" : "turned down") : nullptr);
 				}
 			}
 		}
