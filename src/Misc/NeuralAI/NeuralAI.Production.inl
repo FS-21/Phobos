@@ -1879,7 +1879,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		// added; while a raid lasts, a margin on top. Of that total, the enemy air power plus the
 		// margin is what the raid itself asks for: only that part goes ahead of other picks, the
 		// rest is built at leisure.
-		// The base and the most by difficulty (user, as the Advanced AI); no cap by number of guns.
+		// The base and the most by difficulty (user, as the Advanced AI). Only the level of the base
+		// stops at DefenseMaxValue: the enemy air power comes on top of it, with no cap on the number
+		// of guns (user, 2026-11-21: a big base is not covered with 11 guns; the Advanced AI adds the
+		// enemy aircraft value past its cap). The fog-fair memory of that power bounds it.
 		const int defenseDifficulty = std::clamp(houseDifficulty, 0, 2);
 		constexpr int airDefenseUrgentValue = 20;
 		constexpr int airDefenseStandingValue = 25;
@@ -1888,7 +1891,6 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		constexpr int airDefenseValuePerEnemyAirBase = 20;
 		constexpr int airDefenseEnemyAirBaseCap = 60;
 		constexpr int airDefenseRaidValue = 60;
-		const int maxWantedAirDefenses = DefenseMaxValue[defenseDifficulty] / airDefenseTypicalValue;
 		const bool airRaid = underAirAttack || activeThreatCat == NeuralThreatCategory::Air;
 		const int raidAirValue = airRaid ? enemyAirValue + airDefenseRaidValue : 0;
 		const bool enemyAirKnown = airRaid || enemyAirValue >= airDefenseUrgentValue;
@@ -1902,23 +1904,22 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 		const int announcedAirValue = std::min(knownEnemyAirBases * airDefenseValuePerEnemyAirBase, airDefenseEnemyAirBaseCap);
 		const bool keepsStandingAirDefense = ownedWarFactories >= 1 || ownedTechStructures >= 1 || announcedAirValue > 0;
-		const int wantedAirValue = std::min(DefenseMaxValue[defenseDifficulty], enemyAirKnown
-			? airDefenseBaseValue + ownedRefineries * airDefenseValuePerRefinery + std::max(enemyAirValue, announcedAirValue)
-				+ (airRaid ? airDefenseRaidValue : 0)
+		const int wantedAirValue = enemyAirKnown
+			? std::min(DefenseMaxValue[defenseDifficulty], airDefenseBaseValue + ownedRefineries * airDefenseValuePerRefinery)
+				+ std::max(enemyAirValue, announcedAirValue) + (airRaid ? airDefenseRaidValue : 0)
 			: (keepsStandingAirDefense
-				? airDefenseStandingValue + ownedRefineries * airDefenseValuePerRefinery + announcedAirValue
-				: 0));
+				? std::min(DefenseMaxValue[defenseDifficulty], airDefenseStandingValue + ownedRefineries * airDefenseValuePerRefinery + announcedAirValue)
+				: 0);
 		auto const airDefensesMissingFor = [&](int value) -> int
 		{
-			return std::min((std::max(0, value - ownedAntiAirValue) + airDefenseTypicalValue - 1) / airDefenseTypicalValue,
-				std::max(0, maxWantedAirDefenses - totalAntiAirDefenses));
+			return (std::max(0, value - ownedAntiAirValue) + airDefenseTypicalValue - 1) / airDefenseTypicalValue;
 		};
 
 		const int airDefenseDeficit = airDefensesMissingFor(wantedAirValue);
 		const int raidDefenseDeficit = airDefensesMissingFor(raidAirValue);
 		const int wantedAirDefenses = totalAntiAirDefenses + airDefenseDeficit;
 		const int baseMaxAA = 1 + ownedWarFactories + ownedTechStructures + defDensityMod + (underAirAttack ? 2 : 0);
-		const int maxAADefenses = std::clamp(std::max({ baseMaxAA, 1 + enemyAirValue / 30, wantedAirDefenses }), 2, maxWantedAirDefenses);
+		const int maxAADefenses = std::max({ 2, baseMaxAA, wantedAirDefenses });
 		const bool airRaidShortOfDefenses = raidDefenseDeficit > 0;
 		// With no ground attack on top, a raid short of guns leaves the towers that cannot shoot up for later.
 		const bool airRaidOnly = airRaidShortOfDefenses && !underVehicleAttack && !underInfantryAttack && !effectiveFrontlineThreat;
@@ -1931,8 +1932,11 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		// offensive crawl; anti-air too while the enemy has aircraft or air bases (sneak raids). The
 		// coverage comes on top of the level and of the defense budget, two towers per asset at most
 		// past the level: a coverage that was never met stood 98 towers in one base (match #9885).
+		// The anti-air cover counts every building a raid goes for (IsAirCoverAssetType) at home too,
+		// AirCoverGunsPerAsset guns each, since aircraft fly over the ground towers to them.
 		int functionalStructures = 0;
 		std::vector<CellStruct> coverageAssets;
+		std::vector<CellStruct> airCoverAssets;
 		std::vector<CellStruct> groundDefenseCells;
 		std::vector<CellStruct> antiAirDefenseCells;
 
@@ -1982,6 +1986,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 				if (keyAsset)
 					coverageAssets.push_back(bc);
+
+				if (keyAsset || IsAirCoverAssetType(pOT))
+					airCoverAssets.push_back(bc);
 			}
 		}
 
@@ -1992,6 +1999,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		};
 
 		const bool enemyHasAircraft = enemyAirValue > 0 || knownEnemyAirBases > 0;
+		const int airCoverGunsPerAsset = AirCoverGunsPerAsset(enemyAirValue);
 		int groundCoverageDeficit = 0;
 		int antiAirCoverageDeficit = 0;
 
@@ -1999,9 +2007,18 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		{
 			if (!coveredBy(asset, groundDefenseCells))
 				groundCoverageDeficit++;
+		}
 
-			if (enemyHasAircraft && !coveredBy(asset, antiAirDefenseCells))
-				antiAirCoverageDeficit++;
+		if (enemyHasAircraft)
+		{
+			for (auto const& asset : airCoverAssets)
+			{
+				const auto gunsNear = std::count_if(antiAirDefenseCells.begin(), antiAirDefenseCells.end(), [&asset](const CellStruct& dc)
+					{ return std::max(std::abs(asset.X - dc.X), std::abs(asset.Y - dc.Y)) <= CoverageDefenseCells; });
+
+				if (gunsNear < airCoverGunsPerAsset)
+					antiAirCoverageDeficit++;
+			}
 		}
 
 		int optimalGroundDefenseValue = DefenseBaseValue[defenseDifficulty] + ownedRefineries * DefenseValuePerRefinery
@@ -2020,7 +2037,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		const bool groundCoverageWanted = groundCoverageDeficit > 0
 			&& totalGroundDefenses < optimalGroundDefenseValue / GroundDefenseTypicalValue + coverageAssetCount;
 		const bool antiAirCoverageWanted = antiAirCoverageDeficit > 0
-			&& totalAntiAirDefenses < wantedAirValue / airDefenseTypicalValue + coverageAssetCount;
+			&& totalAntiAirDefenses < wantedAirValue / airDefenseTypicalValue + static_cast<int>(airCoverAssets.size()) * airCoverGunsPerAsset;
 		bool bestFillsAirDeficit = false;
 		int bestAirDefenseIdx = -1;
 		int bestAirDefenseScore = -32000;
@@ -3823,8 +3840,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 						noteAirDefense(pBld, 4, realPowerSurplus);
 
 					// A long-range gun held back by power alone asks for a plant: the power branch reads
-					// it at the next ticks (DefensePowerWantedFrames).
-					if (isDeadZoneTower)
+					// it at the next ticks (DefensePowerWantedFrames). So does a gun that shoots up while
+					// the anti-air is short: the plant came instead of it and nothing asked for it.
+					if (isDeadZoneTower || (isAntiAir && airDefenseDeficit > 0))
 					{
 						auto& gunMacro = GetMacroState(pHouse);
 
@@ -3894,8 +3912,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 				if (isPureAA)
 				{
-					// A raid short of guns takes no count penalty: each one that shoots up is one it still needs.
-					if (!fillsAirDeficit)
+					// A raid short of guns or a base short of its anti-air value takes no count penalty:
+					// each one that shoots up is one it still needs.
+					if (!fillsAirDeficit && airDefenseDeficit == 0)
 						score -= totalAADefenses * 320 + owned * 380;
 				}
 				else if (frontlineDefenseDeficit > 0 || enemyCloseToOurBuildings)
@@ -3933,11 +3952,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					score -= 650;
 				}
 
-				// AdvAI Proactive Enemy Air Value Scaling
+				// AdvAI Proactive Enemy Air Value Scaling: by the guns still missing for the wanted value.
 				if (isAntiAir && enemyAirValue > 0 && airDefenseDeficit > 0)
-				{
-					score += std::min(550, enemyAirValue * 4);
-				}
+					score += std::min(AirDefenseMissingGunMost, airDefenseDeficit * AirDefenseMissingGunBonus);
 
 				// An air raid asks for anti-air whether or not the engine counts it as an attack on the
 				// house: flying units that hit our units leave that mark untouched. With nothing of ours
@@ -4824,6 +4841,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	const int wantedAntiAirEscorts = (tankMass && ownedFrontLineVehicles >= TankMassEscortFromVehicles)
 		? std::max(1, ownedFrontLineVehicles / TankMassVehiclesPerEscort)
 		: 0;
+	// Anti-air vehicles in proportion to the uncovered air threat, any archetype (AntiAirUnits*).
+	const int antiAirVehicleRoom = std::max(0, std::max(AntiAirUnitsFloor, ownedFrontLineVehicles * AntiAirUnitsMostPercent / 100) - ownedAntiAirVehicles);
 
 	// Aircraft passenger transports (not carryalls) shuttle like amphibious transports, so
 	// they count toward the owned ferry capacity: no extra ship is built for the same demand.
@@ -6332,6 +6351,12 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				// The escort of the tank mass comes before any aircraft shows up.
 				if (ownedAntiAirVehicles < wantedAntiAirEscorts)
 					score += TankMassEscortBonus;
+
+				// As many as the air threat our anti-air leaves uncovered asks for, within the room of the front line.
+				const int missingAntiAir = std::min(AntiAirUnitsMissing(pHouse, pUnit), antiAirVehicleRoom);
+
+				if (missingAntiAir > 0)
+					score += std::min(AntiAirUnitMissingMost, missingAntiAir * AntiAirUnitMissingBonus);
 			}
 			else if (isArtillery)
 			{
@@ -6863,6 +6888,27 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		}
 	}
 
+	// Soldiers that shoot up in proportion to the uncovered air threat: at most AntiAirUnitsMostPercent
+	// of our infantry (AntiAirUnitsFloor at least).
+	int ownedInfantryCount = 0;
+	int ownedAntiAirInfantry = 0;
+
+	for (auto const pOwnInf : InfantryClass::Array)
+	{
+		if (!pOwnInf || pOwnInf->Owner != pHouse || pOwnInf->InLimbo || !pOwnInf->IsAlive || !pOwnInf->Type)
+			continue;
+
+		ownedInfantryCount++;
+
+		auto const pOwnWS = pOwnInf->Type->GetWeapon(0);
+		auto const pOwnW = pOwnWS ? pOwnWS->WeaponType : nullptr;
+
+		if (pOwnW && pOwnW->Projectile && pOwnW->Projectile->AA)
+			ownedAntiAirInfantry++;
+	}
+
+	const int antiAirInfantryRoom = std::max(0, std::max(AntiAirUnitsFloor, ownedInfantryCount * AntiAirUnitsMostPercent / 100) - ownedAntiAirInfantry);
+
 	if (FactoryClass* pInfFac = pHouse->GetPrimaryFactory(AbstractType::InfantryType, false, BuildCat::DontCare))
 	{
 		if (pInfFac->Object && pInfFac->Object->GetType())
@@ -6953,6 +6999,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		else if (isAA || pInf->C4)
 		{
 			score += scores[20];
+
+			// Soldiers that shoot up, as many as the uncovered air threat asks for within their room.
+			if (isAA)
+				score += std::min(AntiAirUnitMissingMost, std::min(AntiAirUnitsMissing(pHouse, pInf), antiAirInfantryRoom) * AntiAirUnitMissingBonus);
 		}
 		else if (pInf->Cost >= 250)
 		{
@@ -7343,7 +7393,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			const auto& airMacro = GetMacroState(pHouse);
 			const int airDeficit = std::max(0, airMacro.AirThreatValue - airMacro.OwnAACapacity);
 			const int interceptorBonus = (airDeficit > 0 && GetCombatValueOfType(pAir, true) > 0)
-				? std::clamp(airDeficit * 4, 0, 800)
+				? std::clamp(airDeficit * 4, 0, 800) + AirDeficitSlotLongRamp(airDeficit)
 				: 0;
 
 			// An offensive bank against an enemy across the water buys aircraft that strike the ground.

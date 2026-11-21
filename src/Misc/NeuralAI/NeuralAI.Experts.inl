@@ -550,7 +550,7 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 			? 680
 			: ((features[65] > 6 || activeExpert == 6) ? 420 : 240)));
 
-	outScores[6] = ClampInt16(outScores[6] + 80 + (hasAirThreat ? 220 : 0) + std::clamp(airDeficit * 5, 0, 950));
+	outScores[6] = ClampInt16(outScores[6] + 80 + (hasAirThreat ? 220 : 0) + std::clamp(airDeficit * 5, 0, 950) + AirDeficitSlotLongRamp(airDeficit));
 
 	outScores[7] = ClampInt16(
 		outScores[7] + (((features[67] > 10 || features[21] > 0) && pHouse->NumShipyards == 0) ? 1550 : -200));
@@ -613,7 +613,7 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 
 	outScores[19] = ClampInt16(outScores[19] + ((arch == 1 && pExt->NeuralAI_InfiltratedEnemyMask == 0) ? 500 : 100));
 
-	outScores[20] = ClampInt16(outScores[20] + 300 + std::clamp(airDeficit * 4, 0, 750));
+	outScores[20] = ClampInt16(outScores[20] + 300 + std::clamp(airDeficit * 4, 0, 750) + AirDeficitSlotLongRamp(airDeficit));
 
 	outScores[23] = ClampInt16(outScores[23] + ((arch == 2 || activeExpert == 7) ? 260 : 80));
 
@@ -720,7 +720,7 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 
 	outScores[25] = ClampInt16(outScores[25] + ((features[64] > 20) ? 700 : 300));
 
-	outScores[26] = ClampInt16(outScores[26] + 250 + (hasAirThreat ? 150 : 0) + std::clamp(airDeficit * 6, 0, 1000));
+	outScores[26] = ClampInt16(outScores[26] + 250 + (hasAirThreat ? 150 : 0) + std::clamp(airDeficit * 6, 0, 1000) + AirDeficitSlotLongRamp(airDeficit));
 
 	// Infantry swarm -> anti-infantry vehicles and defenses.
 	outScores[25] = ClampInt16(outScores[25] + counterBonus(foeInfantry, 900));
