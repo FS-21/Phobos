@@ -464,106 +464,13 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	// Phase stopwatch (telemetry only): which part of the micro is heavy.
 	NeuralPhaseClock microClock { pHouse ? pHouse->ArrayIndex : -1, NeuralSection::MicroSetup };
 
-	// pAvoid: sites tried before (the idle MCV watchdog); a candidate within 6 cells of one is passed over.
+	// pAvoid: sites tried before (the idle MCV watchdog); a candidate within 6 cells of one is passed over
+	// (FindDeployFoundationNear, NeuralAI.MobileFactory.inl).
 	auto const FindDeployableFoundationNearCellUncached
 		= [](HouseClass* pH, BuildingTypeClass* pBldType, const CellStruct& originCell, int requiredZone,
 			UnitClass* pDeployerUnit, const std::vector<CellStruct>* pAvoid = nullptr) -> CellStruct
 	{
-		if (!pH || !pBldType || originCell == CellStruct::Empty)
-			return CellStruct::Empty;
-
-		const int w = pBldType->GetFoundationWidth();
-		const int h = pBldType->GetFoundationHeight(false);
-		const CellStruct deployOffset = (w > 2 || h > 2) ? CellStruct { -1, -1 } : CellStruct { 0, 0 };
-		const CellStruct curUnitCell = pDeployerUnit ? pDeployerUnit->GetMapCoords() : CellStruct::Empty;
-		for (int r = 0; r <= 28; ++r)
-		{
-			for (int dy = -r; dy <= r; ++dy)
-			{
-				for (int dx = -r; dx <= r; ++dx)
-				{
-					if (std::max(std::abs(dx), std::abs(dy)) != r)
-						continue;
-
-					const CellStruct cand { static_cast<short>(originCell.X + dx),
-						static_cast<short>(originCell.Y + dy) };
-					const CellStruct topLeftCell = cand + deployOffset;
-					if (!MapClass::Instance.CoordinatesLegal(cand) || !MapClass::Instance.CoordinatesLegal(topLeftCell))
-						continue;
-
-					if (requiredZone >= 0)
-					{
-						const int cz = MapClass::Instance.GetMovementZoneType(cand, MovementZone::Normal, false);
-						if (cz != requiredZone)
-							continue;
-					}
-
-					if (pAvoid && std::any_of(pAvoid->begin(), pAvoid->end(), [&cand](const CellStruct& avoid)
-						{ return std::max(std::abs(avoid.X - cand.X), std::abs(avoid.Y - cand.Y)) <= 6; }))
-					{
-						continue;
-					}
-
-					if (pDeployerUnit && pDeployerUnit->Type && cand != curUnitCell)
-					{
-						auto const pStandCell = MapClass::Instance.TryGetCellAt(cand);
-						if (!pStandCell
-							|| !pStandCell->IsClearToMove(pDeployerUnit->Type->SpeedType, false, false, -1,
-								pDeployerUnit->Type->MovementZone, -1, false))
-						{
-							continue;
-						}
-					}
-
-					if (!NeuralAI::IsCellClearedOfExitCorridors(pH, pBldType, topLeftCell))
-						continue;
-
-					UnitExt::Deployer = pDeployerUnit;
-					const bool canCreate = pBldType->CanCreateHere(topLeftCell, pH);
-					bool canExist = canCreate;
-					if (canExist)
-					{
-						for (auto pFoundCell = pBldType->GetFoundationData(true);
-							*pFoundCell != CellStruct { 0x7FFF, 0x7FFF }; ++pFoundCell)
-						{
-							const CellStruct fc = topLeftCell + *pFoundCell;
-							auto const pFC = MapClass::Instance.TryGetCellAt(fc);
-							if (!pFC || !pFC->CanThisExistHere(pBldType->SpeedType, pBldType, pH))
-							{
-								canExist = false;
-								break;
-							}
-
-							for (ObjectClass* pObj = pFC->FirstObject; pObj; pObj = pObj->NextObject)
-							{
-								if (pObj == pDeployerUnit)
-									continue;
-
-								if (auto const pOtherU = abstract_cast<UnitClass*>(pObj))
-								{
-									if (pOtherU->IsAlive && !pOtherU->InLimbo && pOtherU->Type
-										&& (pOtherU->Type->DeploysInto != nullptr
-											|| IsAmphibiousOrAirTransport(pOtherU->Type)))
-									{
-										canExist = false;
-										break;
-									}
-								}
-							}
-
-							if (!canExist)
-								break;
-						}
-					}
-
-					UnitExt::Deployer = nullptr;
-					if (canExist)
-						return cand;
-				}
-			}
-		}
-
-		return CellStruct::Empty;
+		return FindDeployFoundationNear(pH, pBldType, originCell, requiredZone, pDeployerUnit, pAvoid);
 	};
 
 	// Memoized deploy-site search: an MCV / deployer that has not moved reuses its last answer
@@ -1628,13 +1535,338 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		return (pBld->Refinery || pBld->ResourceDestination) && houseRefineries >= 1 && scores[30] > 450;
 	};
-	// A deployer the idle deployer watchdog sent to the main base is no one's to ferry.
-	auto const deployerSentToMainBase = [pHouse](DWORD uid) -> bool
+	// A deployer with an order for a site off the island goal is no one's to ferry there (runBaseDeployer).
+	auto const deployerOrderedElsewhere = [&](DWORD uid) -> bool
 	{
-		auto const& sites = GetMacroState(pHouse).DeployerSites;
-		auto const itSite = sites.find(uid);
+		auto const& orders = GetMacroState(pHouse).DeployOrders;
+		auto const itOrder = orders.find(uid);
 
-		return itSite != sites.end() && itSite->second.ToMainBase;
+		if (itOrder == orders.end())
+			return false;
+
+		const CellStruct site = itOrder->second.Site != CellStruct::Empty ? itOrder->second.Site : itOrder->second.Goal;
+
+		return site != CellStruct::Empty
+			&& (resourceIslandZone < 0 || MapClass::Instance.GetMovementZoneType(site, MovementZone::Normal, false) != resourceIslandZone);
+	};
+
+	// Base deployers (NeuralAI.MobileFactory.inl; user approved, 2026-11-21, «Apruebo el plan»): one way
+	// for all of them, the order "deploy at this coordinate" (NeuralDeployOrder). Its goal comes from the
+	// building pick (OnTechnoProduced) or, for a deployer with none (packed from a building, captured,
+	// given by the map), from FindDeployerGoal; an expansion deployer with no goal, off the island goal
+	// it fits on, takes that island. A reversible building that packed up to flee goes to its refuge
+	// first, and so does a deployer caught on its way by more than our forces around it; then it asks
+	// again. The trip is an operation (order leases: no wave or routine order takes it) and a transport
+	// operation carries it across water. With enemies on the way it may wait for the next wave sent
+	// toward its site and follow it (DeployerTripFollowsWave, learned). On its site it unfolds
+	// (DeployerSiteMostTries unpack orders, McvIdleArriveFrames on or next to it at most); refused, it
+	// takes the nearest valid cell away from the refused ones, and after DeployerSitePicksMost sites it
+	// asks again where the building goes. With no cell closer for DeployerStallFrames it unfolds at the
+	// nearest valid cell where it stands.
+	auto const runBaseDeployer = [&](UnitClass* pUnit)
+	{
+		auto const pType = pUnit->Type;
+		auto const pBld = pType->DeploysInto;
+		auto& macro = GetMacroState(pHouse);
+		const int now = Unsorted::CurrentFrame;
+		const CellStruct here = pUnit->GetMapCoords();
+		auto const [itOrder, fresh] = macro.DeployOrders.try_emplace(pUnit->UniqueID);
+		auto& order = itOrder->second;
+
+		if (fresh || order.BuildingType != pBld->ArrayIndex)
+		{
+			order = NeuralDeployOrder {};
+			order.BuildingType = pBld->ArrayIndex;
+			order.StartFrame = now;
+			order.ProgressFrame = now;
+
+			// The vehicle a reversible building just packed into: a flight goes to its refuge first, a
+			// planned move keeps the spot it packed up for.
+			if (now - macro.MobileFactoryLastPackFrame <= 300 && macro.MobileFactoryPackCell != CellStruct::Empty
+				&& here.DistanceFrom(macro.MobileFactoryPackCell) <= 5.0 && macro.MobileFactoryPackTarget != CellStruct::Empty)
+			{
+				if (macro.MobileFactoryPackReason == MobileFactoryReasonNone)
+				{
+					order.Refuge = macro.MobileFactoryPackTarget;
+					order.RefugeFrame = now;
+					order.FailedSites.push_back(macro.MobileFactoryPackCell);
+				}
+				else
+				{
+					order.Goal = macro.MobileFactoryPackTarget;
+					order.Kind = NeuralPlacementGoalKind::Hub;
+				}
+			}
+		}
+
+		order.SeenFrame = now;
+
+		if (IsMobileFactoryUnit(pType))
+			macro.MobileFactoryVehicleSeenFrame = now;
+
+		if (pUnit->IsDeploying || pUnit->CurrentMission == Mission::Enter || pUnit->QueuedMission == Mission::Enter
+			|| (pUnit->CurrentMission == Mission::Unload && order.TryFrame >= 0 && now >= order.TryFrame
+				&& now - order.TryFrame < McvUnfoldRetryFrames))
+		{
+			return;
+		}
+
+		const int unitZone = ObjectZone(pUnit, MovementZone::Normal);
+		const bool driving = pUnit->CurrentMission == Mission::Move && pUnit->Destination
+			&& pUnit->DistanceFrom(pUnit->Destination) > 256;
+		auto const buildingName = pBld->ID;
+
+		auto const moveTo = [&](const CellStruct& cell, NeuralOrderPriority priority)
+		{
+			auto const pCell = MapClass::Instance.TryGetCellAt(cell);
+
+			if (!pCell)
+				return;
+
+			const bool headingThere = driving && CellClass::Coord2Cell(pUnit->Destination->GetCoords()).DistanceFrom(cell) <= 1.5;
+
+			if (headingThere && !IsAITickWindow(90, 15))
+				return;
+
+			const NeuralOrderPriorityScope orderPriority { priority };
+			const int cellGround = MapClass::Instance.GetMovementZoneType(cell, MovementZone::Normal, false);
+			const bool reachesOnItsOwn = (IsGroundZone(cellGround) && cellGround == unitZone)
+				|| MapClass::Instance.GetMovementZoneType(cell, pType->MovementZone, false) == ObjectZone(pUnit, pType->MovementZone);
+
+			if (reachesOnItsOwn)
+				IssueMoveOrder(pUnit, pCell, 0.0);
+			else
+				DispatchFootToTargetOrTransport(pUnit, pCell, Mission::Move, false);
+		};
+
+		auto const failSite = [&]()
+		{
+			order.FailedSites.push_back(order.Site);
+			order.Site = CellStruct::Empty;
+			order.PickFrame = -1;
+			order.Tries = 0;
+			order.NearSince = -1;
+			CountDecision(NeuralDecision::DeployerSiteFailed, pHouse->ArrayIndex);
+		};
+
+		// Caught packed by more than our forces around it: back to a quiet refuge, as a deployed one flees.
+		if (order.Refuge == CellStruct::Empty && now - order.StartFrame >= 150 && IsAITickWindow(90, 15))
+		{
+			const int threat = VisibleEnemyThreatNear(pHouse, here, 8);
+
+			if (threat >= 80 && threat * 4 > OwnDefenseNear(pHouse, here, 8) * 5)
+			{
+				const CellStruct retreat = FindMobileFactoryRetreat(pHouse, here, unitZone, CanHouseFerryTypeAcrossWater(pHouse, pType));
+
+				if (retreat != CellStruct::Empty && retreat.DistanceFrom(here) >= 8.0)
+				{
+					if (IsFactoryDeployerUnit(pType))
+					{
+						macro.MobileFactoryAvoidCell = here;
+						macro.MobileFactoryAvoidFrame = now;
+					}
+
+					// TEMP diagnostic: a deployer turned back on its way.
+					if (DeployerLogAllowed(pHouse))
+					{
+						Debug::Log("[NeuralAI] House %d deployer turns back: %s %u (%s) at (%d,%d), threat %d, refuge (%d,%d), site (%d,%d), frame %d.\n",
+							pHouse->ArrayIndex, pType->ID, pUnit->UniqueID, buildingName, here.X, here.Y, threat, retreat.X, retreat.Y,
+							order.Site.X, order.Site.Y, now);
+					}
+
+					order.FailedSites.push_back(here);
+					order.Refuge = retreat;
+					order.RefugeFrame = now;
+					order.Site = CellStruct::Empty;
+					order.Tries = 0;
+					order.NearSince = -1;
+				}
+			}
+		}
+
+		if (order.Refuge != CellStruct::Empty)
+		{
+			if (here.DistanceFrom(order.Refuge) > 6.0 && now - order.RefugeFrame < DeployerStallFrames)
+			{
+				moveTo(order.Refuge, NeuralOrderPriority::Survival);
+				return;
+			}
+
+			// Safe (or the refuge took too long): where the building goes is asked again.
+			order.Refuge = CellStruct::Empty;
+			order.Site = CellStruct::Empty;
+			order.Goal = CellStruct::Empty;
+			order.PickFrame = -1;
+			order.SitePicks = 0;
+		}
+
+		if (order.Site == CellStruct::Empty)
+		{
+			if (order.PickFrame >= 0 && now >= order.PickFrame && now - order.PickFrame < DeployerSiteRetryFrames)
+				return;
+
+			order.PickFrame = now;
+
+			while (order.FailedSites.size() > 12)
+				order.FailedSites.erase(order.FailedSites.begin());
+
+			if (order.Goal == CellStruct::Empty || order.SitePicks >= DeployerSitePicksMost)
+			{
+				const bool islandExpansion = pIslandResourceGoalCell != nullptr && IsGroundZone(resourceIslandZone)
+					&& unitZone != resourceIslandZone && deployerExpandsWith(pBld) && CanHouseFerryTypeAcrossWater(pHouse, pType)
+					&& deployerFitsOnIslandGoal(pUnit, pBld);
+
+				if (islandExpansion)
+				{
+					order.Goal = pIslandResourceGoalCell->MapCoords;
+					order.Kind = NeuralPlacementGoalKind::OreField;
+				}
+				else
+				{
+					order.Goal = FindDeployerGoal(pHouse, pBld, pType, pUnit, order.Kind);
+				}
+
+				order.SitePicks = 0;
+			}
+
+			order.Site = FindDeployerSiteNear(pHouse, pBld, pUnit, order.Goal, &order.FailedSites);
+			order.SitePicks++;
+			order.Tries = 0;
+			order.NearSince = -1;
+			order.BestDist = INT_MAX;
+			order.ProgressFrame = now;
+
+			if (order.Site == CellStruct::Empty)
+			{
+				// No site for now: it deploys where it stands when it can.
+				if (CanDeployerUnpackHere(pHouse, pBld, pUnit))
+				{
+					order.TryFrame = now;
+					OrderDeployerUnpack(pUnit);
+				}
+
+				return;
+			}
+
+			// The first site: with enemies on the way, the way is weighed (alone or behind the next wave).
+			const bool firstSite = order.SitePicks == 1 && order.TryFrame < 0 && !order.Weighed;
+			const int risk = firstSite ? DeployerTripRisk(pHouse, here, order.Site) : 0;
+
+			if (risk > 0)
+			{
+				order.Weighed = true;
+				order.BehindWave = DeployerTripFollowsWave(pHouse, risk, scores[60]);
+				order.WaitSince = order.BehindWave ? now : -1;
+			}
+
+			// TEMP diagnostic: each site a deployer takes.
+			if (DeployerLogAllowed(pHouse))
+			{
+				Debug::Log("[NeuralAI] House %d deployer site: %s %u -> %s at (%d,%d), %d cells away, %s goal (%d,%d), pick %d, risk %d, %s, "
+					"weights %d/%d, frame %d.\n",
+					pHouse->ArrayIndex, pType->ID, pUnit->UniqueID, buildingName, order.Site.X, order.Site.Y,
+					static_cast<int>(here.DistanceFrom(order.Site)), PlacementGoalKindName(order.Kind), order.Goal.X, order.Goal.Y,
+					order.SitePicks, risk, order.BehindWave ? "behind the next wave" : "alone", macro.DeployerTripWeight[0],
+					macro.DeployerTripWeight[1], now);
+			}
+		}
+
+		// Behind the next wave sent toward its site, DeployerEscortFollowFrames after it; with none in
+		// DeployerEscortWaitFrames it goes alone, and that trip teaches nothing.
+		if (order.WaitSince >= 0)
+		{
+			const bool waveTowardSite = macro.LastWaveDispatchFrame > order.WaitSince && macro.LastWaveTargetCell != CellStruct::Empty
+				&& macro.LastWaveTargetCell.DistanceFrom(order.Site) < macro.LastWaveTargetCell.DistanceFrom(here);
+
+			if (waveTowardSite && now - macro.LastWaveDispatchFrame >= DeployerEscortFollowFrames)
+			{
+				order.WaitSince = -1;
+				order.ProgressFrame = now;
+			}
+			else if (now - order.WaitSince >= DeployerEscortWaitFrames)
+			{
+				order.WaitSince = -1;
+				order.BehindWave = false;
+				order.Weighed = false;
+				order.ProgressFrame = now;
+			}
+			else
+			{
+				return;
+			}
+		}
+
+		const double siteDist = here.DistanceFrom(order.Site);
+
+		if (static_cast<int>(siteDist) < order.BestDist)
+		{
+			order.BestDist = static_cast<int>(siteDist);
+			order.ProgressFrame = now;
+		}
+
+		// Stalled on the way: the nearest valid cell where it stands.
+		if (now - order.ProgressFrame > DeployerStallFrames && siteDist > McvIdleNearCells)
+		{
+			// TEMP diagnostic: a deployer that stopped getting closer.
+			if (DeployerLogAllowed(pHouse))
+			{
+				Debug::Log("[NeuralAI] House %d deployer stalled: %s %u (%s) at (%d,%d), site (%d,%d) %d cells away, mission %d, frame %d.\n",
+					pHouse->ArrayIndex, pType->ID, pUnit->UniqueID, buildingName, here.X, here.Y, order.Site.X, order.Site.Y,
+					static_cast<int>(siteDist), static_cast<int>(pUnit->CurrentMission), now);
+			}
+
+			order.FailedSites.push_back(order.Site);
+			order.Goal = here;
+			order.Kind = NeuralPlacementGoalKind::None;
+			order.Site = CellStruct::Empty;
+			order.PickFrame = -1;
+			order.SitePicks = 0;
+			return;
+		}
+
+		if ((here == order.Site || (siteDist <= 1.5 && !driving)) && CanDeployerUnpackHere(pHouse, pBld, pUnit))
+		{
+			if (order.Tries >= DeployerSiteMostTries)
+			{
+				failSite();
+				return;
+			}
+
+			++order.Tries;
+			order.TryFrame = now;
+			OrderDeployerUnpack(pUnit);
+			return;
+		}
+
+		// On the site and refused (units on the foundation, which the check asks to step aside), or next
+		// to it: it fails only when that lasts McvIdleArriveFrames.
+		if (siteDist <= McvIdleNearCells && !driving)
+		{
+			if (order.NearSince < 0)
+				order.NearSince = now;
+
+			if (now - order.NearSince >= McvIdleArriveFrames)
+			{
+				failSite();
+				return;
+			}
+
+			if (here == order.Site)
+				return;
+
+			if (auto const pSiteCell = MapClass::Instance.TryGetCellAt(order.Site); pSiteCell && pUnit->Destination != pSiteCell)
+			{
+				const NeuralOrderPriorityScope orderPriority { NeuralOrderPriority::Operation };
+				pUnit->SetDestination(pSiteCell, true);
+				pUnit->QueueMission(Mission::Move, true);
+				NoteOrderCaller(pUnit, "move");
+			}
+
+			return;
+		}
+
+		order.NearSince = -1;
+		moveTo(order.Site, NeuralOrderPriority::Operation);
 	};
 	auto const islandGoalKindName = [&]() -> const char*
 	{
@@ -4188,6 +4420,59 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		}
 	}
 
+	// Base deployer orders whose deployer is gone (runBaseDeployer): deployed when it was unpacking when
+	// last seen, else lost on the way; a weighed trip teaches its way (NoteDeployerTripEnd). One that rides
+	// a transport, works for an operation or waits in limbo is still there.
+	if (auto& orderMacro = GetMacroState(pHouse); !orderMacro.DeployOrders.empty() && IsAITickWindow(90, 0))
+	{
+		const int now = Unsorted::CurrentFrame;
+		std::vector<DWORD> ended;
+
+		for (auto const& [uid, order] : orderMacro.DeployOrders)
+		{
+			if (now < order.SeenFrame || now - order.SeenFrame > 90)
+				ended.push_back(uid);
+		}
+
+		if (!ended.empty())
+		{
+			std::sort(ended.begin(), ended.end());
+
+			for (auto const pU : UnitClass::Array)
+			{
+				if (pU && pU->Owner == pHouse && pU->IsAlive)
+					std::erase(ended, pU->UniqueID);
+			}
+
+			for (const DWORD uid : ended)
+			{
+				auto const itOrder = orderMacro.DeployOrders.find(uid);
+				auto const& order = itOrder->second;
+				const bool deployed = order.TryFrame >= 0 && order.SeenFrame - order.TryFrame <= McvUnfoldRetryFrames;
+
+				if (order.Weighed)
+					NoteDeployerTripEnd(pHouse, order.BehindWave, deployed);
+
+				// TEMP diagnostic: how each trip ended.
+				if (DeployerLogAllowed(pHouse))
+				{
+					auto const pBldType = order.BuildingType >= 0 && order.BuildingType < BuildingTypeClass::Array.Count
+						? BuildingTypeClass::Array.GetItem(order.BuildingType)
+						: nullptr;
+
+					Debug::Log("[NeuralAI] House %d deployer trip: %u for %s %s after %d frames, %s goal (%d,%d), site (%d,%d), %d sites refused, "
+						"way %s%s, weights %d/%d, frame %d.\n",
+						pHouse->ArrayIndex, uid, pBldType ? pBldType->ID : "?", deployed ? "deployed" : "lost",
+						order.SeenFrame - order.StartFrame, PlacementGoalKindName(order.Kind), order.Goal.X, order.Goal.Y, order.Site.X,
+						order.Site.Y, static_cast<int>(order.FailedSites.size()), order.BehindWave ? "behind a wave" : "alone",
+						order.Weighed ? "" : " (not weighed)", orderMacro.DeployerTripWeight[0], orderMacro.DeployerTripWeight[1], now);
+				}
+
+				orderMacro.DeployOrders.erase(itOrder);
+			}
+		}
+	}
+
 	for (auto const pUnit : UnitClass::Array)
 	{
 		if (!pUnit || pUnit->Owner != pHouse || pUnit->InLimbo || !pUnit->IsAlive)
@@ -5975,218 +6260,32 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			continue;
 		}
 
-		// Factory deployer (NeuralAI.MobileFactory.inl): drive to its spot and unfold there. A mobile
-		// factory (it can pack up again) re-checks the spot on the way; a one-way deployer picks it
-		// once. With no spot it unfolds where it stands, like any base deployer, unless it just fled:
-		// then it heads for the place it fled to first.
-		if (IsFactoryDeployerUnit(pType))
+		// A base deployer (Nanocore, mobile factory, outpost: NeuralAI.MobileFactory.inl) carries out its
+		// order to deploy at a coordinate (runBaseDeployer).
+		if (IsBaseDeployerUnit(pType))
 		{
-			if (pUnit->IsDeploying || pUnit->CurrentMission == Mission::Unload || pUnit->CurrentMission == Mission::Enter
-				|| pUnit->QueuedMission == Mission::Enter)
-			{
-				continue;
-			}
-
-			auto& mobileMacro = GetMacroState(pHouse);
-			const int now = Unsorted::CurrentFrame;
-			const CellStruct unitCell = pUnit->GetMapCoords();
-			const int unitZone = ObjectZone(pUnit, MovementZone::Normal);
-			auto const pFactoryType = pType->DeploysInto;
-			const bool isMobile = IsMobileFactoryUnit(pType);
-
-			if (mobileMacro.MobileFactoryGoals.size() > 16)
-				std::erase_if(mobileMacro.MobileFactoryGoals, [now](const auto& entry) { return now - entry.second.ProgressFrame > 9000; });
-
-			auto& goal = mobileMacro.MobileFactoryGoals[pUnit->UniqueID];
-			const bool firstVisit = goal.StartFrame < 0;
-
-			if (firstVisit)
-			{
-				goal.StartFrame = now;
-				goal.ProgressFrame = now;
-
-				// The vehicle a mobile factory just packed into keeps the goal it was packed up for: picked
-				// afresh, without its building, the spot it left could look empty and win again.
-				if (isMobile && now - mobileMacro.MobileFactoryLastPackFrame <= 300
-					&& mobileMacro.MobileFactoryPackCell != CellStruct::Empty
-					&& unitCell.DistanceFrom(mobileMacro.MobileFactoryPackCell) <= 5.0)
-				{
-					goal.Cell = mobileMacro.MobileFactoryPackTarget;
-					goal.Reason = mobileMacro.MobileFactoryPackReason;
-					goal.PickFrame = now;
-					goal.HoldUntil = now + 1800;
-				}
-			}
-
-			if (isMobile)
-				mobileMacro.MobileFactoryVehicleSeenFrame = now;
-
-			// A packed mobile factory caught by more than our forces around it turns back for a quiet
-			// hub, as a deployed one would flee.
-			if (isMobile && now >= goal.HoldUntil && IsAITickWindow(90, 15))
-			{
-				const int threat = VisibleEnemyThreatNear(pHouse, unitCell, 8);
-
-				if (threat >= 80 && threat * 4 > OwnDefenseNear(pHouse, unitCell, 8) * 5)
-				{
-					const CellStruct retreat
-						= FindMobileFactoryRetreat(pHouse, unitCell, unitZone, CanHouseFerryTypeAcrossWater(pHouse, pType));
-
-					if (retreat != CellStruct::Empty && retreat.DistanceFrom(unitCell) >= 8.0)
-					{
-						mobileMacro.MobileFactoryAvoidCell = unitCell;
-						mobileMacro.MobileFactoryAvoidFrame = now;
-						goal.Cell = retreat;
-						goal.Reason = MobileFactoryReasonNone;
-						goal.PickFrame = now;
-						goal.HoldUntil = now + 1200;
-						goal.BestDist = INT_MAX;
-						goal.ProgressFrame = now;
-						goal.DeployTries = 0;
-					}
-				}
-			}
-
-			const bool holding = now < goal.HoldUntil;
-
-			if ((firstVisit && !holding) || (isMobile && !holding && (now - goal.PickFrame >= 150 || now < goal.PickFrame)))
-			{
-				const MobileFactorySpot spot
-					= FindMobileFactorySpot(pHouse, pFactoryType, nullptr, unitCell, unitZone, pUnit->UniqueID, goal.Cell);
-				CellStruct newCell = spot.Cell;
-
-				const bool fledHere = mobileMacro.MobileFactoryAvoidCell != CellStruct::Empty
-					&& now - mobileMacro.MobileFactoryAvoidFrame < MobileFactoryAvoidFrames
-					&& unitCell.DistanceFrom(mobileMacro.MobileFactoryAvoidCell) <= MobileFactoryAvoidRadius;
-
-				if (newCell == CellStruct::Empty && fledHere)
-					newCell = homeCoords;
-
-				if (newCell != goal.Cell)
-				{
-					goal.BestDist = INT_MAX;
-					goal.ProgressFrame = now;
-					goal.DeployTries = 0;
-				}
-
-				goal.Cell = newCell;
-				goal.Reason = spot.Reason;
-				goal.PickFrame = now;
-			}
-			else if (!isMobile || holding)
-			{
-				// Keep the spot reserved while a one-way deployer, or a vehicle holding the goal it was
-				// packed up for, drives there.
-				goal.PickFrame = now;
-			}
-
-			const int goalDist = goal.Cell != CellStruct::Empty ? static_cast<int>(unitCell.DistanceFrom(goal.Cell)) : 0;
-
-			if (goalDist < goal.BestDist)
-			{
-				goal.BestDist = goalDist;
-				goal.ProgressFrame = now;
-			}
-
-			// No cell closer to the spot for 1800 frames (a blocked path, or a ferry that never comes):
-			// unfold where it is instead of wandering. Progress, not trip time: these vehicles are slow.
-			const bool stalled = now - goal.ProgressFrame > 1800;
-			const bool atGoal = goal.Cell == CellStruct::Empty || stalled || goalDist <= 6;
-			const bool reachedOrNoDest = pUnit->Destination == nullptr || pUnit->CurrentMission != Mission::Move
-				|| CellClass::Coord2Cell(pUnit->Destination->GetCoords()) == unitCell;
-
-			if (atGoal)
-			{
-				if (CanDeployerUnpackHere(pHouse, pFactoryType, pUnit))
-				{
-					// Another routine can hold the unit in its own mission so the queued unpack never
-					// starts: force it after a few tries. When the engine keeps refusing the spot, step
-					// aside and try again from a nearby cell.
-					if (goal.DeployTries == 0 || IsAITickWindow(45, 15))
-					{
-						if (goal.DeployTries >= 12)
-						{
-							goal.DeployTries = 0;
-							pUnit->Scatter(CoordStruct::Empty, true, false);
-						}
-						else
-						{
-							OrderDeployerUnpack(pUnit);
-
-							if (++goal.DeployTries >= 3)
-								pUnit->ForceMission(Mission::Unload);
-						}
-					}
-				}
-				else if (reachedOrNoDest && IsAITickWindow(45, 15))
-				{
-					// The first deployable foundation near the spot (or here, once stalled) is good.
-					const CellStruct origin = (goal.Cell != CellStruct::Empty && !stalled) ? goal.Cell : unitCell;
-					CellStruct stand = FindDeployableFoundationNearCell(pHouse, pFactoryType, origin, unitZone, pUnit);
-
-					if (stand == CellStruct::Empty)
-						stand = FindBestDeployStandCell(pHouse, pFactoryType, pUnit, unitZone);
-
-					if (stand != unitCell)
-					{
-						if (auto const pStand = MapClass::Instance.TryGetCellAt(stand))
-							IssueMoveOrder(pUnit, pStand, 0.0);
-					}
-				}
-			}
-			else if (IsAITickWindow(90, 15))
-			{
-				if (auto const pGoalCell = MapClass::Instance.TryGetCellAt(goal.Cell))
-				{
-					const int goalZone = MapClass::Instance.GetMovementZoneType(goal.Cell, MovementZone::Normal, false);
-
-					if (goalZone < 0 || unitZone < 0 || goalZone == unitZone)
-						IssueMoveOrder(pUnit, pGoalCell, 4.0);
-					else
-						DispatchFootToTargetOrTransport(pUnit, pGoalCell, Mission::Move, false);
-				}
-			}
-
+			runBaseDeployer(pUnit);
 			continue;
 		}
 
 		// Tactical Combat Deployment (Tick Tank, Nod Artillery, Juggernaut, Siege
-		// Chopper) & Universal Deployable Key Structures across all mods (Mobile
-		// Outposts/Explorers, Mobile Refineries/Factories, Power/Tech/Turret Cores,
-		// CABAL Nanocores)!
+		// Chopper), tactical support deployers and the slave miner sent to an island.
 		if ((pType->DeploysInto && !pType->DeploysInto->ConstructionYard) || pType->DeployFire)
 		{
-			const bool hasPrimaryWeapon
-				= (pType->GetWeapon(0) != nullptr && pType->GetWeapon(0)->WeaponType != nullptr);
-
 			auto const pTargetBld = pType->DeploysInto;
 
-			const bool isKeyStructureDeployer = (pTargetBld != nullptr && IsTrueBaseStructureTarget(pTargetBld)
-				&& (!pType->Harvester && !pType->ResourceGatherer || isIslandColonizerSlaveMiner)
-				&& (!pTargetBld->IsBaseDefense || !hasPrimaryWeapon));
-
-			if (isKeyStructureDeployer)
+			// A slave miner sent to colonize an island across water (isIslandColonizerSlaveMiner) boards a
+			// transport there, and once ashore its harvest unfolds it. The other base deployers carry out their
+			// orders (runBaseDeployer, above).
+			if (isIslandColonizerSlaveMiner && pTargetBld != nullptr)
 			{
 				const CellStruct nanoCell = pUnit->GetMapCoords();
-				// The ground the deployer stands on. On water or on a cell of no ground its own zone holds
-				// no site for a land building, so it reads the zone of the main base (user approved,
-				// 2026-11-19, match #11506: from the water its site searches saw water cells only). A
-				// building on water (IsWaterBuildingType) takes water sites only (siteZone -1: the base
-				// placement search puts it on the water by our base).
-				const bool deploysOnWater = IsWaterBuildingType(pTargetBld);
 				const int nanoCellZone = MapClass::Instance.GetMovementZoneType(nanoCell, MovementZone::Normal, pUnit->OnBridge);
 				auto const pNanoCell = pUnit->GetCell();
 				const bool nanoOnGround = IsGroundZone(nanoCellZone) && pNanoCell && pNanoCell->LandType != LandType::Water;
 				const int nanoZone = (nanoOnGround || !IsGroundZone(homeGroundZone)) ? nanoCellZone : homeGroundZone;
-				const int siteZone = deploysOnWater ? -1 : nanoZone;
 				const bool isNanoMoving = (pUnit->CurrentMission == Mission::Move && pUnit->Destination != nullptr
 					&& pUnit->DistanceFrom(pUnit->Destination) > 768);
-				const bool nanoReachedOrNoDest
-					= (pUnit->CurrentMission != Mission::Move || pUnit->Destination == nullptr
-						|| CellClass::Coord2Cell(pUnit->Destination->GetCoords()) == nanoCell);
-
-				int minDistFromBaseBld = 9999;
-				int minDistFromRefOrYard = 9999;
 				int hubsInNanoZone = 0;
 
 				for (auto const pOwnBld : pHouse->Buildings)
@@ -6197,580 +6296,123 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 						continue;
 					}
 
-					const CellStruct bc = pOwnBld->GetMapCoords();
-					const int bz = MapClass::Instance.GetMovementZoneType(bc, MovementZone::Normal, pOwnBld->OnBridge);
-					const int d = std::max(std::abs(nanoCell.X - bc.X), std::abs(nanoCell.Y - bc.Y));
+					const int bz = MapClass::Instance.GetMovementZoneType(pOwnBld->GetMapCoords(), MovementZone::Normal, pOwnBld->OnBridge);
 
-					if (nanoZone < 0 || bz == nanoZone)
+					if ((nanoZone < 0 || bz == nanoZone) && (pOwnBld->Type->Refinery || pOwnBld->Type->ConstructionYard
+						|| pOwnBld->Type->ResourceDestination || pOwnBld->Type->Factory != AbstractType::None))
 					{
-						if (d < minDistFromBaseBld)
-							minDistFromBaseBld = d;
-
-						if (pOwnBld->Type->Refinery || pOwnBld->Type->ConstructionYard
-							|| pOwnBld->Type->ResourceDestination || pOwnBld->Type->Factory != AbstractType::None)
-						{
-							hubsInNanoZone++;
-							if (d < minDistFromRefOrYard)
-								minDistFromRefOrYard = d;
-						}
+						hubsInNanoZone++;
 					}
 				}
 
-				// Only a deployer that expands with its building goes colonizing (deployerExpandsWith, the
-				// predicate of the deployer pick and the airlifts too, so it is never ferried to an island
-				// this logic sends it back from): BaseNormal, which most support buildings have, made a
-				// deployer of a shield generator an outpost that never reached the base logic below (match
-				// #11506). A factory deployer crosses only to an island goal its building fits on
-				// (deployerFitsOnIslandGoal).
-				const bool deploysColony = isColonyBuilding(pTargetBld);
-				const bool expandsWithBuilding = deployerExpandsWith(pTargetBld);
 				const bool canFerryDeployer = CanHouseFerryTypeAcrossWater(pHouse, pType);
-				const bool isCrossIslandFactoryDeployer = (expandsWithBuilding && pTargetBld->Factory != AbstractType::None
-					&& canFerryDeployer && pIslandResourceGoalCell != nullptr && nanoZone != resourceIslandZone
-					&& deployerFitsOnIslandGoal(pUnit, pTargetBld));
+				const bool nanoIslandHasNoRoom = nanoZone >= 0 && isNoRoomIslandFor(pTargetBld, nanoZone);
+				const bool mustColonizeIslandWithDeployer = (canFerryDeployer && nanoZone >= 0
+					&& (hubsInNanoZone >= 1 || nanoIslandHasNoRoom) && pIslandResourceGoalCell != nullptr
+					&& nanoZone != resourceIslandZone && deployerFitsOnIslandGoal(pUnit, pTargetBld));
 
-				const bool isExpansionDeployer = isIslandColonizerSlaveMiner || isCrossIslandFactoryDeployer
-					|| (expandsWithBuilding && (pTargetBld->Refinery || pTargetBld->ResourceDestination));
-
-				auto& siteMacro = GetMacroState(pHouse);
-				const int siteNow = Unsorted::CurrentFrame;
-
-				if (siteMacro.DeployerSites.size() > 64)
+				// Stranded on an island without room and no other island to go to: back home.
+				if (nanoIslandHasNoRoom && !mustColonizeIslandWithDeployer && hubsInNanoZone == 0)
 				{
-					std::erase_if(siteMacro.DeployerSites, [siteNow](const auto& entry)
-						{ return siteNow < entry.second.SeenFrame || siteNow - entry.second.SeenFrame > 900; });
-				}
-
-				auto& deploySite = siteMacro.DeployerSites[pUnit->UniqueID];
-
-				// The site of a deployer of the base (DeployerSites, user approved, 2026-11-19, match #11506:
-				// the site search near the deployer ignores Adjacent): the cell of the base placement search
-				// (CachedTetrisBuildCell, as FindBestDeployStandCell reads it: Adjacent and the placement
-				// rules, water by our shore for a building on water), else the main base, avoiding the sites
-				// it failed at. Sent there by the idle watchdog (toMainBase), a land building takes the legal
-				// foundation nearest the main base in its ground zone. A deployer of a land building standing
-				// on the ground of another island than the main base's takes its site on that island (the
-				// placement cell when it lies there, else the nearest foundation): sent home for a site of
-				// the main base, a deployer ferried there was picked for the island again. A water site is
-				// one the deployer reaches by its own moves: the search goes on past the ones it does not
-				// (DeployerWaterSiteTries searches at most).
-				auto const pickBaseDeploySite = [&](bool toMainBase) -> CellStruct
-				{
-					const CellStruct standOffset = (pTargetBld->GetFoundationWidth() > 2 || pTargetBld->GetFoundationHeight(false) > 2)
-						? CellStruct { 1, 1 }
-						: CellStruct { 0, 0 };
-					const bool onOtherIsland = !toMainBase && !deploysOnWater && nanoOnGround && IsGroundZone(homeGroundZone)
-						&& nanoCellZone != homeGroundZone;
-					const CellStruct tetris = (!toMainBase || deploysOnWater) ? CachedTetrisBuildCell(pHouse, pTargetBld) : CellStruct::Empty;
-					CellStruct tetrisStand = tetris != CellStruct::Empty ? tetris + standOffset : CellStruct::Empty;
-
-					if (onOtherIsland && tetrisStand != CellStruct::Empty
-						&& MapClass::Instance.GetMovementZoneType(tetrisStand, MovementZone::Normal, false) != nanoCellZone)
+					if ((!isNanoMoving || IsAITickWindow(300, 15)) && homeCoords != CellStruct::Empty)
 					{
-						tetrisStand = CellStruct::Empty;
-					}
-
-					const CellStruct origins[2] = { tetrisStand, onOtherIsland ? nanoCell : homeCoords };
-					const int ownMoveZone = ObjectZone(pUnit, pType->MovementZone);
-					std::vector<CellStruct> avoid = deploySite.FailedSites;
-
-					for (auto const& origin : origins)
-					{
-						if (origin == CellStruct::Empty)
-							continue;
-
-						const int originZone = MapClass::Instance.GetMovementZoneType(origin, MovementZone::Normal, false);
-						const int zone = deploysOnWater ? -1
-							: (onOtherIsland ? nanoCellZone : ((toMainBase || !IsGroundZone(originZone)) ? homeGroundZone : originZone));
-
-						for (int search = 0; search < DeployerWaterSiteTries; ++search)
-						{
-							const CellStruct cell = FindDeployableFoundationNearCellUncached(pHouse, pTargetBld, origin, zone, pUnit, &avoid);
-
-							if (cell == CellStruct::Empty)
-								break;
-
-							if (!deploysOnWater || MapClass::Instance.GetMovementZoneType(cell, pType->MovementZone, false) == ownMoveZone)
-								return cell;
-
-							avoid.push_back(cell);
-						}
-					}
-
-					return CellStruct::Empty;
-				};
-
-				// It goes to its site and deploys there; the site changes only when the deploy fails on it
-				// (DeployerSiteMostTries unpack orders there, or McvIdleArriveFrames on or next to it without
-				// deploying, as the idle MCV watchdog steps an MCV onto its site): the site goes to the avoid
-				// list for DeployerFailedSiteFrames and the next one is taken. One boarding a transport is
-				// left to it.
-				auto const deployAtBaseSite = [&](bool toMainBase)
-				{
-					if (pUnit->IsDeploying || pUnit->CurrentMission == Mission::Enter || pUnit->QueuedMission == Mission::Enter
-						|| (pUnit->CurrentMission == Mission::Unload && deploySite.TryFrame >= 0
-							&& siteNow >= deploySite.TryFrame && siteNow - deploySite.TryFrame < McvUnfoldRetryFrames))
-					{
-						return;
-					}
-
-					for (size_t failed = deploySite.FailedSites.size(); failed-- > 0;)
-					{
-						if (failed >= deploySite.FailedFrames.size() || siteNow < deploySite.FailedFrames[failed]
-							|| siteNow - deploySite.FailedFrames[failed] > DeployerFailedSiteFrames)
-						{
-							deploySite.FailedSites.erase(deploySite.FailedSites.begin() + static_cast<std::ptrdiff_t>(failed));
-
-							if (failed < deploySite.FailedFrames.size())
-								deploySite.FailedFrames.erase(deploySite.FailedFrames.begin() + static_cast<std::ptrdiff_t>(failed));
-						}
-					}
-
-					if (deploySite.Site == CellStruct::Empty && (deploySite.PickFrame < 0 || siteNow < deploySite.PickFrame
-						|| siteNow - deploySite.PickFrame >= DeployerSiteRetryFrames))
-					{
-						deploySite.PickFrame = siteNow;
-						deploySite.Site = pickBaseDeploySite(toMainBase);
-						deploySite.Tries = 0;
-						deploySite.NearSince = -1;
-					}
-
-					if (deploySite.Site == CellStruct::Empty)
-					{
-						// No site at all for now: it deploys where it stands when it can.
-						if (CanDeployerUnpackHere(pHouse, pTargetBld, pUnit))
-							OrderDeployerUnpack(pUnit);
-
-						return;
-					}
-
-					const CellStruct site = deploySite.Site;
-					const double siteDist = nanoCell.DistanceFrom(site);
-					const bool driving = pUnit->CurrentMission == Mission::Move && pUnit->Destination
-						&& pUnit->DistanceFrom(pUnit->Destination) > 256;
-
-					auto const failSite = [&]()
-					{
-						deploySite.FailedSites.push_back(site);
-						deploySite.FailedFrames.push_back(siteNow);
-						deploySite.Site = CellStruct::Empty;
-						deploySite.PickFrame = -1;
-						deploySite.Tries = 0;
-						deploySite.NearSince = -1;
-						CountDecision(NeuralDecision::DeployerSiteFailed, pHouse->ArrayIndex);
-					};
-
-					if ((nanoCell == site || (siteDist <= 1.5 && !driving)) && CanDeployerUnpackHere(pHouse, pTargetBld, pUnit))
-					{
-						if (deploySite.Tries >= DeployerSiteMostTries)
-						{
-							failSite();
-							return;
-						}
-
-						++deploySite.Tries;
-						deploySite.TryFrame = siteNow;
-						OrderDeployerUnpack(pUnit);
-						return;
-					}
-
-					// On the site and refused (units on the foundation, which the check asks to step aside), or
-					// next to it: it fails only when that lasts McvIdleArriveFrames.
-					if (siteDist <= McvIdleNearCells && !driving)
-					{
-						if (deploySite.NearSince < 0)
-							deploySite.NearSince = siteNow;
-
-						if (siteNow - deploySite.NearSince >= McvIdleArriveFrames)
-						{
-							failSite();
-							return;
-						}
-
-						if (nanoCell == site)
-							return;
-
-						if (auto const pSiteCell = MapClass::Instance.TryGetCellAt(site); pSiteCell && pUnit->Destination != pSiteCell)
-						{
-							pUnit->SetDestination(pSiteCell, true);
-							pUnit->QueueMission(Mission::Move, true);
-							NoteOrderCaller(pUnit, "move");
-						}
-
-						return;
-					}
-
-					deploySite.NearSince = -1;
-					const bool headingThere = driving && CellClass::Coord2Cell(pUnit->Destination->GetCoords()).DistanceFrom(site) <= 1.5;
-
-					if (!headingThere || IsAITickWindow(90, 15))
-					{
-						if (auto const pSiteCell = MapClass::Instance.TryGetCellAt(site))
-						{
-							const int siteGround = MapClass::Instance.GetMovementZoneType(site, MovementZone::Normal, false);
-							const bool reachesOnItsOwn = (IsGroundZone(siteGround) && siteGround == nanoCellZone)
-								|| MapClass::Instance.GetMovementZoneType(site, pType->MovementZone, false) == ObjectZone(pUnit, pType->MovementZone);
-
-							if (reachesOnItsOwn)
-								IssueMoveOrder(pUnit, pSiteCell, 0.0);
-							else
-								DispatchFootToTargetOrTransport(pUnit, pSiteCell, Mission::Move, false);
-						}
-					}
-				};
-
-				// Idle deployer watchdog (DeployerIdleUndeployedFrames, NeuralAI.State.inl; user approved,
-				// 2026-11-19, match #11506): a deployer packed for that long, or keeping to one spot for
-				// DeployerIdleStillFrames, goes to the main base and deploys at the legal foundation nearest
-				// it (for a building on water, on the water by the base). A slave miner deploys through its
-				// harvest, a defense deployer has its own logic below, one boarding a transport is left to it,
-				// and one on its way to an island goal counts its packed time only. A ride restarts the packed
-				// time: it counts from the boarding and again from the landing on other ground (a deployer
-				// that waited on the shore landed with its time all but run out and was sent back at once);
-				// one that crosses water by itself keeps its time from land to land.
-				if (!pTargetBld->IsBaseDefense)
-				{
-					if (deploySite.SeenFrame < 0 || siteNow < deploySite.SeenFrame || siteNow - deploySite.SeenFrame > 900)
-					{
-						deploySite = NeuralDeployerSite {};
-						deploySite.FirstFrame = siteNow;
-					}
-
-					deploySite.SeenFrame = siteNow;
-					const bool deployerBoarding = pUnit->CurrentMission == Mission::Enter || pUnit->QueuedMission == Mission::Enter;
-					const bool headsForIsland = isExpansionDeployer && canFerryDeployer && pIslandResourceGoalCell != nullptr
-						&& nanoZone != resourceIslandZone;
-					const int groundZoneNow = nanoOnGround ? nanoCellZone : -1;
-
-					if (deployerBoarding || (groundZoneNow >= 0 && deploySite.Zone >= 0 && groundZoneNow != deploySite.Zone
-						&& !CanFootCrossWaterDirectly(pUnit)))
-					{
-						deploySite.FirstFrame = siteNow;
-					}
-
-					if (groundZoneNow >= 0)
-						deploySite.Zone = groundZoneNow;
-
-					if (deploySite.StillCell == CellStruct::Empty || nanoCell.DistanceFrom(deploySite.StillCell) > DeployerIdleDriftCells
-						|| deployerBoarding || headsForIsland || pUnit->IsDeploying)
-					{
-						deploySite.StillCell = nanoCell;
-						deploySite.StillSince = siteNow;
-					}
-
-					const int packedFrames = siteNow - deploySite.FirstFrame;
-					const int stillFrames = siteNow - deploySite.StillSince;
-
-					if (!deploySite.ToMainBase && !isIslandColonizerSlaveMiner && !deployerBoarding
-						&& (packedFrames >= DeployerIdleUndeployedFrames || stillFrames >= DeployerIdleStillFrames))
-					{
-						deploySite.ToMainBase = true;
-						deploySite.Site = CellStruct::Empty;
-						deploySite.PickFrame = -1;
-						deploySite.Tries = 0;
-						deploySite.NearSince = -1;
-						CountDecision(NeuralDecision::DeployerIdleWatchdog, pHouse->ArrayIndex);
-
-						// TEMP diagnostic: each deployer the watchdog sends (DeployerIdleLogLines a match).
-						static int deployerWatchLogSerial = -1;
-						static int deployerWatchLogCount = 0;
-
-						if (deployerWatchLogSerial != NeuralMatchSerial)
-						{
-							deployerWatchLogSerial = NeuralMatchSerial;
-							deployerWatchLogCount = 0;
-						}
-
-						if (deployerWatchLogCount < DeployerIdleLogLines)
-						{
-							++deployerWatchLogCount;
-							Debug::Log("[NeuralAI] House %d deployer watchdog: %s %u (%s, on water %d, colony %d, expansion %d) at (%d,%d) "
-								"zone %d cell zone %d, packed %d frames, still %d frames, mission %d, %d sites failed, goes to the main base "
-								"(%d,%d) zone %d, frame %d.\n",
-								pHouse->ArrayIndex, pType->ID, pUnit->UniqueID, pTargetBld->ID, deploysOnWater ? 1 : 0, deploysColony ? 1 : 0,
-								isExpansionDeployer ? 1 : 0, nanoCell.X, nanoCell.Y, nanoZone, nanoCellZone, packedFrames, stillFrames,
-								static_cast<int>(pUnit->CurrentMission), static_cast<int>(deploySite.FailedSites.size()), homeCoords.X,
-								homeCoords.Y, homeGroundZone, siteNow);
-						}
-					}
-
-					if (deploySite.ToMainBase && !isIslandColonizerSlaveMiner)
-					{
-						deployAtBaseSite(true);
-						continue;
-					}
-				}
-
-				if (isExpansionDeployer)
-				{
-					auto& noRoomIslands = GetMacroState(pHouse).NoRoomIslandUntil;
-					const bool nanoIslandHasNoRoom = nanoZone >= 0 && isNoRoomIslandFor(pTargetBld, nanoZone);
-					const bool mustColonizeIslandWithDeployer = (canFerryDeployer && nanoZone >= 0
-						&& (hubsInNanoZone >= 1 || nanoIslandHasNoRoom) && pIslandResourceGoalCell != nullptr
-						&& nanoZone != resourceIslandZone && deployerFitsOnIslandGoal(pUnit, pTargetBld));
-					const bool landedOnNewIsland = (homeGroundZone >= 0 && nanoZone >= 0 && nanoZone != homeGroundZone
-						&& hubsInNanoZone == 0 && !nanoIslandHasNoRoom);
-
-					// Stranded on an island without room and no other island to go to: back home.
-					if (nanoIslandHasNoRoom && !mustColonizeIslandWithDeployer && hubsInNanoZone == 0)
-					{
-						if ((!isNanoMoving || IsAITickWindow(300, 15)) && homeCoords != CellStruct::Empty)
-						{
-							if (auto const pHomeCell = MapClass::Instance.TryGetCellAt(homeCoords))
-								DispatchFootToTargetOrTransport(pUnit, pHomeCell, Mission::Move, false);
-						}
-
-						continue;
-					}
-
-					if (mustColonizeIslandWithDeployer)
-					{
-						const bool isSelfAmphibOrAir = (pType->MovementZone == MovementZone::Amphibious
-							|| pType->MovementZone == MovementZone::AmphibiousDestroyer
-							|| pType->MovementZone == MovementZone::AmphibiousCrusher
-							|| pType->MovementZone == MovementZone::Fly || pType->JumpJet);
-						if (isSelfAmphibOrAir && pIslandResourceGoalCell)
-						{
-							if (!isNanoMoving || (IsAITickWindow(90, 25)))
-							{
-								IssueMoveOrder(pUnit, pIslandResourceGoalCell, 3.0);
-							}
-						}
-						else
-						{
-							ClearStaleEnterOrUnreachableCrossIslandMission(pUnit, false);
-							if (pUnit->CurrentMission == Mission::Enter || pUnit->QueuedMission == Mission::Enter)
-							{
-								// Already actively boarding a valid transport: do NOT overwrite
-								// or spam orders!
-							}
-							else
-							{
-								UnitClass* pBeachedTrans = nullptr;
-								int bestTransDist = 999999;
-								for (auto const pT : UnitClass::Array)
-								{
-									// Never a transport a strategic plan is using (Airborne Front boards its own): a unit
-									// asking it for a ride took its single radio link and kept the plan's soldiers out.
-									if (!pT || pT->Owner != pHouse || pT->InLimbo || !pT->IsAlive || !pT->Type
-										|| !IsAmphibiousOrAirTransport(pT->Type) || IsPlanMember(pHouse, pT->UniqueID) || IsInTransportOp(pHouse, pT->UniqueID))
-									{
-										continue;
-									}
-
-									if (static_cast<int>(pType->TechnoTypeClass::Size)
-											> static_cast<int>(pT->Type->SizeLimit)
-										|| (pT->Passengers.GetTotalSize()
-											+ static_cast<int>(pType->TechnoTypeClass::Size))
-											> pT->Type->Passengers)
-									{
-										continue;
-									}
-
-									auto const pTCell = pT->GetCell();
-									const int tz = ObjectZone(pT, MovementZone::Normal);
-									if (tz == nanoZone && pTCell && pTCell->LandType != LandType::Water)
-									{
-										const int d = pUnit->DistanceFrom(pT);
-										if (d < bestTransDist)
-										{
-											bestTransDist = d;
-											pBeachedTrans = pT;
-										}
-									}
-								}
-
-								if (pBeachedTrans && !HasActiveBoardingPassenger(pBeachedTrans, nanoZone))
-								{
-									if (pBeachedTrans->CurrentMission == Mission::Move
-										|| pBeachedTrans->Destination != nullptr)
-									{
-										pBeachedTrans->SetDestination(nullptr, true);
-										pBeachedTrans->ClearNavigationList();
-										pBeachedTrans->ForceMission(Mission::Guard);
-									}
-
-									OrderFootToEnter(pUnit, pBeachedTrans);
-								}
-								else if (!isNanoMoving)
-								{
-									if (auto const pIslandPickupBeach
-										= FindSafeIslandLandingCell(pHouse, nanoCell, nanoZone, false))
-									{
-										if (nanoCell.DistanceFrom(pIslandPickupBeach->MapCoords) > 8.0)
-										{
-											IssueMoveOrder(pUnit, pIslandPickupBeach, 4.0);
-										}
-									}
-								}
-							}
-						}
-					}
-					else if (isIslandColonizerSlaveMiner)
-					{
-						// Never force OrderDeployerUnpack on a Slave Miner; let
-						// Mission::Harvest manage deployment on ore!
-						if (pUnit->CurrentMission != Mission::Harvest && pUnit->CurrentMission != Mission::Enter
-							&& pUnit->CurrentMission != Mission::Move)
-						{
-							pUnit->QueueMission(Mission::Harvest, false);
-						}
-					}
-					else if (landedOnNewIsland || (!isNanoMoving && minDistFromRefOrYard >= 10))
-					{
-						if (CanDeployerUnpackHere(pHouse, pTargetBld, pUnit))
-						{
-							OrderDeployerUnpack(pUnit);
-						}
-						else
-						{
-							const CellStruct deployCell
-								= FindDeployableFoundationNearCell(pHouse, pTargetBld, nanoCell, siteZone, pUnit);
-							if (deployCell != CellStruct::Empty)
-							{
-								if (nanoReachedOrNoDest || (IsAITickWindow(45, 15)))
-								{
-									if (auto const pClear = MapClass::Instance.TryGetCellAt(deployCell))
-									{
-										pUnit->SetDestination(pClear, true);
-										pUnit->QueueMission(Mission::Move, true);
-										NoteOrderCaller(pUnit, "move");
-									}
-								}
-							}
-							else if (isIslandColonizerSlaveMiner)
-							{
-								pUnit->QueueMission(Mission::Harvest, false);
-							}
-							else if (landedOnNewIsland)
-							{
-								// No foundation for this building anywhere near on this island: the
-								// island search skips it for 9000 frames and the deployer moves on. The
-								// mark is kept for this building type as well (NoRoomTypeIslandUntil).
-								noRoomIslands[nanoZone] = Unsorted::CurrentFrame + NoRoomIslandFrames;
-								GetMacroState(pHouse).NoRoomTypeIslandUntil[{ pTargetBld->ArrayIndex, nanoZone }]
-									= Unsorted::CurrentFrame + NoRoomIslandFrames;
-								CountDecision(NeuralDecision::DeployerIslandNoRoom, pHouse->ArrayIndex);
-							}
-						}
-					}
-					else if (nanoReachedOrNoDest || (IsAITickWindow(60, 15)))
-					{
-						CellClass* pExpOreCell = nullptr;
-						int bestOreDist = 99999;
-						for (int dy = -56; dy <= 56; dy += 3)
-						{
-							for (int dx = -56; dx <= 56; dx += 3)
-							{
-								const CellStruct tc { static_cast<short>(nanoCell.X + dx),
-									static_cast<short>(nanoCell.Y + dy) };
-								auto const pC = MapClass::Instance.TryGetCellAt(tc);
-								if (!pC || pC->GetContainedTiberiumValue() <= 0)
-									continue;
-
-								const int candZone
-									= MapClass::Instance.GetMovementZoneType(tc, MovementZone::Normal, false);
-								if (nanoZone >= 0 && candZone != nanoZone)
-									continue;
-
-								bool nearExistingRef = false;
-								for (auto const pOwnBld : pHouse->Buildings)
-								{
-									if (!pOwnBld || pOwnBld->InLimbo || !pOwnBld->IsAlive || !pOwnBld->Type
-										|| pOwnBld->Type->Insignificant || pOwnBld->Type->InvisibleInGame)
-									{
-										continue;
-									}
-
-									if (pOwnBld->Type->Refinery || pOwnBld->Type->ConstructionYard
-										|| pOwnBld->Type->ResourceDestination)
-									{
-										const CellStruct bc = pOwnBld->GetMapCoords();
-										if (MapClass::Instance.GetMovementZoneType(bc, MovementZone::Normal, pOwnBld->OnBridge)
-											!= candZone)
-										{
-											continue;
-										}
-
-										if (std::max(std::abs(tc.X - bc.X), std::abs(tc.Y - bc.Y)) < 12)
-										{
-											nearExistingRef = true;
-											break;
-										}
-									}
-								}
-
-								if (nearExistingRef)
-									continue;
-
-								const int distFromNano = std::abs(tc.X - nanoCell.X) + std::abs(tc.Y - nanoCell.Y);
-								if (distFromNano < bestOreDist)
-								{
-									bestOreDist = distFromNano;
-									pExpOreCell = pC;
-								}
-							}
-						}
-
-						if (pExpOreCell && bestOreDist > 6)
-						{
-							IssueMoveOrder(pUnit, pExpOreCell, 3.0);
-						}
-						else if (CanDeployerUnpackHere(pHouse, pTargetBld, pUnit))
-						{
-							OrderDeployerUnpack(pUnit);
-						}
-						else
-						{
-							const CellStruct deployCell = FindBestDeployStandCell(pHouse, pTargetBld, pUnit, siteZone);
-							if (auto const pClear = MapClass::Instance.TryGetCellAt(deployCell))
-							{
-								pUnit->SetDestination(pClear, true);
-								pUnit->QueueMission(Mission::Move, true);
-								NoteOrderCaller(pUnit, "move");
-							}
-						}
+						if (auto const pHomeCell = MapClass::Instance.TryGetCellAt(homeCoords))
+							DispatchFootToTargetOrTransport(pUnit, pHomeCell, Mission::Move, false);
 					}
 
 					continue;
 				}
 
-				// Defense Turret Deployer (Mobile Turret Cores / ROBOTEGG_OBELISK2,
-				// ROBOTEGG_CERBERUS2, etc.): Unpack on a valid foundation clear of
-				// factory exit corridors, or move to a free perimeter foundation!
-				if (pTargetBld->IsBaseDefense)
+				if (mustColonizeIslandWithDeployer)
 				{
-					if (minDistFromBaseBld >= 2 && CanDeployerUnpackHere(pHouse, pTargetBld, pUnit))
+					const bool isSelfAmphibOrAir = (pType->MovementZone == MovementZone::Amphibious
+						|| pType->MovementZone == MovementZone::AmphibiousDestroyer
+						|| pType->MovementZone == MovementZone::AmphibiousCrusher
+						|| pType->MovementZone == MovementZone::Fly || pType->JumpJet);
+					if (isSelfAmphibOrAir && pIslandResourceGoalCell)
 					{
-						OrderDeployerUnpack(pUnit);
-						continue;
-					}
-
-					if (nanoReachedOrNoDest || (IsAITickWindow(45, 15)))
-					{
-						const CellStruct perimStandCell = FindBestDeployStandCell(pHouse, pTargetBld, pUnit, siteZone);
-						if (perimStandCell == nanoCell && CanDeployerUnpackHere(pHouse, pTargetBld, pUnit))
+						if (!isNanoMoving || (IsAITickWindow(90, 25)))
 						{
-							OrderDeployerUnpack(pUnit);
-							continue;
-						}
-
-						if (auto const pPerim = MapClass::Instance.TryGetCellAt(perimStandCell))
-						{
-							pUnit->SetDestination(pPerim, true);
-							pUnit->QueueMission(Mission::Move, true);
-							NoteOrderCaller(pUnit, "move");
-							continue;
+							IssueMoveOrder(pUnit, pIslandResourceGoalCell, 3.0);
 						}
 					}
+					else
+					{
+						ClearStaleEnterOrUnreachableCrossIslandMission(pUnit, false);
+						if (pUnit->CurrentMission == Mission::Enter || pUnit->QueuedMission == Mission::Enter)
+						{
+							// Already actively boarding a valid transport: do NOT overwrite
+							// or spam orders!
+						}
+						else
+						{
+							UnitClass* pBeachedTrans = nullptr;
+							int bestTransDist = 999999;
+							for (auto const pT : UnitClass::Array)
+							{
+								// Never a transport a strategic plan is using (Airborne Front boards its own): a unit
+								// asking it for a ride took its single radio link and kept the plan's soldiers out.
+								if (!pT || pT->Owner != pHouse || pT->InLimbo || !pT->IsAlive || !pT->Type
+									|| !IsAmphibiousOrAirTransport(pT->Type) || IsPlanMember(pHouse, pT->UniqueID) || IsInTransportOp(pHouse, pT->UniqueID))
+								{
+									continue;
+								}
 
-					continue;
+								if (static_cast<int>(pType->TechnoTypeClass::Size)
+										> static_cast<int>(pT->Type->SizeLimit)
+									|| (pT->Passengers.GetTotalSize()
+										+ static_cast<int>(pType->TechnoTypeClass::Size))
+										> pT->Type->Passengers)
+								{
+									continue;
+								}
+
+								auto const pTCell = pT->GetCell();
+								const int tz = ObjectZone(pT, MovementZone::Normal);
+								if (tz == nanoZone && pTCell && pTCell->LandType != LandType::Water)
+								{
+									const int d = pUnit->DistanceFrom(pT);
+									if (d < bestTransDist)
+									{
+										bestTransDist = d;
+										pBeachedTrans = pT;
+									}
+								}
+							}
+
+							if (pBeachedTrans && !HasActiveBoardingPassenger(pBeachedTrans, nanoZone))
+							{
+								if (pBeachedTrans->CurrentMission == Mission::Move
+									|| pBeachedTrans->Destination != nullptr)
+								{
+									pBeachedTrans->SetDestination(nullptr, true);
+									pBeachedTrans->ClearNavigationList();
+									pBeachedTrans->ForceMission(Mission::Guard);
+								}
+
+								OrderFootToEnter(pUnit, pBeachedTrans);
+							}
+							else if (!isNanoMoving)
+							{
+								if (auto const pIslandPickupBeach
+									= FindSafeIslandLandingCell(pHouse, nanoCell, nanoZone, false))
+								{
+									if (nanoCell.DistanceFrom(pIslandPickupBeach->MapCoords) > 8.0)
+									{
+										IssueMoveOrder(pUnit, pIslandPickupBeach, 4.0);
+									}
+								}
+							}
+						}
+					}
+				}
+				else if (pUnit->CurrentMission != Mission::Harvest && pUnit->CurrentMission != Mission::Enter
+					&& pUnit->CurrentMission != Mission::Move)
+				{
+					// Never an unpack order to a slave miner: its harvest unfolds it on the ore.
+					pUnit->QueueMission(Mission::Harvest, false);
 				}
 
-				// Base Infrastructure Deployer (Power, Barracks, Radar, Tech, Repair Bay, Shield/Gap
-				// Generator, a naval yard on the water, or Refinery/Factory): it deploys at the site of the
-				// base placement search it keeps (deployAtBaseSite above).
-				deployAtBaseSite(false);
 				continue;
 			}
 			// A siege unit stuck on an unfold that never happens goes back on guard, where the rules
@@ -14290,7 +13932,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			const bool isExpOutpostOrRef = (!pUT->DeploysInto->ConstructionYard && (hubsInUz >= 1 || strandedWithoutRoom)
 				&& (pOwnU == pExtraHomeSlaveMiner
 					|| (!pUT->Harvester && !pUT->ResourceGatherer && deployerExpandsWith(pUT->DeploysInto)))
-				&& !deployerSentToMainBase(pOwnU->UniqueID) && deployerFitsOnIslandGoal(pOwnU, pUT->DeploysInto));
+				&& !deployerOrderedElsewhere(pOwnU->UniqueID) && deployerFitsOnIslandGoal(pOwnU, pUT->DeploysInto));
 			if (isExpMCV || isExpOutpostOrRef)
 			{
 				pHomeExpansionDeployer = pOwnU;
@@ -15261,7 +14903,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 								&& (pU->Type->DeploysInto->ConstructionYard
 									? (!(pHouse->CountOwnedNow(pU->Type->DeploysInto) == 0 && pHouse->NumConYards >= 1)
 										&& (pU == pHomeExpansionDeployer || yardMcvMayCrossToIslandGoal(pU)))
-									: ((pU == pExtraHomeSlaveMiner || deployerExpandsWith(pU->Type->DeploysInto)) && !deployerSentToMainBase(pU->UniqueID)
+									: ((pU == pExtraHomeSlaveMiner || deployerExpandsWith(pU->Type->DeploysInto)) && !deployerOrderedElsewhere(pU->UniqueID)
 										&& deployerFitsOnIslandGoal(pU, pU->Type->DeploysInto))));
 							const bool isIslandHarvester
 								= ((pU->Type->Harvester || pU->Type->Weeder) && islandGoalTakesHarvesters()
@@ -17589,7 +17231,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					&& (pU->Type->DeploysInto->ConstructionYard
 						? (!(pHouse->CountOwnedNow(pU->Type->DeploysInto) == 0 && pHouse->NumConYards >= 1)
 							&& (pU == pHomeExpansionDeployer || yardMcvMayCrossToIslandGoal(pU)))
-						: ((pU == pExtraHomeSlaveMiner || deployerExpandsWith(pU->Type->DeploysInto)) && !deployerSentToMainBase(pU->UniqueID)
+						: ((pU == pExtraHomeSlaveMiner || deployerExpandsWith(pU->Type->DeploysInto)) && !deployerOrderedElsewhere(pU->UniqueID)
 							&& deployerFitsOnIslandGoal(pU, pU->Type->DeploysInto))));
 				const bool isIslandHarvester = ((pU->Type->Harvester || pU->Type->Weeder) && islandGoalTakesHarvesters()
 					&& uZone == homeGroundZone && uZone != resourceIslandZone && pHouse->CountOwnedNow(pU->Type) >= 2);
@@ -18001,9 +17643,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					auto& yardMacro = GetMacroState(pHouse);
 					const CellStruct here = pBld->GetMapCoords();
 
-					if (Unsorted::CurrentFrame - yardMacro.LastYardUndeployFrame < 3600
+					if (Unsorted::CurrentFrame - yardMacro.LastYardUndeployFrame < ReversibleRepackFrames
 						&& yardMacro.LastYardUndeployCell != CellStruct::Empty
-						&& here.DistanceFrom(yardMacro.LastYardUndeployCell) <= 8.0)
+						&& here.DistanceFrom(yardMacro.LastYardUndeployCell) <= ReversibleRepackCells)
 					{
 						CountDecision(NeuralDecision::YardUndeployBlocked, pHouse->ArrayIndex);
 						return;
@@ -18026,55 +17668,73 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 			bool handledConYardAction = false;
 
-			if (hpPct < 0.16 && pOwnBld->HasBeenAttacked && pOwnBld->Type->ConstructionYard && pHouse->NumConYards == 1
-				&& pOwnBld->Type->UndeploysInto != nullptr && GameModeOptionsClass::Instance.MCVRedeploy)
+			// The health a reversible building had at its last sample (MobileFactoryStands: every 600 frames,
+			// or as soon as it rises), and how long ago: how fast it falls (IsReversibleBuildingFalling).
+			double standHealthThen = hpPct;
+			int standHealthFrames = 0;
+			int standSince = Unsorted::CurrentFrame;
+
+			if (IsReversibleBaseBuilding(pOwnBld->Type))
+			{
+				auto& standMacro = GetMacroState(pHouse);
+				const int now = Unsorted::CurrentFrame;
+
+				if (standMacro.MobileFactoryStands.size() > 32)
+				{
+					std::erase_if(standMacro.MobileFactoryStands,
+						[now](const auto& entry) { return now - entry.second.HealthFrame > 9000; });
+				}
+
+				auto const [standIt, justDeployed] = standMacro.MobileFactoryStands.try_emplace(pOwnBld->UniqueID,
+					NeuralMobileFactoryStand { now, hpPct, now });
+				auto& stand = standIt->second;
+
+				if (justDeployed && IsMobileFactoryBuilding(pOwnBld->Type))
+					standMacro.MobileFactoryDeployFrame = now;
+
+				standHealthThen = stand.Health;
+				standHealthFrames = now - stand.HealthFrame;
+				standSince = stand.Since;
+
+				if (now - stand.HealthFrame >= 600 || hpPct > stand.Health)
+				{
+					stand.Health = hpPct;
+					stand.HealthFrame = now;
+				}
+			}
+
+			// Our last ConYard about to fall (IsReversibleBuildingFalling: attacked, an enemy unit within
+			// ReversibleFleeEnemyLeptons, health under ReversibleFleeHealth or falling that fast) packs up only
+			// toward a building of ours ReversibleFleeRefugeCells away or more on its ground; otherwise it stays
+			// deployed with wrench repair active and keeps building defenses and units.
+			if (pOwnBld->Type->ConstructionYard && pHouse->NumConYards == 1 && pOwnBld->Type->UndeploysInto != nullptr
+				&& GameModeOptionsClass::Instance.MCVRedeploy && IsReversibleBuildingFalling(pHouse, pOwnBld, standHealthThen, standHealthFrames))
 			{
 				const CellStruct yc = pOwnBld->GetMapCoords();
 				const int yz = MapClass::Instance.GetMovementZoneType(yc, MovementZone::Normal, pOwnBld->OnBridge);
-				bool closeAttackerNearCY = false;
-				ForEachTechnoNear(yc, 12, [&](TechnoClass* pET) -> bool
-				{
-					if (!pET->Owner || pET->WhatAmI() == AbstractType::Building)
-						return true;
-
-					if (pET->Owner == pHouse || pHouse->IsAlliedWith(pET->Owner) || !IsCellVisibleToAI(pHouse, pET->GetCell()) || pET->Owner->IsNeutral())
-						return true;
-
-					if (pOwnBld->DistanceFrom(pET) <= 2048)
-						closeAttackerNearCY = true;
-
-					return !closeAttackerNearCY;
-				});
-
 				CellStruct safeRetreatHub = CellStruct::Empty;
 
-				if (closeAttackerNearCY)
+				for (auto const pFriendlyB : pHouse->Buildings)
 				{
-					for (auto const pFriendlyB : pHouse->Buildings)
+					if (!pFriendlyB || pFriendlyB == pOwnBld || pFriendlyB->InLimbo || !pFriendlyB->IsAlive
+						|| !pFriendlyB->Type)
 					{
-						if (!pFriendlyB || pFriendlyB == pOwnBld || pFriendlyB->InLimbo || !pFriendlyB->IsAlive
-							|| !pFriendlyB->Type)
-						{
-							continue;
-						}
+						continue;
+					}
 
-						const CellStruct fc = pFriendlyB->GetMapCoords();
+					const CellStruct fc = pFriendlyB->GetMapCoords();
 
-						if (yz >= 0 && MapClass::Instance.GetMovementZoneType(fc, MovementZone::Normal, pFriendlyB->OnBridge) != yz)
-							continue;
+					if (yz >= 0 && MapClass::Instance.GetMovementZoneType(fc, MovementZone::Normal, pFriendlyB->OnBridge) != yz)
+						continue;
 
-						if (fc.DistanceFrom(yc) >= 16.0)
-						{
-							safeRetreatHub = fc;
-							break;
-						}
+					if (fc.DistanceFrom(yc) >= ReversibleFleeRefugeCells)
+					{
+						safeRetreatHub = fc;
+						break;
 					}
 				}
 
-				// Only pack up our last ConYard if an enemy is right on top of it AND we own a
-				// distant friendly hub (>= 16 cells away) to retreat to; otherwise stay deployed
-				// with wrench repair active and keep building defenses and units!
-				if (closeAttackerNearCY && safeRetreatHub != CellStruct::Empty)
+				if (safeRetreatHub != CellStruct::Empty)
 				{
 					UndeployBuildingToVehicle(pOwnBld, safeRetreatHub);
 					handledConYardAction = true;
@@ -18421,23 +18081,26 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				}
 			}
 
-			// A damaged mobile factory is always repaired (it is never sell-dodged, see below).
-			if (IsMobileFactoryBuilding(pOwnBld->Type) && pOwnBld->Type->ClickRepairable && hpPct < 0.82 && currentCredits > 600
-				&& !pOwnBld->IsBeingRepaired)
+			// A damaged reversible building (a mobile factory, the Iron Fist) is always repaired: it is never
+			// sell-dodged, see below.
+			if (IsReversibleBaseBuilding(pOwnBld->Type) && !pOwnBld->Type->ConstructionYard && pOwnBld->Type->ClickRepairable && hpPct < 0.82
+				&& currentCredits > 600 && !pOwnBld->IsBeingRepaired)
 			{
 				pOwnBld->SetRepairState(1);
 			}
 
-			// Deployed mobile factory (NeuralAI.MobileFactory.inl): production uses it like any other
-			// factory (UpdatePrimaryFactories picks the one closest to the front). It flees (packs up for
-			// the main base or the nearest quiet hub) when the enemy it sees around outweighs our local
-			// defense or its health fell sharply. Otherwise, after standing MobileFactoryDwellFrames and
-			// MobileFactoryPackCooldownFrames after the house's last pack-up, it moves when its spot is
-			// elsewhere: the front moved 30+ cells past it (leapfrog, only with an idle queue), the main
-			// base needs hidden production, or a known enemy defense now reaches it. Only buildings
-			// that pack back into their vehicle (UndeploysInto) ever move; the MCVRedeploy option only
-			// concerns ConYards.
-			if (!handledConYardAction && IsMobileFactoryBuilding(pOwnBld->Type) && hpPct >= 0.12
+			// A deployed reversible building other than a yard (NeuralAI.MobileFactory.inl): a mobile factory
+			// produces like any other factory (UpdatePrimaryFactories picks the one closest to the front). It
+			// flees with the criteria of the last yard (user, 2026-11-21: conservative): about to fall
+			// (IsReversibleBuildingFalling), with a quiet refuge ReversibleFleeRefugeCells away or more (the main
+			// base or the nearest quiet hub, FindMobileFactoryRetreat), never within ReversibleRepackCells of
+			// the last pack-up for ReversibleRepackFrames; its vehicle goes to the refuge and then asks again
+			// where to deploy. Otherwise, after standing MobileFactoryDwellFrames and MobileFactoryPackCooldownFrames
+			// after the house's last pack-up, it moves when its spot is elsewhere: for a factory the front moved
+			// 30+ cells past it (leapfrog, only with an idle queue), the main base needs hidden production, or a
+			// known enemy defense now reaches it (FindMobileFactorySpot); for another building the goal of its
+			// role moved as far (FindDeployerGoal). The MCVRedeploy option only concerns ConYards.
+			if (!handledConYardAction && IsReversibleBaseBuilding(pOwnBld->Type) && !pOwnBld->Type->ConstructionYard
 				&& pOwnBld->CurrentMission != Mission::Construction && pOwnBld->CurrentMission != Mission::Selling
 				&& IsAITickWindow(90, 20))
 			{
@@ -18445,61 +18108,66 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				const int now = Unsorted::CurrentFrame;
 				const CellStruct fc = pOwnBld->GetMapCoords();
 				const int fz = ObjectZone(pOwnBld, MovementZone::Normal);
-
-				if (mobileMacro.MobileFactoryStands.size() > 16)
-				{
-					std::erase_if(mobileMacro.MobileFactoryStands,
-						[now](const auto& entry) { return now - entry.second.HealthFrame > 9000; });
-				}
-
-				auto const [standIt, justDeployed] = mobileMacro.MobileFactoryStands.try_emplace(pOwnBld->UniqueID,
-					NeuralMobileFactoryStand { now, hpPct, now });
-				auto& stand = standIt->second;
-
-				if (justDeployed)
-					mobileMacro.MobileFactoryDeployFrame = now;
-
-				const int stoodFor = now - stand.Since;
-				const bool healthDropped = stand.Health - hpPct >= 0.2;
-
-				if (now - stand.HealthFrame >= 600 || hpPct > stand.Health)
-				{
-					stand.Health = hpPct;
-					stand.HealthFrame = now;
-				}
-
-				const int threat = VisibleEnemyThreatNear(pHouse, fc, 10);
-				const int localDefense = OwnDefenseNear(pHouse, fc, 10);
-				const bool flee = (threat >= 80 && threat * 4 > localDefense * 5 && (stoodFor >= 300 || hpPct < 0.5))
-					|| (healthDropped && stoodFor >= 150);
+				const int stoodFor = now - standSince;
 				const bool producing = pOwnBld->Factory != nullptr && pOwnBld->Factory->Object != nullptr;
 				auto const pVehicle = pOwnBld->Type->UndeploysInto;
+				const bool isFactory = IsMobileFactoryBuilding(pOwnBld->Type);
 
-				if (flee)
+				auto const packUp = [&](const CellStruct& target, int reason, const char* why)
+				{
+					mobileMacro.MobileFactoryLastPackFrame = now;
+					mobileMacro.MobileFactoryPackCell = fc;
+					mobileMacro.MobileFactoryPackTarget = target;
+					mobileMacro.MobileFactoryPackReason = reason;
+					NoteReversiblePack(pHouse, fc);
+
+					// TEMP diagnostic: each pack-up of a reversible building.
+					if (DeployerLogAllowed(pHouse))
+					{
+						Debug::Log("[NeuralAI] House %d reversible pack-up: %s %u at (%d,%d) %s toward (%d,%d), health %d%% (%d%% %d frames ago), "
+							"stood %d frames, frame %d.\n",
+							pHouse->ArrayIndex, pOwnBld->Type->ID, pOwnBld->UniqueID, fc.X, fc.Y, why, target.X, target.Y,
+							static_cast<int>(hpPct * 100), static_cast<int>(standHealthThen * 100), standHealthFrames, stoodFor, now);
+					}
+
+					UndeployBuildingToVehicle(pOwnBld, target);
+					handledConYardAction = true;
+				};
+
+				if (IsReversibleBuildingFalling(pHouse, pOwnBld, standHealthThen, standHealthFrames))
 				{
 					const CellStruct retreat
 						= FindMobileFactoryRetreat(pHouse, fc, fz, CanHouseFerryTypeAcrossWater(pHouse, pVehicle));
+					const bool quiet = retreat != CellStruct::Empty && VisibleEnemyThreatNear(pHouse, retreat, 12) == 0;
 
-					if (retreat != CellStruct::Empty && retreat.DistanceFrom(fc) >= 8.0)
+					if (quiet && retreat.DistanceFrom(fc) >= ReversibleFleeRefugeCells && ReversiblePackAllowed(pHouse, fc))
 					{
 						mobileMacro.MobileFactoryAvoidCell = fc;
 						mobileMacro.MobileFactoryAvoidFrame = now;
-						mobileMacro.MobileFactoryPackCell = fc;
-						mobileMacro.MobileFactoryPackTarget = retreat;
-						mobileMacro.MobileFactoryPackReason = MobileFactoryReasonNone;
-						mobileMacro.MobileFactoryLastPackFrame = now;
-						UndeployBuildingToVehicle(pOwnBld, retreat);
-						handledConYardAction = true;
+						packUp(retreat, MobileFactoryReasonNone, "flees");
 					}
 				}
-				else if (threat == 0 && stoodFor >= MobileFactoryDwellFrames
+				else if (VisibleEnemyThreatNear(pHouse, fc, 10) == 0 && stoodFor >= MobileFactoryDwellFrames
 					&& now - mobileMacro.MobileFactoryLastPackFrame >= MobileFactoryPackCooldownFrames)
 				{
 					const bool inDefenseReach = IsCellInKnownEnemyDefenseReach(pHouse, fc, 1);
-					const MobileFactorySpot spot
-						= FindMobileFactorySpot(pHouse, pOwnBld->Type, pOwnBld, fc, fz, pOwnBld->UniqueID);
-					// Evasive moves (hidden production, a defense in reach) may interrupt production, as
-					// fleeing does; a planned move (leapfrog, a better spot) waits until the queue is idle.
+					MobileFactorySpot spot {};
+
+					if (isFactory)
+					{
+						spot = FindMobileFactorySpot(pHouse, pOwnBld->Type, pOwnBld, fc, fz, pOwnBld->UniqueID);
+					}
+					else
+					{
+						NeuralPlacementGoalKind goalKind = NeuralPlacementGoalKind::None;
+						spot.Cell = FindDeployerGoal(pHouse, pOwnBld->Type, pVehicle, nullptr, goalKind);
+						spot.Reason = (spot.Cell != CellStruct::Empty && goalKind != NeuralPlacementGoalKind::None)
+							? MobileFactoryReasonForward
+							: MobileFactoryReasonNone;
+					}
+
+					// Evasive moves (hidden production, a defense in reach) may interrupt production, as fleeing
+					// does; a planned move (leapfrog, a better spot) waits until the queue is idle.
 					const bool evasive = inDefenseReach || spot.Reason == MobileFactoryReasonHidden;
 					const double minMove = evasive ? 10.0 : MobileFactoryLeapfrogCells;
 
@@ -18511,18 +18179,13 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 							mobileMacro.MobileFactoryAvoidFrame = now;
 						}
 
-						mobileMacro.MobileFactoryLastPackFrame = now;
-						mobileMacro.MobileFactoryPackCell = fc;
-						mobileMacro.MobileFactoryPackTarget = spot.Cell;
-						mobileMacro.MobileFactoryPackReason = spot.Reason;
-						UndeployBuildingToVehicle(pOwnBld, spot.Cell);
-						handledConYardAction = true;
+						packUp(spot.Cell, spot.Reason, evasive ? "moves away" : "moves on");
 					}
 				}
 			}
 
-			// A mobile factory is not sell-dodged: selling it only packs it back into its vehicle, which
-			// unfolds again at once. It is repaired instead (wrench repair below).
+			// A reversible building (a mobile factory) is not sell-dodged: selling it only packs it back into its
+			// vehicle, which unfolds again at once. It is repaired instead (above).
 			if (!handledConYardAction && hpPct < sellDodgeThresh && IsDeployedSiegeBuildingType(pOwnBld->Type)
 				&& pOwnBld->CurrentMission != Mission::Selling && pOwnBld->QueuedMission != Mission::Selling)
 			{
@@ -18531,7 +18194,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				UndeployBuildingToVehicle(pOwnBld, homeCoords);
 			}
 			else if (!handledConYardAction && hpPct < sellDodgeThresh && !pOwnBld->Type->ConstructionYard
-				&& !IsMobileFactoryBuilding(pOwnBld->Type) && !pOwnBld->Type->Unsellable && !IsDeployedSiegeBuildingType(pOwnBld->Type)
+				&& !IsReversibleBaseBuilding(pOwnBld->Type) && !pOwnBld->Type->Unsellable && !IsDeployedSiegeBuildingType(pOwnBld->Type)
 				&& !pOwnBld->Type->ResourceGatherer && pOwnBld->Type->Enslaves == nullptr && pOwnBld->Type->Cost >= 500
 				&& !pOwnBld->Type->CanBeOccupied && pOwnBld->CurrentMission != Mission::Selling)
 			{

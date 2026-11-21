@@ -3079,9 +3079,13 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		// say: its houses live on the trickle of income and the depot never came (Heisenberg repro).
 		std::vector<int> mcvPrerequisites;
 
-		if (pHouse->NumConYards >= 1 && pHouse->NumConYards < 6
-			&& ((scores[30] >= 450 && money >= 2000 && GetMacroState(pHouse).UncolonizedOreFields > 0)
-				|| GetMacroState(pHouse).IslandExpansionUrgent))
+		// With no yard left the MCV's missing buildings come first too (user approved, 2026-11-21: as in Red
+		// Alert 3, a house with deployers rebuilds what its MCV needs, then the MCV and a yard): only a
+		// deployer brings them then (the source choice after this pick).
+		if (pHouse->NumConYards == 0
+			|| (pHouse->NumConYards >= 1 && pHouse->NumConYards < 6
+				&& ((scores[30] >= 450 && money >= 2000 && GetMacroState(pHouse).UncolonizedOreFields > 0)
+					|| GetMacroState(pHouse).IslandExpansionUrgent)))
 		{
 			bool mcvBuildable = false;
 			std::vector<int> missing;
@@ -3222,6 +3226,45 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 		const bool firstFactoryPending = groundWarFactoryBuildableNow || navalFirst;
 
+		// Buildings a deployer of ours can bring (NeuralAI.MobileFactory.inl; user approved, 2026-11-21,
+		// «Apruebo el plan»): of the deployers our vehicle factories can build now the cheapest of each
+		// building, a mobile factory only with a spot waiting for it (HouseWantsMobileFactory). Such a
+		// building is a candidate of this pick as one the yard builds, and after the pick the yard or a
+		// deployer brings it. One a deployer brings already (asked for, or on its way) waits for it when one
+		// is enough (a factory, a tech or support building); the yard may add a refinery, a power plant or
+		// a defense meanwhile.
+		std::unordered_map<int, UnitTypeClass*> deployerOfBuilding;
+		std::vector<int> buildingsOnTheWay;
+		int yardBestIdx = -1;
+		int yardBestScore = INT_MIN;
+		int yardSecondIdx = -1;
+		int yardSecondScore = INT_MIN;
+
+		for (auto const& build : GetMacroState(pHouse).DeployerBuilds)
+			buildingsOnTheWay.push_back(build.BuildingType);
+
+		for (auto const& [uid, order] : GetMacroState(pHouse).DeployOrders)
+			buildingsOnTheWay.push_back(order.BuildingType);
+
+		for (auto const pDeployerType : UnitTypeClass::Array)
+		{
+			if (!IsBaseDeployerUnit(pDeployerType) || pDeployerType->Naval || !CanBuildUnderHumanRules(pHouse, pDeployerType)
+				|| (IsMobileFactoryUnit(pDeployerType) && !HouseWantsMobileFactory(pHouse, pDeployerType)))
+			{
+				continue;
+			}
+
+			auto& pCheapest = deployerOfBuilding[pDeployerType->DeploysInto->ArrayIndex];
+
+			if (!pCheapest || pDeployerType->GetActualCost(pHouse) < pCheapest->GetActualCost(pHouse))
+				pCheapest = pDeployerType;
+		}
+
+		auto const isOnTheWay = [&buildingsOnTheWay](int buildingIdx)
+		{
+			return std::find(buildingsOnTheWay.begin(), buildingsOnTheWay.end(), buildingIdx) != buildingsOnTheWay.end();
+		};
+
 		for (auto const pBld : BuildingTypeClass::Array)
 		{
 			if (!pBld || pBld->Wall || pBld->FirestormWall || pBld->Gate || pBld->LaserFence || pBld->LaserFencePost
@@ -3233,8 +3276,21 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			if (HouseExt::IsDisabledFromShell(pHouse, pBld))
 				continue;
 
-			if (!CanBuildUnderHumanRules(pHouse, pBld))
+			const bool yardBuildsIt = CanBuildUnderHumanRules(pHouse, pBld);
+
+			if (!yardBuildsIt && !deployerOfBuilding.contains(pBld->ArrayIndex))
 				continue;
+
+			if (isOnTheWay(pBld->ArrayIndex))
+			{
+				const DeployerRole onTheWayRole = DeployedBuildingRole(pBld);
+
+				if (!yardBuildsIt || (onTheWayRole != DeployerRole::Refinery && onTheWayRole != DeployerRole::Power
+					&& onTheWayRole != DeployerRole::Defense))
+				{
+					continue;
+				}
+			}
 
 			auto const& cooldownMap = GetMacroState(pHouse).BuildingPlacementCooldownUntilFrame;
 			auto const cdIt = cooldownMap.find(pBld->ArrayIndex);
@@ -4220,6 +4276,20 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				bestBldIdx = pBld->ArrayIndex;
 				bestFillsAirDeficit = candidateFillsAirDeficit;
 			}
+
+			// The two best the yard builds itself: its pick when a deployer brings the best one.
+			if (yardBuildsIt && score > yardBestScore)
+			{
+				yardSecondIdx = yardBestIdx;
+				yardSecondScore = yardBestScore;
+				yardBestIdx = pBld->ArrayIndex;
+				yardBestScore = score;
+			}
+			else if (yardBuildsIt && score > yardSecondScore)
+			{
+				yardSecondIdx = pBld->ArrayIndex;
+				yardSecondScore = score;
+			}
 		}
 
 		const int scoredBldIdx = bestBldIdx;
@@ -4512,6 +4582,59 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				"towers per asset %d, assets short of cover %d of %d, credits %d, frame %d.\n",
 				pHouse->ArrayIndex, enemyGroundThreat, ownedGroundDefenseValue, optimalGroundDefenseValue, totalGroundDefenses,
 				groundThreatDefenseDeficit, groundCoverTowersPerAsset, groundCoverageDeficit, coverageAssetCount, money, Unsorted::CurrentFrame);
+		}
+
+		// Who brings the pick (NeuralAI.MobileFactory.inl; user approved, 2026-11-21, «Apruebo el plan»; user:
+		// the deployer for the far spots, which the yard's adjacency does not reach, near ones too when that
+		// does better): the yard when it builds it and its cell stands within DeployerNearSpotCells of the
+		// role goal (FindDeployerGoal), a deployer when the yard cannot build it or the goal lies farther, and
+		// for a near spot while the yard queue builds something else, when the deployer costs at most
+		// DeployerNearCostPct of the building. A deployer is asked of the vehicle factory (DeployerBuilds, at
+		// most DeployerOrdersMost with the orders under way, never two for one building) and the yard takes
+		// its next best pick. A building only a deployer brings, when none may be asked now, leaves the yard
+		// to that next pick too.
+		if (bestBldIdx >= 0)
+		{
+			auto& orderMacro = GetMacroState(pHouse);
+			auto const pPick = BuildingTypeClass::Array.GetItem(bestBldIdx);
+			auto const itDeployer = deployerOfBuilding.find(bestBldIdx);
+			const bool yardBuildsPick = CanBuildUnderHumanRules(pHouse, pPick);
+			const bool yardBuildingPick = inProgressBldIdx == bestBldIdx || inProgressDefIdx == bestBldIdx;
+			const int ordersUnderWay = static_cast<int>(orderMacro.DeployerBuilds.size() + orderMacro.DeployOrders.size());
+			const int yardNextIdx = yardBestIdx != bestBldIdx ? yardBestIdx : yardSecondIdx;
+			bool deployerBrings = false;
+
+			if (itDeployer != deployerOfBuilding.end() && !yardBuildingPick && !isOnTheWay(bestBldIdx) && ordersUnderWay < DeployerOrdersMost)
+			{
+				auto const pDeployerType = itDeployer->second;
+				NeuralPlacementGoalKind goalKind = NeuralPlacementGoalKind::None;
+				const CellStruct goal = FindDeployerGoal(pHouse, pPick, pDeployerType, nullptr, goalKind);
+				const CellStruct yardCell = yardBuildsPick ? CachedTetrisBuildCell(pHouse, pPick) : CellStruct::Empty;
+				const int yardGap = (yardCell != CellStruct::Empty && goal != CellStruct::Empty) ? static_cast<int>(yardCell.DistanceFrom(goal)) : -1;
+				const bool farSpot = yardCell == CellStruct::Empty || yardGap > DeployerNearSpotCells;
+				const int queueIdx = pPick->IsBaseDefense ? inProgressDefIdx : inProgressBldIdx;
+				const bool yardBusy = queueIdx >= 0 && queueIdx != bestBldIdx;
+				const bool cheapEnough = pDeployerType->GetActualCost(pHouse) * 100 <= pPick->GetActualCost(pHouse) * DeployerNearCostPct;
+				deployerBrings = goal != CellStruct::Empty && (!yardBuildsPick || farSpot || (yardBusy && cheapEnough));
+
+				if (deployerBrings)
+				{
+					orderMacro.DeployerBuilds.push_back({ pDeployerType->ArrayIndex, bestBldIdx, goal, goalKind, Unsorted::CurrentFrame });
+
+					// TEMP diagnostic: each deployer the building pick asks for.
+					if (DeployerLogAllowed(pHouse))
+					{
+						Debug::Log("[NeuralAI] House %d deployer order: %s from %s, %s goal (%d,%d), the yard %s (its cell %d cells from the goal), "
+							"yard queue busy %d, %d credits, the yard takes %s, frame %d.\n",
+							pHouse->ArrayIndex, pPick->ID, pDeployerType->ID, PlacementGoalKindName(goalKind), goal.X, goal.Y,
+							yardBuildsPick ? "builds it" : "cannot build it", yardGap, yardBusy ? 1 : 0, money,
+							yardNextIdx >= 0 ? BuildingTypeClass::Array.GetItem(yardNextIdx)->ID : "nothing", Unsorted::CurrentFrame);
+					}
+				}
+			}
+
+			if (deployerBrings || !yardBuildsPick)
+				bestBldIdx = yardNextIdx;
 		}
 
 		pExt->NeuralAI_NextBuildingTarget = bestBldIdx;
@@ -5875,19 +5998,11 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		// A main battle tank stays one whatever its passengers, range, projectile or damage figure say.
 		const bool isMainTank = IsMainBattleTankType(pUnit);
 
-		const bool isKeyStructureDeployer = (pUnit->DeploysInto != nullptr
-			&& IsTrueBaseStructureTarget(pUnit->DeploysInto) && !isMCV && !pUnit->Harvester && !pUnit->ResourceGatherer
-			&& (!pUnit->DeploysInto->IsBaseDefense || pWpn == nullptr));
-
-		if (isKeyStructureDeployer && ownsUndeployedKeyStructure)
-			continue;
-
-		// A mobile factory is built only with a spot waiting for it (forward production, an island or
-		// expansion hub without that factory kind, a lost main factory, see NeuralAI.MobileFactory.inl);
-		// otherwise it would unfold next to its own maker.
-		const bool isMobileFactory = IsMobileFactoryUnit(pUnit);
-
-		if (isMobileFactory && !isUnitInProgress && !HouseWantsMobileFactory(pHouse, pUnit))
+		// A base deployer (Nanocore, mobile factory, outpost: NeuralAI.MobileFactory.inl) never competes as a
+		// vehicle of the army: the building pick weighs it as the building it becomes and asks the vehicle
+		// factory for it (DeployerBuilds, after this pick). As a combat unit the mobile factories won 13 picks
+		// of matches #13416..#13473 and the tank floor took all 13.
+		if (IsBaseDeployerUnit(pUnit))
 			continue;
 
 		const bool isAmphibTransport = IsAmphibiousOrAirTransport(pUnit);
@@ -6000,7 +6115,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				continue;
 		}
 
-		const bool isUnarmedSupportVehicle = (!pUnit->Naval && pWpn == nullptr && !isMCV && !isKeyStructureDeployer
+		const bool isUnarmedSupportVehicle = (!pUnit->Naval && pWpn == nullptr && !isMCV
 			&& !isEconomyUnit && !isConvertToOpenToppedOrCombat && pUnit->Passengers == 0
 			&& !(TechnoTypeExt::Fetch(pUnit) && TechnoTypeExt::Fetch(pUnit)->Carryall));
 
@@ -6073,7 +6188,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			awaitedUnitStage = std::max(awaitedUnitStage, 4);
 
 		const int ownedUnitWithConv = CountOwnedUnitWithConversions(pHouse, pUnit);
-		if (!isEconomyUnit && !isMCV && !isKeyStructureDeployer && !isAmphibTransport)
+		if (!isEconomyUnit && !isMCV && !isAmphibTransport)
 		{
 			// No ceiling by number, in all or of one type: a kind is built for as long as its units
 			// are put to work, and waits while those it has go unused (IsArmyKindUnused).
@@ -6124,7 +6239,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		// Under attack the answer to the threat is built first. What the house cannot do without
 		// stays: the MCV when there is no yard, a harvester per refinery, anything while no income is left.
 		if (GetMacroState(pHouse).CounterUnderAttack && hasActiveUnitIncome
-			&& ((isMCV && pHouse->NumConYards > 0) || (isKeyStructureDeployer && !isMCV)
+			&& ((isMCV && pHouse->NumConYards > 0)
 				|| (isEconomyUnit && ownedEconomyUnits >= std::max(1, trueRefineries))))
 		{
 			score -= ThreatFirstPenalty;
@@ -6226,7 +6341,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 			// Artillery past what our front line can cover loses ground for every gun over it, with no
 			// cap: the main battle tanks come next (ArtilleryFreeVehicles).
-			if (isArtillery && !isEconomyUnit && !isMCV && !isKeyStructureDeployer && pUnit->Passengers == 0
+			if (isArtillery && !isEconomyUnit && !isMCV && pUnit->Passengers == 0
 				&& ownedArtilleryVehicles >= artilleryAllowance)
 			{
 				score -= (ownedArtilleryVehicles - artilleryAllowance + 1) * ArtilleryOverFrontPenalty
@@ -6242,94 +6357,6 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 				if (bankWantsYard)
 					bankYardMcvIdx = pUnit->ArrayIndex;
-			}
-			else if (isKeyStructureDeployer)
-			{
-				// Universal Deployable Key Structure Scoring across all mods (Mobile
-				// Outposts/Explorers, Mobile Refineries/Factories, Power/Tech/Turret
-				// Cores, Nanocores):
-				auto const pTargetBld = pUnit->DeploysInto;
-				const int ownedTargetBld = BuildingTypeExt::CountOwnedNowWithDeployOrUpgrade(pTargetBld, pHouse);
-
-				// Tech role (radar, spy satellite or superweapon carrier): one is enough, it only
-				// unlocks the tech tree. It must never be mistaken for an expansion outpost.
-				const bool isTechStructure = pTargetBld->Radar || pTargetBld->SpySat || pTargetBld->SuperWeapon != -1
-					|| pTargetBld->SuperWeapon2 != -1
-					|| (BuildingTypeExt::Fetch(pTargetBld) && !BuildingTypeExt::Fetch(pTargetBld)->SuperWeapons.empty());
-				// A building the construction yard builds too is not a dedicated outpost: the vehicle is one
-				// more way to get it and it keeps the yard's cap (a shield generator Nanocore was taken for an
-				// outpost and built 5 times, 400 power each, where one enables the shields; user, 2026-11-20).
-				const bool yardBuildsTarget = pTargetBld->TechLevel >= 0 && pTargetBld->TechLevel <= 10;
-				const bool isDedicatedOutpost = !isTechStructure && !yardBuildsTarget && pTargetBld->BaseNormal
-					&& !pTargetBld->Refinery && pTargetBld->Factory == AbstractType::None
-					&& pTargetBld->PowerBonus <= pTargetBld->PowerDrain;
-
-				if (isTechStructure && !pTargetBld->Refinery && pTargetBld->Factory == AbstractType::None
-					&& pTargetBld->PowerBonus <= pTargetBld->PowerDrain)
-				{
-					if (ownedTargetBld >= 1)
-						score -= 2000;
-					else
-						score += scores[4];
-				}
-				else if (isDedicatedOutpost)
-				{
-					// Mobile Outpost / Explorer / Expansion Hub (Tiberian Sun / Firestorm
-					// / Mental Omega / YR mods):
-					const int maxDedicatedOutposts = (features[21] > 0) ? 8 : 4;
-					if (scores[30] < 300 || ownedTargetBld >= maxDedicatedOutposts)
-						score -= 2000;
-					else
-						score += scores[30] - (ownedTargetBld * 250);
-				}
-				else if (pTargetBld->PowerBonus > pTargetBld->PowerDrain && !pTargetBld->IsBaseDefense)
-				{
-					score += scores[0];
-				}
-				else if (pTargetBld->Refinery)
-				{
-					score += scores[1] + ((scores[30] > 700) ? (scores[30] / 2) : 0); // Use Mobile Refinery / Refinery
-				}
-
-				// Core for Outpost Expansion!
-				else if (pTargetBld->Factory == AbstractType::InfantryType)
-					score += scores[2];
-				else if (pTargetBld->Factory == AbstractType::UnitType && !pTargetBld->Naval)
-					score += scores[3]
-						+ ((scores[30] > 800) ? (scores[30] / 3) : 0); // Forward Mobile War Factory / Core!
-				else if (pTargetBld->Factory == AbstractType::UnitType && pTargetBld->Naval)
-					score += scores[7];
-				else if (pTargetBld->Factory == AbstractType::AircraftType)
-					score += scores[8];
-				else if (pTargetBld->UnitRepair)
-					score += scores[9] - (ownedTargetBld * 900);
-				else if (pTargetBld->SuperWeapon != -1)
-					score += scores[10] - (ownedTargetBld * 900);
-				else if (pTargetBld->Storage > 0 && !pTargetBld->Refinery)
-					score += scores[11];
-				else if (pTargetBld->IsBaseDefense)
-				{
-					const auto pBldWpn = pTargetBld->GetWeapon(0) ? pTargetBld->GetWeapon(0)->WeaponType : nullptr;
-					const bool isBldAA = pBldWpn && pBldWpn->Projectile && pBldWpn->Projectile->AA;
-
-					score += isBldAA ? scores[6] : scores[5];
-				}
-				else
-				{
-					// Support building (shield or gap generator, sensor, lab...): as many as the
-					// construction yard builds of it, one, or two of a building with a support radius
-					// when money is plenty; a copy past that only drains power.
-					const int supportCap = (GetSupportRadius(pTargetBld) > 0 && money > 3000) ? 2 : 1;
-
-					if (ownedTargetBld >= supportCap)
-						score -= 2000;
-					else
-						score += scores[4] - (ownedTargetBld * 900);
-				}
-
-				// A mobile factory past the reason gate above has a spot waiting for it.
-				if (isMobileFactory)
-					score += 500;
 			}
 			else if (pUnit->Harvester || pUnit->ResourceGatherer)
 			{
@@ -6439,7 +6466,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			// transport, shift War Factory production toward self-ferrying vehicles (Amphibious,
 			// Hover, JumpJet, Flying, Teleporter) or Transports so ground-only tanks never
 			// saturate and gridlock the home base!
-			if (features[21] > 0 && !isEconomyUnit && !isMCV && !isKeyStructureDeployer && !isAmphibTransport
+			if (features[21] > 0 && !isEconomyUnit && !isMCV && !isAmphibTransport
 				&& pUnit->Passengers == 0)
 			{
 				const bool canSelfCrossWater = (pUnit->MovementZone == MovementZone::Amphibious
@@ -6477,17 +6504,17 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			// A Rotating Raids recruiting the bigger group of a lesson (RaidRecruitWanted) asks for fast
 			// armed vehicles: the raid takes the fastest idle units first.
 			if (GetMacroState(pHouse).RaidRecruitWanted > 0 && pWpn && !pUnit->Naval && !isEconomyUnit && !isMCV && !isTransportClass
-				&& !isKeyStructureDeployer && !isAA)
+				&& !isAA)
 			{
 				score += std::min(RaidRecruitMostBonus, std::max(0, pUnit->Speed) * RaidRecruitSpeedBonus);
 			}
 
 			if (logUnitPicks)
 			{
-				const char diagClass = isMCV ? 'M' : (isKeyStructureDeployer ? 'D' : ((pUnit->Harvester || pUnit->ResourceGatherer) ? 'H'
+				const char diagClass = isMCV ? 'M' : ((pUnit->Harvester || pUnit->ResourceGatherer) ? 'H'
 					: (isTransportClass ? 'P'
 						: ((isUnarmedSupportVehicle || IsRepairerUnitType(pUnit)) ? 'S'
-							: (isAA ? 'A' : (isArtillery ? 'G' : (isMainTank ? 'T' : 'L')))))));
+							: (isAA ? 'A' : (isArtillery ? 'G' : (isMainTank ? 'T' : 'L'))))));
 				const int diagBase = pUnit->Cost / 4 + pUnit->Strength / 3 + unitFirepower;
 				const int diagPenalty = std::min(1200, ownedUnitWithConv * 55);
 				unitPickDiags.push_back({ pUnit, diagClass, diagBase, diagPenalty, diagCounter, diagPostClass - diagPreClass,
@@ -6529,7 +6556,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			// An armed light vehicle (the pick line's class L): no main battle tank, artillery, anti-air,
 			// transport, economy unit, deployer or repairer (IsRepairerUnitType).
 			if (pWpn && !IsRepairerUnitType(pUnit) && !isMainTank && !isAA && !isArtillery && !isTransportClass && !isEconomyUnit && !isMCV
-				&& !isKeyStructureDeployer && !pUnit->Harvester && !pUnit->ResourceGatherer && score > bestLightScore)
+				&& !pUnit->Harvester && !pUnit->ResourceGatherer && score > bestLightScore)
 			{
 				bestLightScore = score;
 				bestLightIdx = pUnit->ArrayIndex;
@@ -6542,7 +6569,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				bestRepairerIdx = pUnit->ArrayIndex;
 			}
 
-			if (tankBunkersToFill > 0 && pUnit->Bunkerable && !isEconomyUnit && !isMCV && !isKeyStructureDeployer
+			if (tankBunkersToFill > 0 && pUnit->Bunkerable && !isEconomyUnit && !isMCV
 				&& score > bestBunkerTankScore)
 			{
 				bestBunkerTankScore = score;
@@ -6716,6 +6743,37 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 		if (IsAITickWindow(450, evalDelay))
 			CountDecision(NeuralDecision::BankYardPick, pHouse->ArrayIndex);
+	}
+
+	// A deployer the building pick asked for (DeployerBuilds, NeuralAI.MobileFactory.inl) goes ahead of the
+	// scored pick, its floors and complements: the building pick weighed it as the building it becomes.
+	// Under attack only a defense keeps that place, and anything for a house without a yard; an MCV that
+	// such a house can build comes first. One the factory has not started in DeployerBuildWaitFrames is
+	// given up, and so is one no factory of ours can build any more.
+	{
+		auto& builds = GetMacroState(pHouse).DeployerBuilds;
+		const int now = Unsorted::CurrentFrame;
+
+		std::erase_if(builds, [&](const NeuralDeployerBuild& build)
+		{
+			if (build.UnitType == inProgressUnitIdx)
+				return false;
+
+			return now < build.Frame || now - build.Frame > DeployerBuildWaitFrames
+				|| !CanBuildUnderHumanRules(pHouse, UnitTypeClass::Array.GetItem(build.UnitType));
+		});
+
+		auto const pScored = bestUnitIdx >= 0 ? UnitTypeClass::Array.GetItem(bestUnitIdx) : nullptr;
+		const bool yardMcvFirst = pHouse->NumConYards == 0 && pScored && pScored->DeploysInto && pScored->DeploysInto->ConstructionYard;
+
+		if (!builds.empty() && !yardMcvFirst)
+		{
+			auto const& build = builds.front();
+			auto const pBuilding = BuildingTypeClass::Array.GetItem(build.BuildingType);
+
+			if (!GetMacroState(pHouse).CounterUnderAttack || pBuilding->IsBaseDefense || pHouse->NumConYards == 0)
+				bestUnitIdx = build.UnitType;
+		}
 	}
 
 	// The harvester the economy hold saves for (fewer than refineries) or, with no harvester nor
@@ -7724,6 +7782,29 @@ void NeuralAI::OnTechnoProduced(HouseClass* pHouse, TechnoClass* pTechno)
 
 	auto const pUnitType = abstract_cast<UnitTypeClass*>(pType);
 	auto const pInfType = abstract_cast<InfantryTypeClass*>(pType);
+
+	// A deployer the building pick asked for takes its order: the building and the goal it was asked
+	// for (runBaseDeployer, NeuralAI.Micro.inl).
+	if (pUnitType && IsBaseDeployerUnit(pUnitType))
+	{
+		auto& macro = GetMacroState(pHouse);
+		auto const itBuild = std::find_if(macro.DeployerBuilds.begin(), macro.DeployerBuilds.end(),
+			[pUnitType](const NeuralDeployerBuild& build) { return build.UnitType == pUnitType->ArrayIndex; });
+
+		if (itBuild != macro.DeployerBuilds.end())
+		{
+			auto& order = macro.DeployOrders[pTechno->UniqueID];
+			order = NeuralDeployOrder {};
+			order.BuildingType = itBuild->BuildingType;
+			order.Goal = itBuild->Goal;
+			order.Kind = itBuild->Kind;
+			order.StartFrame = Unsorted::CurrentFrame;
+			order.ProgressFrame = Unsorted::CurrentFrame;
+			order.SeenFrame = Unsorted::CurrentFrame;
+			macro.DeployerBuilds.erase(itBuild);
+		}
+	}
+
 	auto const pWeapon = pType->GetWeapon(0);
 	const bool armed = pWeapon && pWeapon->WeaponType && pWeapon->WeaponType->Damage > 0;
 	const bool oneOff = !armed || (pUnitType && (pUnitType->DeploysInto || pUnitType->Harvester || pUnitType->ResourceGatherer))

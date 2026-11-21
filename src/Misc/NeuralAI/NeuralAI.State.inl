@@ -878,6 +878,70 @@ namespace
 		bool ToMainBase { false };
 	};
 
+	// The role goal the base placement search (FindSpatialTetrisBuildCell) picked for one building
+	// type (NeuralPlacementGoalKind): where the building is wanted, which the yard reaches by adjacency
+	// and a deployer reaches straight, and the building of ours the search anchored at.
+	enum class NeuralPlacementGoalKind : int
+	{
+		None,
+		OreField,
+		IslandHold,
+		AttackedBuilding,
+		KeyAsset,
+		RouteSpot,
+		DefenseSector,
+		Front,
+		AirSector,
+		Hub
+	};
+
+	struct NeuralPlacementGoal
+	{
+		CellStruct Cell { CellStruct::Empty };
+		CellStruct Anchor { CellStruct::Empty };
+		NeuralPlacementGoalKind Kind { NeuralPlacementGoalKind::None };
+		int Frame { -100000 };
+	};
+
+	// The order a base deployer carries out (NeuralAI.MobileFactory.inl): the building it becomes, the
+	// cell it deploys at, when it was picked and the role goal behind it, the refuge it goes to first
+	// and since when, whether its way was weighed (enemies on the way) and it follows the next wave there
+	// and since when it waits for one, when the order was given and last run, the closest it got and
+	// when, the unpack orders on its site and the frame of the last one, since when it stands on or next
+	// to the site, how many sites it took for its goal and the ones that refused it.
+	struct NeuralDeployOrder
+	{
+		int BuildingType { -1 };
+		CellStruct Site { CellStruct::Empty };
+		int PickFrame { -1 };
+		CellStruct Goal { CellStruct::Empty };
+		CellStruct Refuge { CellStruct::Empty };
+		int RefugeFrame { -1 };
+		NeuralPlacementGoalKind Kind { NeuralPlacementGoalKind::None };
+		bool Weighed { false };
+		bool BehindWave { false };
+		int WaitSince { -1 };
+		int StartFrame { -1 };
+		int SeenFrame { -1 };
+		int BestDist { INT_MAX };
+		int ProgressFrame { -1 };
+		int Tries { 0 };
+		int TryFrame { -1 };
+		int NearSince { -1 };
+		int SitePicks { 0 };
+		std::vector<CellStruct> FailedSites {};
+	};
+
+	// A deployer the building pick asked of a vehicle factory, until one comes out (OnTechnoProduced).
+	struct NeuralDeployerBuild
+	{
+		int UnitType { -1 };
+		int BuildingType { -1 };
+		CellStruct Goal { CellStruct::Empty };
+		NeuralPlacementGoalKind Kind { NeuralPlacementGoalKind::None };
+		int Frame { -1 };
+	};
+
 	struct NeuralHouseMacroState
 	{
 		CellStruct PendingClearanceCell { CellStruct::Empty };
@@ -1239,6 +1303,18 @@ namespace
 		std::unordered_map<DWORD, int> DeployerNoSiteSince;
 		// Deployers of buildings other than yards (unit -> NeuralDeployerSite).
 		std::unordered_map<DWORD, NeuralDeployerSite> DeployerSites;
+		// One placement for buildings that come from deployers (NeuralAI.MobileFactory.inl): the role
+		// goal of the base placement search per building type, the order of each base deployer (unit ->
+		// NeuralDeployOrder), the deployers the building pick asked of the vehicle factories, the trip
+		// lesson (weight of going alone, 0, and behind a wave, 1), the TEMP diagnostic lines written this
+		// match, and where and when a reversible building last packed up to flee.
+		std::unordered_map<int, NeuralPlacementGoal> PlacementGoals;
+		std::unordered_map<DWORD, NeuralDeployOrder> DeployOrders;
+		std::vector<NeuralDeployerBuild> DeployerBuilds;
+		std::array<int, 2> DeployerTripWeight { 100, 100 };
+		int DeployerLogLines { 0 };
+		CellStruct LastReversiblePackCell { CellStruct::Empty };
+		int LastReversiblePackFrame { -100000 };
 		// Packed MCVs the idle watchdog follows (unit -> NeuralMcvIdle).
 		std::unordered_map<DWORD, NeuralMcvIdle> McvIdle;
 		// Watched MCVs unfolding by another rule's order (unit -> NeuralMcvIdleUnfold, TEMP diagnostic).
@@ -1959,6 +2035,13 @@ namespace
 			this->NoRoomTypeIslandUntil.clear();
 			this->DeployerNoSiteSince.clear();
 			this->DeployerSites.clear();
+			this->PlacementGoals.clear();
+			this->DeployOrders.clear();
+			this->DeployerBuilds.clear();
+			this->DeployerTripWeight = { 100, 100 };
+			this->DeployerLogLines = 0;
+			this->LastReversiblePackCell = CellStruct::Empty;
+			this->LastReversiblePackFrame = -100000;
 			this->McvIdle.clear();
 			this->McvIdleUnfolds.clear();
 			this->McvFallbacks.clear();
@@ -3193,6 +3276,59 @@ namespace
 	constexpr int DeployerIdleStillFrames = 900;
 	constexpr double DeployerIdleDriftCells = 4.0;
 	constexpr int DeployerIdleLogLines = 40;
+	// One placement for the buildings that come from deployer vehicles (NeuralAI.MobileFactory.inl; user
+	// approved, 2026-11-21, «Apruebo el plan»). Over matches #13416..#13473 the refinery Nanocores went
+	// back and forth between ore cells (5 to 21 reversals) and 12 of them ended in the idle watchdog
+	// after 1725 to 2700 frames packed, deploying next to the main base; the mobile factories won 13
+	// vehicle picks and lost all 13 to the tank floor. The role goal of the base placement search holds
+	// PlacementGoalFrames. The building pick lets the yard build what its cell puts within
+	// DeployerNearSpotCells of that goal (its adjacency covers the spot) and sends a deployer farther;
+	// a near spot goes to a deployer too while the yard queue is busy, when the deployer costs at most
+	// DeployerNearCostPct of the building.
+	constexpr int PlacementGoalFrames = 900;
+	constexpr double DeployerNearSpotCells = 8.0;
+	constexpr int DeployerNearCostPct = 125;
+	// At most DeployerOrdersMost deployers of a house carry an order or wait for their factory at once;
+	// one the vehicle factory has not delivered in DeployerBuildWaitFrames is given up.
+	constexpr int DeployerOrdersMost = 2;
+	constexpr int DeployerBuildWaitFrames = 2700;
+	// On the way: with no cell closer to its site for DeployerStallFrames (a blocked path, a ferry that
+	// never comes) it deploys at the nearest valid cell where it stands. On or next to the site it gives
+	// DeployerSiteMostTries unpack orders and stands McvIdleArriveFrames at most; after
+	// DeployerSitePicksMost refused sites it asks again where the building goes. A defense sent to the
+	// front stands at most DeployerFrontCells past our forward building, short of the known enemy
+	// defenses.
+	constexpr int DeployerStallFrames = 1800;
+	constexpr int DeployerSitePicksMost = 3;
+	constexpr int DeployerFrontCells = 16;
+	// Escort: a trip with known enemies on the way (DeployerTripRisk: their value near the site and the
+	// midpoint, DeployerTripRiskDefense for a known enemy defense that reaches the site) weighs going now
+	// against following the next wave sent its way, DeployerEscortFollowFrames after it; it waits
+	// DeployerEscortWaitFrames at most. Behind the wave wins when its weight, a quarter of the risk and a
+	// quarter of the trained escort slot (60) beat the weight of going alone by DeployerEscortMargin.
+	// Each weighed trip that ends teaches its way: deployed +DeployerTripGain, lost on the way
+	// -DeployerTripLoss, within DeployerTripWeightMin..DeployerTripWeightMax (the rule of the plan weights).
+	constexpr int DeployerTripRiskDefense = 200;
+	constexpr int DeployerEscortMargin = 40;
+	constexpr int DeployerEscortWaitFrames = 2700;
+	constexpr int DeployerEscortFollowFrames = 150;
+	constexpr int DeployerTripGain = 10;
+	constexpr int DeployerTripLoss = 20;
+	constexpr int DeployerTripWeightMin = 20;
+	constexpr int DeployerTripWeightMax = 200;
+	// TEMP diagnostic lines a match (orders, trips, pack-ups).
+	constexpr int DeployerLogLinesMost = 120;
+	// Reversible buildings in danger (user, 2026-11-21: conservative, with the criteria of the yard): one
+	// attacked with an enemy unit within ReversibleFleeEnemyLeptons (the last yard's rule) packs up when
+	// its health is under ReversibleFleeHealth (the last yard's rule) or falls so fast it would be gone
+	// within ReversibleFleeForecastFrames, and only toward a quiet refuge ReversibleFleeRefugeCells away
+	// or more. Never twice within ReversibleRepackCells and ReversibleRepackFrames (the yard's anti-loop).
+	constexpr double ReversibleFleeHealth = 0.16;
+	constexpr int ReversibleFleeEnemyLeptons = 2048;
+	constexpr int ReversibleFleeForecastFrames = 450;
+	constexpr double ReversibleFleeRefugeCells = 16.0;
+	constexpr int ReversibleRepackFrames = 3600;
+	constexpr double ReversibleRepackCells = 8.0;
 	// Idle MCV watchdog (user, match #11562 Fort Urban Square: two expansion MCVs of houses with a
 	// yard stood packed for thousands of frames, 227 path failures of their type, no fallback ever
 	// reached): an MCV that stays within McvIdleDriftCells of one spot for McvIdleFrames without
