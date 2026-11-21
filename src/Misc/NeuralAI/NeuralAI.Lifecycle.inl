@@ -773,6 +773,10 @@ void NeuralAI::OnScenarioStart()
 	ResetBridgePlanner();
 	AirRoutes.clear();
 	AirPickups.clear();
+	AirliftJobs.clear();
+	AirliftRefusedUntil.clear();
+	AirliftCargoHolds.clear();
+	AirliftRefusalLogCount.fill(0);
 	HouseStyleSalt.fill(0);
 	AirDropAborts.clear();
 

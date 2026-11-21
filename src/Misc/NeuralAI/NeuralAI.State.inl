@@ -1629,6 +1629,9 @@ namespace
 		// that never gathered the wave in 2700 frames rests 2700).
 		int StagingHoldSince { -1 };
 		int StagingHoldPauseUntil { -1 };
+		// The forward staging point of the last wave and when it was set (airlift of stragglers).
+		CellStruct WaveStagingCell { CellStruct::Empty };
+		int WaveStagingFrame { -100000 };
 		// Last frame the jam breaker cleared a block of our units, last frame it looked for one, last
 		// frame bridge and tunnel mouths were cleared (UpdateStuckUnits).
 		int LastJamBreakFrame { -1 };
@@ -2141,6 +2144,8 @@ namespace
 			this->FailedApproachWeight.fill(0);
 			this->StagingHoldSince = -1;
 			this->StagingHoldPauseUntil = -1;
+			this->WaveStagingCell = CellStruct::Empty;
+			this->WaveStagingFrame = -100000;
 			this->LastJamBreakFrame = -1;
 			this->LastJamCheckFrame = -1;
 			this->LastMouthClearFrame = -1;
@@ -2356,6 +2361,80 @@ namespace
 
 	// Loaded carrier UniqueID -> frame its drop was aborted (see ResolveAirDropCell). Key access only.
 	std::unordered_map<DWORD, int> AirDropAborts;
+
+	// Airlift jobs of carryall aircraft (idle carryall dispatch, NeuralAI.Micro.inl), most urgent first.
+	enum class AirliftKind : int
+	{
+		Rescue = 0,
+		Evacuation,
+		StrikeApc,
+		StrandedHarvester,
+		Island,
+		Expansion,
+		Straggler,
+		None
+	};
+
+	// The job of a carryall: the vehicle it goes for, the cell it sets it down on (Empty: the loaded
+	// carryall rules pick the drop), when the job began and when the real pickup order (a move onto the
+	// vehicle) went out. Carrier UniqueID -> job, key access only.
+	struct NeuralAirliftJob
+	{
+		DWORD CargoID { 0 };
+		AirliftKind Kind { AirliftKind::None };
+		CellStruct Drop { CellStruct::Empty };
+		int Frame { -1 };
+		int OrderFrame { -1 };
+		bool Lifted { false };
+	};
+
+	std::unordered_map<DWORD, NeuralAirliftJob> AirliftJobs;
+	// A vehicle whose pickup went wrong (the engine turned the ride down, or the vehicle was not aboard
+	// CarryallPickupTimeoutFrames after the pickup order): no carryall goes for it before the frame.
+	// Cargo UniqueID -> frame, key access only.
+	std::unordered_map<DWORD, int> AirliftRefusedUntil;
+	// A vehicle a carryall comes for (the real pickup order went out) -> that carryall: the order helpers
+	// leave the vehicle where it is until it is aboard (IsAwaitingAirlift). Key access only.
+	std::unordered_map<DWORD, DWORD> AirliftCargoHolds;
+	// TEMP diagnostic: the pickups that went wrong, logged per house this match (CarryallRefusalLogLines).
+	std::array<int, 32> AirliftRefusalLogCount {};
+
+	constexpr int CarryallPickupTimeoutFrames = 900;
+	constexpr int CarryallRefusedPickupFrames = 1800;
+	constexpr int CarryallRefusalLogLines = 40;
+	// A carryall takes a vehicle of ours where it is going (an expansion deployer to its site, a wave
+	// vehicle far behind the forward staging point to that point) when the trip is AirliftGoalMinCells
+	// long at least, the loaded carryall flies AirliftGoalSpeedRatio times as fast as the vehicle drives,
+	// and flying to it and then the trip take at most AirliftGoalTimePercent of the drive.
+	constexpr double AirliftGoalMinCells = 20.0;
+	constexpr double AirliftGoalSpeedRatio = 2.0;
+	constexpr int AirliftGoalTimePercent = 67;
+	// A wave vehicle more than WaveStragglerCells behind the forward staging point goes through it
+	// (cohesion for stragglers); a carryall uses the point WaveStagingFreshFrames after the wave set it.
+	constexpr double WaveStragglerCells = 30.0;
+	constexpr int WaveStagingFreshFrames = 2700;
+
+	// Whether a carryall of ours comes for the vehicle now: the real pickup order went out at most
+	// CarryallPickupTimeoutFrames ago and the vehicle is not aboard yet.
+	bool IsAwaitingAirlift(const FootClass* pFoot)
+	{
+		auto const itHold = AirliftCargoHolds.find(pFoot->UniqueID);
+
+		if (itHold == AirliftCargoHolds.end())
+			return false;
+
+		auto const itJob = AirliftJobs.find(itHold->second);
+		const int age = itJob != AirliftJobs.end() ? Unsorted::CurrentFrame - itJob->second.OrderFrame : -1;
+
+		if (itJob == AirliftJobs.end() || itJob->second.CargoID != pFoot->UniqueID || itJob->second.Lifted
+			|| itJob->second.OrderFrame < 0 || age < 0 || age > CarryallPickupTimeoutFrames)
+		{
+			AirliftCargoHolds.erase(itHold);
+			return false;
+		}
+
+		return true;
+	}
 
 	NeuralFerryTripRecord* FindFerryTrip(DWORD transportID)
 	{
@@ -4658,6 +4737,24 @@ namespace
 
 				return false;
 			}
+		}
+
+		// A carryall of ours comes for it: it waits for the ride, which only a survival order overrides, so
+		// the rules it belongs to do not drive it away from under the carryall.
+		if (CurrentOrderPriority < NeuralOrderPriority::Survival && IsAwaitingAirlift(pFoot))
+		{
+			CountDecision(NeuralDecision::OrderLeaseRefused, pFoot->Owner->ArrayIndex);
+
+			if (NeuralAI::HeadlessMode)
+			{
+				auto& refusals = LeaseRefusals[pFoot->Owner->ArrayIndex];
+				char key[128];
+				std::snprintf(key, sizeof(key), "airlift > %s:%d", OrderCallerBaseName(file) ? OrderCallerBaseName(file) : "?", line);
+				refusals.Pairs[key]++;
+				refusals.Total++;
+			}
+
+			return false;
 		}
 
 		auto& leases = OrderLeasesOf(pFoot->Owner->ArrayIndex);
