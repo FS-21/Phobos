@@ -1165,6 +1165,37 @@ namespace
 			extraWalk.push_back(std::max(0, static_cast<int>(c.DistanceFrom(op.Target) - firstWalk)));
 	}
 
+	// The safe ground route of a raid (PlanRouteLeg, NeuralAI.Plans.inl): the waypoints PlanOpRoute gives
+	// pLead to goal on its own ground, its danger and that of the straight way. False with none.
+	bool PlanSafeGroundRoute(HouseClass* pHouse, FootClass* pLead, const CellStruct& goal, std::vector<CellStruct>& waypoints,
+		int& danger, int& straightDanger)
+	{
+		waypoints.clear();
+		danger = 0;
+		straightDanger = 0;
+		auto const pType = pLead->GetTechnoType();
+		const CellStruct here = pLead->GetMapCoords();
+
+		if (MapClass::Instance.GetMovementZoneType(goal, pType->MovementZone, false)
+			!= MapClass::Instance.GetMovementZoneType(here, pType->MovementZone, pLead->OnBridge))
+		{
+			return false;
+		}
+
+		OpRoutePlan plan;
+		const std::vector<CellStruct> goals { goal };
+		const std::vector<int> noWalk { 0 };
+
+		if (!PlanOpRoute(pHouse, pLead, OpCarrier::Surface, goals, noWalk, plan))
+			return false;
+
+		waypoints = plan.Waypoints;
+		danger = plan.Danger;
+		OpLineCost(GetOpDangerMap(pHouse, false), here, goal, straightDanger);
+
+		return true;
+	}
+
 	// The landing a load sails for (user: the landing chosen together with the route): the
 	// operation's landing or another of its candidates (CollectOpLandingCandidates), the one PlanOpRoute
 	// finds cheapest for the first transport that sails. danger: that of the route to it (0 when none
