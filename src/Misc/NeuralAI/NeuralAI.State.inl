@@ -3246,8 +3246,9 @@ namespace
 	constexpr int PassengerFillReholdFrames = 900;
 	constexpr int PassengerBoardTrackFrames = 900;
 	// A seated fighting vehicle our soldiers were sent to board waits for them up to this long after the
-	// last boarding order, while one of them is still on the way: only an operation or survival order
-	// takes it (user, 2026-11-21: 56 of 60 boardings given up with the vehicle driving off).
+	// last boarding order, while one of them is still on the way, and they keep on to it: only an
+	// operation or survival order takes either (user, 2026-11-21: 56 of 60 boardings given up with the
+	// vehicle driving off; 1426 of 1576 soldiers turned away by other orders or the vehicle leaving).
 	constexpr int PassengerBoardWaitFrames = 450;
 	// TEMP: the boardings given up with no other order (the soldier left its Enter by itself) logged in
 	// detail, at most this many per house and match.
@@ -4991,18 +4992,34 @@ namespace
 			&& pFactory->GetCurrentMission() == Mission::Unload;
 	}
 
-	// A seated fighting vehicle waiting for the soldiers sent to board it (UpdatePassengerFill,
-	// PassengerBoardWaitFrames).
+	// A seated fighting vehicle waiting for the soldiers sent to board it, or a soldier on its way into a
+	// vehicle that waits for it (UpdatePassengerFill, PassengerBoardWaitFrames).
 	bool IsAwaitingPassengers(const FootClass* pFoot)
 	{
-		if (pFoot->WhatAmI() != AbstractType::Unit)
-			return false;
+		auto const& macro = GetMacroState(pFoot->Owner);
+		DWORD vehicle = pFoot->UniqueID;
 
-		auto const& awaited = GetMacroState(pFoot->Owner).PassengerAwaitedUntil;
-		auto const itWait = awaited.find(pFoot->UniqueID);
+		if (pFoot->WhatAmI() == AbstractType::Infantry)
+		{
+			auto const itTrack = macro.PassengerBoardTrack.find(pFoot->UniqueID);
+
+			if (itTrack == macro.PassengerBoardTrack.end()
+				|| (pFoot->CurrentMission != Mission::Enter && pFoot->QueuedMission != Mission::Enter))
+			{
+				return false;
+			}
+
+			vehicle = itTrack->second.first;
+		}
+		else if (pFoot->WhatAmI() != AbstractType::Unit)
+		{
+			return false;
+		}
+
+		auto const itWait = macro.PassengerAwaitedUntil.find(vehicle);
 		const int now = Unsorted::CurrentFrame;
 
-		return itWait != awaited.end() && now < itWait->second && itWait->second - now <= PassengerBoardWaitFrames;
+		return itWait != macro.PassengerAwaitedUntil.end() && now < itWait->second && itWait->second - now <= PassengerBoardWaitFrames;
 	}
 
 	// Whether the code at file:line may give pFoot an order toward goal now. An order to board (boarding:
@@ -5055,7 +5072,8 @@ namespace
 			}
 		}
 
-		// Our soldiers walk to board it: it waits for them, which an operation or survival order overrides.
+		// Our soldiers walk to board it, or it walks to board one: it waits for them, or goes on, which an
+		// operation or survival order overrides.
 		if (CurrentOrderPriority < NeuralOrderPriority::Operation && IsAwaitingPassengers(pFoot))
 		{
 			CountDecision(NeuralDecision::OrderLeaseRefused, pFoot->Owner->ArrayIndex);

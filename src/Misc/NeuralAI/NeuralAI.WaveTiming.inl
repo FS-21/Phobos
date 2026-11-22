@@ -925,15 +925,23 @@ namespace
 					const char* destination = !pInf->Destination ? "none"
 						: pInf->Destination == pVehicle ? "vehicle"
 						: pInf->Destination->WhatAmI() == AbstractType::Cell ? "cell" : "other";
+					auto const itVehicleCaller = callers.find(pVehicle->UniqueID);
+					char vehicleCaller[96] = "none";
+
+					if (itVehicleCaller != callers.end() && itVehicleCaller->second.File)
+					{
+						std::snprintf(vehicleCaller, sizeof(vehicleCaller), "%s %s:%d %d frames ago", itVehicleCaller->second.Kind ? itVehicleCaller->second.Kind : "?",
+							itVehicleCaller->second.File, itVehicleCaller->second.Line, now - itVehicleCaller->second.Frame);
+					}
 					Debug::Log("[NeuralAI] TEMP boarding given up: house %d soldier %s %u mission %d queued %d destination %s, %d cells from %s %u "
 						"(%d when ordered, %d frames ago); vehicle mission %d moving %d destination %d target %d passengers %d/%d links %d "
-						"linked to soldier %d deactivated %d, door zones %d/%d, frame %d.\n", pHouse->ArrayIndex, pInf->Type->ID, pInf->UniqueID,
+						"linked to soldier %d deactivated %d, door zones %d/%d, vehicle's last order %s, frame %d.\n", pHouse->ArrayIndex, pInf->Type->ID, pInf->UniqueID,
 						static_cast<int>(pInf->CurrentMission), static_cast<int>(pInf->QueuedMission), destination,
 						static_cast<int>(pInf->GetMapCoords().DistanceFrom(pVehicle->GetMapCoords())), pVehicle->Type->ID, pVehicle->UniqueID,
 						itStart != macro.PassengerBoardStartCells.end() ? itStart->second : -1, now - entry.second.second,
 						static_cast<int>(pVehicle->CurrentMission), pVehicle->Locomotor->Is_Moving() ? 1 : 0, pVehicle->Destination ? 1 : 0,
 						pVehicle->Target ? 1 : 0, pVehicle->Passengers.NumPassengers, pVehicle->Type->Passengers, pVehicle->HasAnyLink() ? 1 : 0,
-						pVehicle->ContainsLink(pInf) ? 1 : 0, pVehicle->Deactivated ? 1 : 0, doorZoneVehicle, doorZoneSoldier, now);
+						pVehicle->ContainsLink(pInf) ? 1 : 0, pVehicle->Deactivated ? 1 : 0, doorZoneVehicle, doorZoneSoldier, vehicleCaller, now);
 				}
 
 				return true;
