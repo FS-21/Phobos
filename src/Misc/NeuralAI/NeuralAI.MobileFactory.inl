@@ -475,14 +475,8 @@ namespace
 
 		for (const DWORD id : macro.OffensiveStones)
 		{
-			for (auto const pBld : pHouse->Buildings)
-			{
-				if (pBld && pBld->IsAlive && !pBld->InLimbo && pBld->UniqueID == id)
-				{
-					stones.push_back(pBld->GetMapCoords());
-					break;
-				}
-			}
+			if (auto const pStone = FindOwnStandingBuildingByID(pHouse, id))
+				stones.push_back(pStone->GetMapCoords());
 		}
 
 		std::vector<CellStruct> reserved;

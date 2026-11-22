@@ -228,24 +228,7 @@ namespace
 			return false;
 
 		auto const pCell = SpreadDestination(pFoot, pHop);
-		pFoot->SetTarget(nullptr);
-		pFoot->SetArchiveTarget(nullptr);
-		pFoot->MegaMission = Mission::AttackMove;
-		pFoot->MegaDestination = pCell;
-		pFoot->MegaTarget = nullptr;
-		pFoot->HaveAttackMoveTarget = false;
-		pFoot->SetDestination(pCell, true);
-
-		if (pFoot->CurrentMission == Mission::Guard || pFoot->CurrentMission == Mission::Area_Guard
-			|| pFoot->CurrentMission == Mission::None || pFoot->CurrentMission == Mission::Sleep)
-		{
-			pFoot->ForceMission(Mission::Move);
-		}
-		else
-		{
-			pFoot->QueueMission(Mission::Move, true);
-		}
-
+		SetUpAttackMove(pFoot, pCell, nullptr, pCell);
 		CountDecision(NeuralDecision::MoveOrderIssued, pFoot->Owner ? pFoot->Owner->ArrayIndex : -1);
 		NoteOrderCaller(pFoot, "attackMoveHop");
 
@@ -2819,6 +2802,18 @@ namespace
 		}
 	}
 
+	// The standing building of this house (alive, on the map) with this UniqueID, or null.
+	BuildingClass* FindOwnStandingBuildingByID(HouseClass* pHouse, DWORD id)
+	{
+		for (auto const pBld : pHouse->Buildings)
+		{
+			if (pBld && pBld->IsAlive && !pBld->InLimbo && pBld->UniqueID == id)
+				return pBld;
+		}
+
+		return nullptr;
+	}
+
 	// Offensive crawl bookkeeping: confirm the cells chosen for stones toward the enemy once a
 	// structure of ours stands there, then count the confirmed stones that are destroyed. The
 	// trainer credits slots 38 / 81 with how well forward stones survive.
@@ -2916,18 +2911,7 @@ namespace
 
 		for (const DWORD id : macro.OffensiveStones)
 		{
-			bool found = false;
-
-			for (auto const pB : pHouse->Buildings)
-			{
-				if (pB && pB->IsAlive && !pB->InLimbo && pB->UniqueID == id)
-				{
-					found = true;
-					break;
-				}
-			}
-
-			if (found)
+			if (FindOwnStandingBuildingByID(pHouse, id))
 				alive.push_back(id);
 			else
 				CountDecision(NeuralDecision::CrawlStoneLost, pHouse->ArrayIndex);
@@ -2944,13 +2928,9 @@ namespace
 		if (stones.empty())
 			return CellStruct::Empty;
 
-		for (auto const pOwnB : pHouse->Buildings)
-		{
-			if (pOwnB && pOwnB->IsAlive && !pOwnB->InLimbo && pOwnB->UniqueID == stones.back())
-				return pOwnB->GetMapCoords();
-		}
+		auto const pFront = FindOwnStandingBuildingByID(pHouse, stones.back());
 
-		return CellStruct::Empty;
+		return pFront ? pFront->GetMapCoords() : CellStruct::Empty;
 	}
 
 	// Resource hoarder (Expert 6 at full strength, every house a little): the best ore field we

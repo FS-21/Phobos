@@ -1111,29 +1111,6 @@ namespace
 		return best;
 	}
 
-	FootClass* FindOwnScoutFoot(HouseClass* pHouse, DWORD uid)
-	{
-		for (auto const pUnit : UnitClass::Array)
-		{
-			if (pUnit && pUnit->UniqueID == uid)
-				return (pUnit->Owner == pHouse && pUnit->IsAlive) ? pUnit : nullptr;
-		}
-
-		for (auto const pInf : InfantryClass::Array)
-		{
-			if (pInf && pInf->UniqueID == uid)
-				return (pInf->Owner == pHouse && pInf->IsAlive) ? pInf : nullptr;
-		}
-
-		for (auto const pAir : AircraftClass::Array)
-		{
-			if (pAir && pAir->UniqueID == uid)
-				return (pAir->Owner == pHouse && pAir->IsAlive) ? pAir : nullptr;
-		}
-
-		return nullptr;
-	}
-
 	void SendScoutHome(HouseClass* pHouse, FootClass* pFoot)
 	{
 		if (auto const pAir = abstract_cast<AircraftClass*>(pFoot))
@@ -1579,7 +1556,7 @@ namespace
 
 		for (auto const& trip : state.SensorTrips)
 		{
-			auto const pUnit = abstract_cast<UnitClass*>(FindOwnScoutFoot(pHouse, trip.ID));
+			auto const pUnit = abstract_cast<UnitClass*>(FindOwnFootByID(pHouse, trip.ID));
 
 			if (!pUnit || pUnit->InLimbo || !IsSensorLookoutType(pUnit->Type))
 				continue;
@@ -1814,7 +1791,7 @@ namespace
 
 		for (auto trip : state.Trips)
 		{
-			FootClass* const pFoot = FindOwnScoutFoot(pHouse, trip.ScoutID);
+			FootClass* const pFoot = FindOwnFootByID(pHouse, trip.ScoutID);
 
 			if (!pFoot)
 			{

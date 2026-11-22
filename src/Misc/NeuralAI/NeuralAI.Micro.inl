@@ -1127,18 +1127,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	// lands it on the target's ground; there its client gives it its mission again.
 	auto CanFootCrossWaterDirectly = [](const FootClass* pF) -> bool
 	{
-		if (!pF)
-			return false;
-
-		auto const pT = pF->GetTechnoType();
-		if (!pT)
-			return false;
-
-		return (pT->MovementZone == MovementZone::Amphibious || pT->MovementZone == MovementZone::AmphibiousDestroyer
-			|| pT->MovementZone == MovementZone::AmphibiousCrusher || pT->MovementZone == MovementZone::Fly
-			|| pT->MovementZone == MovementZone::Subterrannean || pT->MovementZone == MovementZone::Water
-			|| pT->SpeedType == SpeedType::Hover || pT->SpeedType == SpeedType::Winged || pT->JumpJet || pT->Teleporter
-			|| pT->Naval);
+		return pF && CrossesWaterAlone(pF->GetTechnoType());
 	};
 
 	auto UnstickCrossIslandFoot = [&](FootClass* pFoot) -> bool
@@ -17275,18 +17264,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					}
 
 					// The vehicle still ours and on the ground: the pickup went wrong, else it is simply gone.
-					UnitClass* pJobCargo = nullptr;
+					UnitClass* pJobCargo = abstract_cast<UnitClass*>(FindOwnFootByID(pHouse, job.CargoID));
 
-					for (auto const pUnit : UnitClass::Array)
-					{
-						if (pUnit && pUnit->UniqueID == job.CargoID)
-						{
-							if (pUnit->IsAlive && !pUnit->InLimbo && pUnit->Owner == pHouse)
-								pJobCargo = pUnit;
-
-							break;
-						}
-					}
+					if (pJobCargo && pJobCargo->InLimbo)
+						pJobCargo = nullptr;
 
 					if (!timedOut && pJobCargo && job.Accepted && job.Retries < CarryallPickupRetries
 						&& CanCarryallLiftUnit(pAir, pJobCargo) && CarryallRideAccepted(pJobCargo, pAir))

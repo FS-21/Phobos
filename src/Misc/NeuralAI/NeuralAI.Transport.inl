@@ -3,6 +3,20 @@
 
 namespace
 {
+	// A unit that needs no transport over water or cliffs: amphibious, hovering, flying, burrowing,
+	// teleporting, or a ship.
+	bool CrossesWaterAlone(const TechnoTypeClass* pType)
+	{
+		if (!pType)
+			return false;
+
+		return pType->MovementZone == MovementZone::Amphibious || pType->MovementZone == MovementZone::AmphibiousDestroyer
+			|| pType->MovementZone == MovementZone::AmphibiousCrusher || pType->MovementZone == MovementZone::Fly
+			|| pType->MovementZone == MovementZone::Subterrannean || pType->MovementZone == MovementZone::Water
+			|| pType->SpeedType == SpeedType::Hover || pType->SpeedType == SpeedType::Winged || pType->JumpJet || pType->Teleporter
+			|| pType->Naval;
+	}
+
 	bool IsAmphibiousOrAirTransport(const TechnoTypeClass* pType)
 	{
 		if (!pType || pType->Passengers < 4)
@@ -282,11 +296,7 @@ namespace
 		const unsigned sources = query.Sources;
 		const unsigned rules = query.Rules;
 
-		if ((rules & CarryAloneIsYes) && pCargo && (pCargo->MovementZone == MovementZone::Amphibious
-			|| pCargo->MovementZone == MovementZone::AmphibiousDestroyer || pCargo->MovementZone == MovementZone::AmphibiousCrusher
-			|| pCargo->MovementZone == MovementZone::Fly || pCargo->MovementZone == MovementZone::Subterrannean
-			|| pCargo->MovementZone == MovementZone::Water || pCargo->SpeedType == SpeedType::Hover
-			|| pCargo->SpeedType == SpeedType::Winged || pCargo->JumpJet || pCargo->Teleporter || pCargo->Naval))
+		if ((rules & CarryAloneIsYes) && CrossesWaterAlone(pCargo))
 		{
 			return true;
 		}
@@ -1592,6 +1602,36 @@ namespace
 		LastGroundRouteAnswer = NeuralRouteAnswer::Given;
 
 		return MapClass::Instance.TryGetCellAt(cells[next]);
+	}
+
+	// An idle unit (Guard, Area_Guard, None, Sleep) takes the mission now; a busy one gets it queued.
+	void ForceOrQueueMission(FootClass* pFoot, Mission mission, bool startQueued)
+	{
+		if (pFoot->CurrentMission == Mission::Guard || pFoot->CurrentMission == Mission::Area_Guard
+			|| pFoot->CurrentMission == Mission::None || pFoot->CurrentMission == Mission::Sleep)
+		{
+			pFoot->ForceMission(mission);
+		}
+		else
+		{
+			pFoot->QueueMission(mission, startQueued);
+		}
+	}
+
+	// The attack-move as the engine's mega mission sets it up: no target, the mega destination (a cell)
+	// and the mega target (an object, or null), then the destination (the mega destination, or the
+	// fallback when there is none) and the Move mission.
+	void SetUpAttackMove(FootClass* pFoot, AbstractClass* pMegaDestination, AbstractClass* pMegaTarget,
+		AbstractClass* pFallbackDestination)
+	{
+		pFoot->SetTarget(nullptr);
+		pFoot->SetArchiveTarget(nullptr);
+		pFoot->MegaMission = Mission::AttackMove;
+		pFoot->MegaDestination = pMegaDestination;
+		pFoot->MegaTarget = pMegaTarget;
+		pFoot->HaveAttackMoveTarget = false;
+		pFoot->SetDestination(pFoot->MegaDestination ? pFoot->MegaDestination : pFallbackDestination, true);
+		ForceOrQueueMission(pFoot, Mission::Move, true);
 	}
 
 	bool IssueMoveOrder(FootClass* pFoot, AbstractClass* pDest, double keepWithinCells = 1.5,
