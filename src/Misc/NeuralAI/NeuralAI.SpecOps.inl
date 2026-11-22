@@ -621,6 +621,27 @@ namespace
 		return false;
 	}
 
+	// Whether an engineer walking to its claimed building has not come EngineerClaimStepCells closer to it
+	// for EngineerClaimStallFrames (EngineerClaimStall*). A claim made after its last step starts again.
+	bool IsEngineerClaimStalled(HouseClass* pHouse, const InfantryClass* pEngineer, const BuildingClass* pBld, int claimFrame)
+	{
+		const int now = Unsorted::CurrentFrame;
+		const int distance = static_cast<int>(pEngineer->GetMapCoords().DistanceFrom(pBld->GetMapCoords()));
+		auto& progress = GetMacroState(pHouse).EngineerClaimProgress;
+		auto const it = progress.find(pEngineer->UniqueID);
+
+		if (it == progress.end() || claimFrame > it->second.second || distance <= it->second.first - EngineerClaimStepCells)
+		{
+			if (progress.size() > 64)
+				std::erase_if(progress, [now](const auto& entry) { return now - entry.second.second > 4 * EngineerClaimStallFrames; });
+
+			progress[pEngineer->UniqueID] = { distance, now };
+			return false;
+		}
+
+		return now - it->second.second > EngineerClaimStallFrames;
+	}
+
 	// Engineer claims (EngineerClaim*): does an engineer of ours other than engineerUid go for this
 	// building? In a transport operation, walking to it or attacking it, or sent at it within
 	// EngineerClaimFrames. With aheadOnly only the ones ahead of engineerUid count: walking or attacking
@@ -646,6 +667,9 @@ namespace
 			const bool onIt = !pEngineer->InLimbo && (pEngineer->Destination == pBld || pEngineer->Target == pBld);
 
 			if (!inOp && !onIt && now - claim.second > EngineerClaimFrames)
+				continue;
+
+			if (!inOp && onIt && IsEngineerClaimStalled(pHouse, pEngineer, pBld, claim.second))
 				continue;
 
 			if (!aheadOnly || onIt || !inOp || pEngineer->InLimbo || uid < engineerUid)

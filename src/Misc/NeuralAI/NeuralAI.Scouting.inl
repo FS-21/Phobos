@@ -1308,44 +1308,61 @@ namespace
 				found.push_back({ gain * 4 + bonus - static_cast<int>(cell.DistanceFrom(home)), cell, gain });
 		};
 
-		std::vector<CellStruct> leads;
-
-		for (auto const& lead : state.RemnantLeads)
+		// The leads, the free ore fields, then the grid.
+		auto const gather = [&]()
 		{
-			auto const pOwner = lead.Owner >= 0 && lead.Owner < HouseClass::Array.Count ? HouseClass::Array.GetItem(lead.Owner) : nullptr;
+			std::vector<CellStruct> leads;
 
-			if (pOwner && !pOwner->Defeated && pOwner->Buildings.Count > 0)
+			for (auto const& lead : state.RemnantLeads)
 			{
-				leads.push_back(lead.Cell);
-				consider(lead.Cell, RemnantLeadBuildingBonus);
-			}
-		}
+				auto const pOwner = lead.Owner >= 0 && lead.Owner < HouseClass::Array.Count ? HouseClass::Array.GetItem(lead.Owner) : nullptr;
 
-		for (auto const& field : GetOreFields())
-		{
-			bool ours = false;
-
-			for (auto const pOwnB : pHouse->Buildings)
-			{
-				if (pOwnB && pOwnB->IsAlive && pOwnB->GetMapCoords().DistanceFrom(field.Cell) <= 14.0)
+				if (pOwner && !pOwner->Defeated && pOwner->Buildings.Count > 0)
 				{
-					ours = true;
-					break;
+					leads.push_back(lead.Cell);
+					consider(lead.Cell, RemnantLeadBuildingBonus);
 				}
 			}
 
-			if (ours)
-				continue;
+			for (auto const& field : GetOreFields())
+			{
+				bool ours = false;
 
-			const bool nearLead = leads.empty() || std::any_of(leads.begin(), leads.end(),
-				[&field](const CellStruct& lead) { return lead.DistanceFrom(field.Cell) <= RemnantLeadFieldCells; });
-			consider(field.Cell, nearLead ? RemnantLeadFieldBonus : RemnantLeadFieldBonus / 2);
-		}
+				for (auto const pOwnB : pHouse->Buildings)
+				{
+					if (pOwnB && pOwnB->IsAlive && pOwnB->GetMapCoords().DistanceFrom(field.Cell) <= 14.0)
+					{
+						ours = true;
+						break;
+					}
+				}
 
-		for (int y = RemnantSearchStepCells / 2; y < VisionMapSide; y += RemnantSearchStepCells)
+				if (ours)
+					continue;
+
+				const bool nearLead = leads.empty() || std::any_of(leads.begin(), leads.end(),
+					[&field](const CellStruct& lead) { return lead.DistanceFrom(field.Cell) <= RemnantLeadFieldCells; });
+				consider(field.Cell, nearLead ? RemnantLeadFieldBonus : RemnantLeadFieldBonus / 2);
+			}
+
+			for (int y = RemnantSearchStepCells / 2; y < VisionMapSide; y += RemnantSearchStepCells)
+			{
+				for (int x = RemnantSearchStepCells / 2; x < VisionMapSide; x += RemnantSearchStepCells)
+					consider(CellStruct { static_cast<short>(x), static_cast<short>(y) }, 0);
+			}
+		};
+
+		gather();
+
+		// Nowhere left while the enemy still has buildings: the places the searchers were sent to and
+		// left as out of their reach are tried again (match #14836: "no place left to look" five times
+		// with 296 idle units while five enemy buildings by the map edge were never seen).
+		if (found.empty() && !state.RemnantSent.empty())
 		{
-			for (int x = RemnantSearchStepCells / 2; x < VisionMapSide; x += RemnantSearchStepCells)
-				consider(CellStruct { static_cast<short>(x), static_cast<short>(y) }, 0);
+			Debug::Log("[NeuralAI] Frame %d | House #%d remnant search: no place left, forgets %d places sent to\n", now, pHouse->ArrayIndex,
+				static_cast<int>(state.RemnantSent.size()));
+			state.RemnantSent.clear();
+			gather();
 		}
 
 		if (std::any_of(found.begin(), found.end(), [](const RemnantPlace& place) { return place.Gain >= RemnantSearchMinGain; }))
