@@ -2971,6 +2971,18 @@ namespace
 				continue;
 
 			auto const pFoot = find(member.UniqueID);
+
+			// A deployed soldier (a Guardian GI the engine dug in while it waited on guard) neither walks
+			// nor boards: it undeploys first (Unload toggles an infantry deploy) and is moved once it
+			// stands up. The load it was the last seat of never sailed (user, 2026-11-22).
+			if (auto const pDeployedInf = abstract_cast<InfantryClass*>(pFoot); pDeployedInf && pDeployedInf->IsDeployed())
+			{
+				if (pDeployedInf->CurrentMission != Mission::Unload && pDeployedInf->QueuedMission != Mission::Unload)
+					pDeployedInf->QueueMission(Mission::Unload, true);
+
+				continue;
+			}
+
 			checkInterference(pFoot, member.OrderCell, false, nullptr);
 			auto const pRecord = member.Transport ? recordOf(member.Transport) : nullptr;
 			auto const pTransport = pRecord ? find(pRecord->UniqueID) : nullptr;
