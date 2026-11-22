@@ -15088,6 +15088,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 							{
 								pDropCell = pIslandResourceGoalCell;
 							}
+							else if (pCarriedUnit->Type->DeploysInto != nullptr && homeCoords != CellStruct::Empty)
+							{
+								// A base deployer with no site of its own goes home, never to the wave's drop cell.
+								pDropCell = MapClass::Instance.TryGetCellAt(homeCoords);
+							}
 						}
 
 						if (!pDropCell && !(pCarriedUnit->Type && (pCarriedUnit->Type->Harvester || pCarriedUnit->Type->Weeder)))
@@ -17398,6 +17403,16 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					{
 						job.Lifted = true;
 						AirliftCargoHolds.erase(job.CargoID);
+
+						// A base deployer lifted for an island keeps the island site it was lifted for: the
+						// island goal of the tick may change or go while it flies (CarryallLongCarryFrames).
+						auto const pLiftedUnit = abstract_cast<UnitClass*>(pAboard);
+
+						if (job.Drop == CellStruct::Empty && pIslandResourceGoalCell && pLiftedUnit && pLiftedUnit->Type
+							&& pLiftedUnit->Type->DeploysInto)
+						{
+							job.Drop = pIslandResourceGoalCell->MapCoords;
+						}
 					}
 				}
 				else if (job.Lifted)
@@ -17593,6 +17608,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				{
 					pDropCell = pIslandResourceGoalCell;
 				}
+				else if (pCarriedUnit->Type->DeploysInto != nullptr && homeCoords != CellStruct::Empty)
+				{
+					// A base deployer with no site of its own goes home, where the expansion gives it one,
+					// never to the wave's drop cell (CarryallLongCarryFrames).
+					pDropCell = MapClass::Instance.TryGetCellAt(homeCoords);
+				}
 			}
 
 			if (!pDropCell && !(pCarriedUnit->Type && (pCarriedUnit->Type->Harvester || pCarriedUnit->Type->Weeder)))
@@ -17603,10 +17624,49 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 										: (pIslandResourceGoalCell ? pIslandResourceGoalCell : WaveDropCellFor(pHouse, pCarriedUnit, pWaveTargetCell)));
 			}
 
+			CellClass* const pGoalDropCell = pDropCell;
+
 			if (pDropCell)
 			{
 				// Badly damaged, or the drop zone got covered by anti-air: bring the cargo home.
 				pDropCell = ResolveAirDropCell(pHouse, pAir, pDropCell);
+			}
+
+			// TEMP diagnostic (CarryallLongCarryFrames): a carryall long with the same cargo, and where it takes it.
+			{
+				auto& cargoSince = GetMacroState(pHouse).CarryallCargoSince;
+				auto& since = cargoSince[pAir->UniqueID];
+				const int now = Unsorted::CurrentFrame;
+				static int longLogSerial = -1;
+				static int longLogCount = 0;
+
+				if (longLogSerial != NeuralMatchSerial)
+				{
+					longLogSerial = NeuralMatchSerial;
+					longLogCount = 0;
+				}
+
+				if (since.first <= 0 || now < since.first)
+					since = { now, now + CarryallLongCarryFrames };
+
+				if (now >= since.second && longLogCount < CarryallLongCarryLines)
+				{
+					longLogCount++;
+					since.second = now + CarryallLongCarryFrames;
+					auto const itLongJob = AirliftJobs.find(pAir->UniqueID);
+					const CellStruct jobDrop = itLongJob != AirliftJobs.end() ? itLongJob->second.Drop : CellStruct::Empty;
+					Debug::Log("[NeuralAI] House %d carryall long carry (TEMP): %s %u with %s for %d frames at (%d,%d), goal drop (%d,%d), "
+						"taken to (%d,%d), job kind %d drop (%d,%d), island resource goal %d, frame %d.\n", pHouse->ArrayIndex, pAir->Type->ID,
+						pAir->UniqueID, pCarriedFoot && pCarriedFoot->GetTechnoType() ? pCarriedFoot->GetTechnoType()->ID : "-", now - since.first,
+						pAir->GetMapCoords().X, pAir->GetMapCoords().Y, pGoalDropCell ? pGoalDropCell->MapCoords.X : -1,
+						pGoalDropCell ? pGoalDropCell->MapCoords.Y : -1, pDropCell ? pDropCell->MapCoords.X : -1, pDropCell ? pDropCell->MapCoords.Y : -1,
+						itLongJob != AirliftJobs.end() ? static_cast<int>(itLongJob->second.Kind) : -1, jobDrop.X, jobDrop.Y,
+						pIslandResourceGoalCell ? 1 : 0, now);
+				}
+			}
+
+			if (pDropCell)
+			{
 
 				if (pAir->DistanceFrom(pDropCell) <= 768 && pDropCell->LandType != LandType::Water)
 				{
@@ -17630,6 +17690,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// Empty carryall still flying the safe detour toward its pickup.
 		if (pAir->Type->Carryall && pAir->Passengers.NumPassengers == 0)
 		{
+			// TEMP diagnostic (CarryallLongCarryFrames): no cargo, no long carry.
+			GetMacroState(pHouse).CarryallCargoSince.erase(pAir->UniqueID);
+
 			if (auto const pPendingCargo = FindPendingPickupCargo(pHouse, pAir))
 			{
 				if (CanCarryallLiftUnit(pAir, pPendingCargo))
