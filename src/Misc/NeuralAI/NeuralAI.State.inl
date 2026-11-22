@@ -1558,6 +1558,9 @@ namespace
 		// told to and left the unload with its cargo still on, each until when it stays out
 		// (CarryallDropFailFrames), by carryall UniqueID (key access only). Cleared when the cargo is down.
 		std::unordered_map<DWORD, CellStruct> CarryallDropTried {};
+		// TEMP diagnostic (CarryallLongCarryFrames): when each aircraft carryall of ours took its cargo, and
+		// the frame of its next long-carry line.
+		std::unordered_map<DWORD, std::pair<int, int>> CarryallCargoSince {};
 		std::unordered_map<DWORD, std::vector<std::pair<CellStruct, int>>> CarryallDropFailed {};
 		// How often a unit carryall left the unload with its cargo still on, and the carryall phase it was
 		// in at the last AI tick (TEMP: a broken descent), by carryall UniqueID (key access only). Cleared
@@ -2212,6 +2215,7 @@ namespace
 			this->CarryallDropCells.clear();
 			this->CarryallDropSince.clear();
 			this->CarryallDropTried.clear();
+			this->CarryallCargoSince.clear();
 			this->CarryallDropFailed.clear();
 			this->CarryallDropFailCount.clear();
 			this->CarryallLastState.clear();
@@ -3811,6 +3815,13 @@ namespace
 	constexpr int PlanLessonFrames = 9000;
 	// A raid the gate of startPlan held back is weighed again after this long.
 	constexpr int PlanGateRetryFrames = 900;
+	// A base deployer an aircraft carryall lifts for an island keeps the island site it was lifted for,
+	// and one carried with no site of its own is set down at home (user, 2026-11-22: «Yes, do it»; match
+	// #14944: a carryall flew an MCV for over 9000 frames, its island goal gone on the way and the wave's
+	// drop cell and home taking turns). TEMP: a carryall with the same cargo for CarryallLongCarryFrames
+	// logs where it takes it, again every CarryallLongCarryFrames, at most CarryallLongCarryLines a match.
+	constexpr int CarryallLongCarryFrames = 3600;
+	constexpr int CarryallLongCarryLines = 40;
 	// Raids by safe routes (user, 2026-11-22: «Yes, safe routes»: eco raids lost their groups about 47 cells
 	// from the target to enemies in sight): Eco Raid, Tech Tree Cut and Factory Decapitation march their
 	// ground members waypoint by waypoint along the route PlanOpRoute gives over the danger map of the
