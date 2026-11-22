@@ -1083,7 +1083,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 						[id](BuildingClass* pB) { return pB && pB->IsAlive && pB->UniqueID == id; });
 				}), relaxedReach.end());
 			RecycleObsoleteRefineries(pHouse, pExt->NeuralAI_ActiveExpert == 6, relaxedReach);
-			if (SellFactoriesOverDifficultyCap(pHouse, GetNewestOffensiveStoneCell(pHouse)))
+			if (SellFactoriesOverDifficultyCap(pHouse, GetNewestOffensiveStoneCell(pHouse), GetMacroState(pHouse).OffensiveStones))
 				GetMacroState(pHouse).LastFactoryCapSaleFrame = Unsorted::CurrentFrame;
 			RaiseEmergencyMoneyForRefinery(pHouse, ownedRefineries, ownedHarvestersCount, money);
 		}

@@ -170,10 +170,13 @@ namespace
 	// one whose sale would leave a ConYard (18 cells) or the newest forward stone of the offensive
 	// crawl (15 cells) without a factory of that category. The type with the most copies goes
 	// first, outside the main base before inside. Nothing qualifies: the extra factory stays.
+	// Over the cap a bridgehead stays too: a building of the offensive crawl (`offensiveStones`)
+	// taken from another house, the one most likely to be picked since it stands far from home.
 	// For the recovery of the economy (`recovery`) the category with the most factories goes first
 	// and no shipyard is sold: on an island map it is the only way off the island.
 	// True when one was sold.
-	bool SellSurplusFactory(HouseClass* pHouse, const CellStruct& frontStoneCell, int keep, bool recovery)
+	bool SellSurplusFactory(HouseClass* pHouse, const CellStruct& frontStoneCell, int keep, bool recovery,
+		const std::vector<DWORD>& offensiveStones)
 	{
 		if (!pHouse)
 			return false;
@@ -256,6 +259,12 @@ namespace
 				if (pBld == pNewest || copies < 2)
 					continue;
 
+				if (!recovery && pBld->OriginallyOwnedByHouse && pBld->OriginallyOwnedByHouse != pHouse
+					&& std::find(offensiveStones.begin(), offensiveStones.end(), pBld->UniqueID) != offensiveStones.end())
+				{
+					continue;
+				}
+
 				const CellStruct bc = pBld->GetMapCoords();
 				bool soleCover = false;
 
@@ -312,9 +321,10 @@ namespace
 
 	// Sells one factory of a category above the difficulty cap (an outpost factory, or the first of
 	// a new factory type a captured tree opened, was placed past it).
-	bool SellFactoriesOverDifficultyCap(HouseClass* pHouse, const CellStruct& frontStoneCell)
+	bool SellFactoriesOverDifficultyCap(HouseClass* pHouse, const CellStruct& frontStoneCell,
+		const std::vector<DWORD>& offensiveStones)
 	{
-		return pHouse && SellSurplusFactory(pHouse, frontStoneCell, GetFactoryCategorySellCap(pHouse), false);
+		return pHouse && SellSurplusFactory(pHouse, frontStoneCell, GetFactoryCategorySellCap(pHouse), false, offensiveStones);
 	}
 
 	// Emergency cash recovery (AdvAI_Raise_Money): ONLY when the AI has 0
