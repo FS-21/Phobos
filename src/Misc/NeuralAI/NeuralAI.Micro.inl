@@ -1064,18 +1064,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 	auto CanFootCrossWaterDirectly = [](const FootClass* pF) -> bool
 	{
-		if (!pF)
-			return false;
-
-		auto const pT = pF->GetTechnoType();
-		if (!pT)
-			return false;
-
-		return (pT->MovementZone == MovementZone::Amphibious || pT->MovementZone == MovementZone::AmphibiousDestroyer
-			|| pT->MovementZone == MovementZone::AmphibiousCrusher || pT->MovementZone == MovementZone::Fly
-			|| pT->MovementZone == MovementZone::Subterrannean || pT->MovementZone == MovementZone::Water
-			|| pT->SpeedType == SpeedType::Hover || pT->SpeedType == SpeedType::Winged || pT->JumpJet || pT->Teleporter
-			|| pT->Naval);
+		return pF && CrossesWaterAlone(pF->GetTechnoType());
 	};
 
 	auto UnstickCrossIslandFoot = [&](FootClass* pFoot) -> bool
