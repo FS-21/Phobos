@@ -1578,8 +1578,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	// building pick (OnTechnoProduced) or, for a deployer with none (packed from a building, captured,
 	// given by the map), from FindDeployerGoal; an expansion deployer with no goal, off the island goal
 	// it fits on, takes that island. A reversible building that packed up to flee goes to its refuge
-	// first, and so does a deployer caught on its way by more than our forces around it; then it asks
-	// again. The trip is an operation (order leases: no wave or routine order takes it) and a transport
+	// first, then it asks again. Enemies near its way or its site stop no deployer, as they stop no
+	// building the yard places (user, 2026-11-22: «el éxito de desplegar donde se lo diga el planificador
+	// ha de ser del 100%»): no turning back, no wait for a fight to end. The trip is an operation (order leases: no wave or routine order takes it) and a transport
 	// operation carries it across water. With enemies on the way it may wait for the next wave sent
 	// toward its site and follow it (DeployerTripFollowsWave, learned). On its site it unfolds
 	// (DeployerSiteMostTries unpack orders, McvIdleArriveFrames on or next to it at most); refused, it
@@ -1726,41 +1727,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			return static_cast<int>(cells + at.DistanceFrom(order.Site));
 		};
 
-		// Caught packed by more than our forces around it: back to a quiet refuge, as a deployed one flees.
-		if (order.Refuge == CellStruct::Empty && now - order.StartFrame >= 150 && IsAITickWindow(90, 15))
-		{
-			const int threat = VisibleEnemyThreatNear(pHouse, here, 8);
-
-			if (threat >= 80 && threat * 4 > OwnDefenseNear(pHouse, here, 8) * 5)
-			{
-				const CellStruct retreat = FindMobileFactoryRetreat(pHouse, here, unitZone, CanHouseFerryTypeAcrossWater(pHouse, pType));
-
-				if (retreat != CellStruct::Empty && retreat.DistanceFrom(here) >= 8.0)
-				{
-					if (IsFactoryDeployerUnit(pType))
-					{
-						macro.MobileFactoryAvoidCell = here;
-						macro.MobileFactoryAvoidFrame = now;
-					}
-
-					// TEMP diagnostic: a deployer turned back on its way.
-					if (DeployerLogAllowed(pHouse))
-					{
-						Debug::Log("[NeuralAI] House %d deployer turns back: %s %u (%s) at (%d,%d), threat %d, refuge (%d,%d), site (%d,%d), frame %d.\n",
-							pHouse->ArrayIndex, pType->ID, pUnit->UniqueID, buildingName, here.X, here.Y, threat, retreat.X, retreat.Y,
-							order.Site.X, order.Site.Y, now);
-					}
-
-					order.FailedSites.push_back(here);
-					order.Refuge = retreat;
-					order.RefugeFrame = now;
-					order.Site = CellStruct::Empty;
-					order.Tries = 0;
-					order.NearSince = -1;
-				}
-			}
-		}
-
 		if (order.Refuge != CellStruct::Empty)
 		{
 			if (here.DistanceFrom(order.Refuge) > 6.0 && now - order.RefugeFrame < DeployerStallFrames)
@@ -1849,45 +1815,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					static_cast<int>(here.DistanceFrom(order.Site)), PlacementGoalKindName(order.Kind), order.Goal.X, order.Goal.Y,
 					order.SitePicks, routed ? "" : "none, ", static_cast<int>(order.Route.size()), order.RouteDanger, order.StraightDanger, risk,
 					order.BehindWave ? "behind the next wave" : "alone", macro.DeployerTripWeight[0], macro.DeployerTripWeight[1], now);
-			}
-		}
-
-		// A defense sent to a building of ours under attack waits where it stands while an enemy is in sight
-		// within DeployerCombatCells of its goal, DeployerCombatWaitFrames at most: it would drive into the
-		// fight. Then it asks again where it goes and goes there, without a second wait.
-		if (pBld->IsBaseDefense && order.Kind == NeuralPlacementGoalKind::AttackedBuilding && !order.CombatWaited)
-		{
-			if (VisibleEnemyThreatNear(pHouse, order.Goal, DeployerCombatCells) <= 0)
-			{
-				order.CombatWaitSince = -1;
-			}
-			else if (order.CombatWaitSince < 0 || now < order.CombatWaitSince || now - order.CombatWaitSince < DeployerCombatWaitFrames)
-			{
-				if (order.CombatWaitSince < 0 || now < order.CombatWaitSince)
-				{
-					order.CombatWaitSince = now;
-
-					// TEMP diagnostic: a defense waiting for the fight at its goal to end.
-					if (DeployerLogAllowed(pHouse))
-					{
-						Debug::Log("[NeuralAI] House %d deployer waits: %s %u (%s) for the fight at its goal (%d,%d) to end, %d cells away, frame %d.\n",
-							pHouse->ArrayIndex, pType->ID, pUnit->UniqueID, buildingName, order.Goal.X, order.Goal.Y,
-							static_cast<int>(here.DistanceFrom(order.Goal)), now);
-					}
-				}
-
-				order.ProgressFrame = now;
-				return;
-			}
-			else
-			{
-				order.CombatWaited = true;
-				order.CombatWaitSince = -1;
-				order.Goal = CellStruct::Empty;
-				order.Site = CellStruct::Empty;
-				order.PickFrame = -1;
-				order.SitePicks = 0;
-				return;
 			}
 		}
 
