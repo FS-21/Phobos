@@ -10195,6 +10195,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	int bestVisEnemyBldScore = -999999;
 	CellClass* pFallbackEnemyCell = nullptr;
 	int bestFallbackEnemyScore = -999999;
+	// TEMP diagnostic (match #14836): what the fallback target stands for, for the wave target line.
+	const char* waveFallbackKind = "none";
+	const ObjectClass* pWaveFallbackObject = nullptr;
 	bool anyEnemyBuildingExists = false;
 	const int coalitionTarget = CoalitionTargetOf(pHouse);
 	// What the idle army of the last tick does to each building type in 900 frames, as a percent of
@@ -10600,11 +10603,43 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		if (!pCell)
 			continue;
 
-		// A tech building only known to us, and none an engineer of ours goes to capture.
-		if (techTarget && ((!IsCellVisibleToAI(pHouse, pCell) && !IsEnemyBuildingKnown(pHouse, pEnemyBld))
-			|| IsCaptureClaimedByOther(pHouse, pEnemyBld, 0, false)))
+		// A tech building only known to us, and none an engineer of ours goes to capture, unless it
+		// fires at us now: the army does not leave it to an engineer while it shoots (EngineerClaimStall*).
+		if (techTarget)
 		{
-			continue;
+			if (!IsCellVisibleToAI(pHouse, pCell) && !IsEnemyBuildingKnown(pHouse, pEnemyBld))
+				continue;
+
+			auto const pTechVictim = abstract_cast<TechnoClass*>(pEnemyBld->Target);
+			const bool firesAtUs = pTechVictim && pTechVictim->Owner == pHouse;
+
+			if (!firesAtUs && IsCaptureClaimedByOther(pHouse, pEnemyBld, 0, false))
+			{
+				// TEMP diagnostic (match #14836, 2026-11-22): the enemy tech buildings a claim of ours keeps
+				// out of the waves, once every 1800 frames each, at most 60 lines a match.
+				static int claimSkipSerial = -1;
+				static int claimSkipLines = 0;
+				static std::unordered_map<DWORD, int> claimSkipFrames;
+
+				if (claimSkipSerial != NeuralMatchSerial)
+				{
+					claimSkipSerial = NeuralMatchSerial;
+					claimSkipLines = 0;
+					claimSkipFrames.clear();
+				}
+
+				auto& lastSkipLog = claimSkipFrames.try_emplace(pEnemyBld->UniqueID, -100000).first->second;
+
+				if (claimSkipLines < 60 && Unsorted::CurrentFrame - lastSkipLog >= 1800)
+				{
+					lastSkipLog = Unsorted::CurrentFrame;
+					++claimSkipLines;
+					Debug::Log("[NeuralAI] Frame %d | House #%d wave targets skip %s %u of house %d at (%d,%d): an engineer of ours claims it\n",
+						Unsorted::CurrentFrame, pHouse->ArrayIndex, pEnemyBld->Type->ID, pEnemyBld->UniqueID, pOwner->ArrayIndex, ebc.X, ebc.Y);
+				}
+
+				continue;
+			}
 		}
 
 		const int distHome
@@ -10786,6 +10821,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		{
 			bestFallbackEnemyScore = bldCandScore;
 			pFallbackEnemyCell = pCell;
+			waveFallbackKind = "known building";
+			pWaveFallbackObject = pEnemyBld;
 		}
 
 		const int ownerIdx = std::clamp(pOwner->ArrayIndex, 0, 7);
@@ -10806,7 +10843,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		const CellStruct scoutCell = FindNextStartLocationToScout(pHouse, homeCoords);
 
 		if (scoutCell != CellStruct::Empty)
+		{
 			pFallbackEnemyCell = MapClass::Instance.TryGetCellAt(scoutCell);
+			waveFallbackKind = "start location";
+		}
 	}
 
 	const bool allEnemyBldsGone = !anyEnemyBuildingExists;
@@ -10824,17 +10864,23 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		if (pHiddenOrStealthEnemy && pHiddenOrStealthEnemy->GetCell() && !pHiddenOrStealthEnemy->IsInAir())
 		{
 			pFallbackEnemyCell = pHiddenOrStealthEnemy->GetCell();
+			waveFallbackKind = "hidden enemy";
+			pWaveFallbackObject = pHiddenOrStealthEnemy;
 		}
 		else if (pEnemySubOrShip && pEnemySubOrShip->GetCell())
 		{
 			pFallbackEnemyCell = pEnemySubOrShip->GetCell();
+			waveFallbackKind = "ship";
+			pWaveFallbackObject = pEnemySubOrShip;
 		}
 		else
 		{
 			for (auto const pRemT : TechnoClass::Array)
 			{
+				// Aircraft, landed or not, are left to the hunt of the remnants below.
 				if (!pRemT || pRemT->InLimbo || !pRemT->IsAlive || !pRemT->Owner
-					|| pRemT->WhatAmI() == AbstractType::Building || pRemT->IsInAir())
+					|| pRemT->WhatAmI() == AbstractType::Building || pRemT->WhatAmI() == AbstractType::Aircraft
+					|| pRemT->IsInAir())
 				{
 					continue;
 				}
@@ -10853,6 +10899,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				if (auto const pRC = pRemT->GetCell())
 				{
 					pFallbackEnemyCell = pRC;
+					waveFallbackKind = "enemy on the ground";
+					pWaveFallbackObject = pRemT;
 
 					if (pRO->ArrayIndex == pHouse->EnemyHouseIndex)
 						break;
@@ -10871,17 +10919,19 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 	// Remnants in the air (aircraft, jumpjets) in the remnant phase, also while an enemy building no
 	// unit of ours has seen is left: a ground wave sent to their cell cannot hit them, so the 12
-	// nearest units with an anti-air weapon attack each one directly. Every 150 frames.
+	// nearest units with an anti-air weapon attack each one directly. Every 150 frames. Aircraft
+	// landed on the ground too, by the 12 nearest units with a ground weapon: a wave attack-moving to
+	// their cell leaves them be (match #14836: 300 units stood 20000 frames by three landed jets).
 	if (remnantPhase && IsAITickWindow(150, 15))
 	{
-		auto const hitsAir = [](TechnoTypeClass* pType)
+		auto const canHit = [](TechnoTypeClass* pType, bool air)
 		{
 			for (int i = 0; i < 2; ++i)
 			{
 				auto const pWS = pType->GetWeapon(i);
 
 				if (pWS && pWS->WeaponType && pWS->WeaponType->Damage > 0 && pWS->WeaponType->Projectile
-					&& pWS->WeaponType->Projectile->AA)
+					&& (air ? pWS->WeaponType->Projectile->AA : pWS->WeaponType->Projectile->AG))
 				{
 					return true;
 				}
@@ -10892,13 +10942,15 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		for (auto const pRemnant : TechnoClass::Array)
 		{
-			if (!pRemnant || pRemnant->InLimbo || !pRemnant->IsAlive || !pRemnant->IsInAir() || !pRemnant->Owner
+			if (!pRemnant || pRemnant->InLimbo || !pRemnant->IsAlive || !pRemnant->Owner
+				|| (!pRemnant->IsInAir() && pRemnant->WhatAmI() != AbstractType::Aircraft)
 				|| pRemnant->WhatAmI() == AbstractType::Building)
 			{
 				continue;
 			}
 
 			auto const pRO = pRemnant->Owner;
+			const bool remnantInAir = pRemnant->IsInAir();
 
 			if (pRO == pHouse || pHouse->IsAlliedWith(pRO) || pRO->IsNeutral() || pRO->IsObserver() || pRO->Defeated
 				|| (coalitionTarget >= 0 && IsTacitTrucePartner(pHouse, pRO->ArrayIndex)))
@@ -10917,7 +10969,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 				auto const pType = pFoot->GetTechnoType();
 
-				if (!pType || pType->Spawned || !hitsAir(pType))
+				if (!pType || pType->Spawned || !canHit(pType, remnantInAir))
 					continue;
 
 				hunters.emplace_back(pFoot->DistanceFrom(pRemnant), pFoot);
@@ -11332,9 +11384,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	}
 
 	// Remnant search: the remnant phase while the enemy still has buildings, whatever enemy unit the
-	// waves go after meanwhile. Idle units go and look, the fastest first, each to a different place
-	// (RemnantSearchScouts, one in RemnantSearchArmyShare of a big idle army), and leave the idle
-	// pools until they get there (KeepRemnantSearchers). Outside it the known enemy buildings are
+	// waves go after meanwhile. Every idle unit goes and looks, the fastest first, each to a different
+	// place while there are places (user, 2026-11-22: as many searchers to as many unexplored places
+	// as there are, so that none stands idle), and leaves the idle pools until it gets there
+	// (KeepRemnantSearchers). Outside it the known enemy buildings are
 	// noted as the first places of a later search (NoteRemnantLeads).
 	if (!remnantPhase)
 	{
@@ -11354,9 +11407,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					return a->GetTechnoType()->Speed > b->GetTechnoType()->Speed;
 				});
 
-			const size_t wantedSearchers = std::clamp((searchers.size() + onTheirWay) / RemnantSearchArmyShare,
-				RemnantSearchScouts, RemnantSearchMostScouts);
-			const size_t searcherCount = std::min(searchers.size(), wantedSearchers > onTheirWay ? wantedSearchers - onTheirWay : 0);
+			const size_t searcherCount = searchers.size();
 			const std::vector<CellStruct> places = searcherCount > 0 ? FindRemnantSearchCells(pHouse, searcherCount) : std::vector<CellStruct> {};
 
 			for (size_t i = 0; i < places.size(); ++i)
@@ -12964,6 +13015,31 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				}
 
 				waveMacro.WaveStartFrame = Unsorted::CurrentFrame;
+
+				// TEMP diagnostic (match #14836, 2026-11-22: 300 units sent to one cell for 20000 frames, the
+				// line named no target): what a new wave goes for, at most 200 lines a match.
+				{
+					static int waveTargetDiagSerial = -1;
+					static int waveTargetDiagLines = 0;
+
+					if (waveTargetDiagSerial != NeuralMatchSerial)
+					{
+						waveTargetDiagSerial = NeuralMatchSerial;
+						waveTargetDiagLines = 0;
+					}
+
+					if (waveTargetDiagLines < 200)
+					{
+						++waveTargetDiagLines;
+						auto const pTargetObject = pVisibleEnemyBld ? static_cast<const ObjectClass*>(pVisibleEnemyBld) : pWaveFallbackObject;
+						auto const pTargetTechno = abstract_cast<const TechnoClass*>(pTargetObject);
+						Debug::Log("[NeuralAI] Frame %d | House #%d wave target DIAG: (%d,%d) %s %s %u of house %d, remnant phase %d, remnant hunt %d\n",
+							Unsorted::CurrentFrame, pHouse->ArrayIndex, pWaveTargetCell->MapCoords.X, pWaveTargetCell->MapCoords.Y,
+							pVisibleEnemyBld ? "building" : waveFallbackKind, pTargetObject ? pTargetObject->GetType()->ID : "-",
+							pTargetObject ? pTargetObject->UniqueID : 0u, (pTargetTechno && pTargetTechno->Owner) ? pTargetTechno->Owner->ArrayIndex : -1,
+							remnantPhase ? 1 : 0, endgameRemnantHunt ? 1 : 0);
+					}
+				}
 
 				if (!endgameRemnantHunt)
 					NoteWaveDecision(pHouse, waveCheck, true, static_cast<int>(dispatchedVeh + dispatchedInf + handedVeh + handedInf));

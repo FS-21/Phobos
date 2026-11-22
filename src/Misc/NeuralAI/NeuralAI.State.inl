@@ -1697,7 +1697,7 @@ namespace
 		// and no new wait before this frame.
 		int WaveEscortWaitSince { -1 };
 		int WaveEscortRetryFrame { -1 };
-		// Last frame scouts were sent to look for the remnants of an enemy (RemnantSearchScouts).
+		// Last frame scouts were sent to look for the remnants of an enemy (RemnantSearch*).
 		int RemnantSearchFrame { -100000 };
 		// The goal the waves gave each unit (KeptWaveGoal): one still on its way keeps it (IsOnWaveMarch).
 		std::unordered_map<DWORD, NeuralWaveGoal> WaveGoals;
@@ -1722,6 +1722,9 @@ namespace
 		// Engineer claims (EngineerClaim*): the building each engineer of ours was sent to capture by the
 		// generic capture choice, and when.
 		std::unordered_map<DWORD, std::pair<DWORD, int>> EngineerCaptureTargets;
+		// The nearest an engineer walking to its claimed building came to it, in cells, and when
+		// (EngineerClaimStall*).
+		std::unordered_map<DWORD, std::pair<int, int>> EngineerClaimProgress;
 		// Where transports of the operations were lost, with the frame and whether they flew: the
 		// routes of the next crossings keep away from there (PlanOpRoute).
 		std::vector<NeuralOpLossSpot> OpLossSpots;
@@ -2274,6 +2277,7 @@ namespace
 			this->WaveGroupFrame = -100000;
 			this->TransportOps.clear();
 			this->EngineerCaptureTargets.clear();
+			this->EngineerClaimProgress.clear();
 			this->NextTransportOpId = 1;
 			this->TransportOpOf.clear();
 			this->TransportOpRetryUntil.clear();
@@ -4187,6 +4191,12 @@ namespace
 	// inland from where it stands, towards its old goal, off the landing.
 	constexpr int EngineerClaimFrames = 900;
 	constexpr int EngineerLandingStepCells = 6;
+	// An engineer walking to its claimed building that has not come EngineerClaimStepCells closer
+	// to it for EngineerClaimStallFrames no longer holds the claim (match #14836: a claim on an
+	// enemy tech outpost hid it from the waves for 20000 frames while 300 units of ours stood
+	// around it), and an enemy building that fires at us now is never hidden by a claim.
+	constexpr int EngineerClaimStallFrames = 1350;
+	constexpr int EngineerClaimStepCells = 2;
 
 	constexpr int DetectionNeedBlind = 1;
 	constexpr int DetectionNeedStealth = 2;
@@ -4264,20 +4274,15 @@ namespace
 	// slave miners and no tank in its first 18000 frames, with two war factories).
 	constexpr int TankMassGatherersPerRefinery = 2;
 	// Remnant search (user): a house that knows no enemy building while the enemy still has some
-	// sends up to RemnantSearchScouts idle units, the fastest first, each to a different place of
+	// sends its idle units, the fastest first, each to a different place of
 	// a grid of RemnantSearchStepCells whose surroundings (RemnantSearchRadius) it knows least
 	// (information gain of RemnantSearchMinGain or more), every RemnantSearchEveryFrames (match
 	// #10274: 160 vehicles and 95 soldiers stood idle for 12000 frames while six buildings they
 	// had never seen kept the match going).
-	constexpr size_t RemnantSearchScouts = 12;
 	constexpr int RemnantSearchStepCells = 14;
 	constexpr int RemnantSearchRadius = 7;
 	constexpr int RemnantSearchMinGain = 60;
 	constexpr int RemnantSearchEveryFrames = 450;
-	// A big idle army searches with more units: one in RemnantSearchArmyShare of the idle ones, at
-	// most RemnantSearchMostScouts (user, match #11110: 180 idle vehicles searched 3 at a time).
-	constexpr size_t RemnantSearchArmyShare = 6;
-	constexpr size_t RemnantSearchMostScouts = 32;
 	// A place the searchers went to lately is left to the next ones for RemnantSearchSpreadFrames;
 	// one they went to RemnantSearchMostSends times within RemnantSearchMemoryFrames is out of their
 	// reach (match #11110: the same corner 25 times in 22000 frames, never reached).
