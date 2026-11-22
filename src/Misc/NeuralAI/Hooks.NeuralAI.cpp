@@ -12,6 +12,7 @@
 #include <Ext/House/Body.h>
 #include <Ext/Rules/Body.h>
 #include <Ext/SWType/Body.h>
+#include <Utilities/Debug.h>
 #include <Utilities/Macro.h>
 #include <algorithm>
 #include <cstring>
@@ -239,6 +240,34 @@ DEFINE_HOOK(0x4CBBA0, FootClass_FindPath_Backoff_NeuralAI, 0x6)
 	R->EAX(0);
 
 	return NoPath;
+}
+
+// Outside the campaign the engine sells at once, upgrades refunded first, every building a computer
+// house takes from a house that is not passive. A Neural AI house keeps it: a factory or a yard taken
+// next to an enemy base is a bridgehead of its offensive crawl (UpdateOffensiveStones), and its own
+// sell rules decide later on whatever is of no use.
+DEFINE_HOOK(0x4492D7, BuildingClass_Captured_SkipAISell_NeuralAI, 0x5)
+{
+	enum { SkipSell = 0x44936E };
+
+	GET(BuildingClass*, pThis, ESI);
+	GET(HouseClass*, pNewOwner, EBP);
+
+	if (!SessionClass::IsCampaign() && NeuralAI::IsEnabledForHouse(pNewOwner))
+	{
+		auto const pOriginal = pThis->OriginallyOwnedByHouse;
+
+		if (pOriginal && pOriginal != pNewOwner && pOriginal->Type && !pOriginal->Type->MultiplayPassive)
+		{
+			auto const cell = pThis->GetMapCoords();
+			Debug::Log("[NeuralAI] House %d keeps %s at (%d,%d) taken from house %d, which the engine would sell, frame %d.\n",
+				pNewOwner->ArrayIndex, pThis->Type->ID, cell.X, cell.Y, pOriginal->ArrayIndex, Unsorted::CurrentFrame);
+		}
+
+		return SkipSell;
+	}
+
+	return 0;
 }
 
 // Scenario victory & defeat hooks

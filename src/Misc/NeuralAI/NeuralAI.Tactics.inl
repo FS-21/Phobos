@@ -4494,7 +4494,8 @@ namespace
 
 			if (savesForIncome && nothingComesIn && !macro.DryEconomyActive && pHouse->Available_Money() < recoveryTarget
 				&& (now - macro.LastRecoverySaleFrame >= EconomyRecoverySaleFrames || now < macro.LastRecoverySaleFrame)
-				&& SellSurplusFactory(pHouse, GetNewestOffensiveStoneCell(pHouse), EconomyRecoveryKeepFactories, true))
+				&& SellSurplusFactory(pHouse, GetNewestOffensiveStoneCell(pHouse), EconomyRecoveryKeepFactories, true,
+					macro.OffensiveStones))
 			{
 				macro.LastRecoverySaleFrame = now;
 			}
