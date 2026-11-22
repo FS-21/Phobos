@@ -408,6 +408,62 @@ static int CountOwnFootsGoingFor(const TArray& array, const HouseClass* pHouse, 
 	return count;
 }
 
+// Fires the superweapon at the visible enemy foot of the array (InfantryClass::Array or
+// UnitClass::Array) whose cell with its 3x3 neighbours scores most: scoreOf is summed over every
+// visible enemy foot of the array in that square. The candidates go in array order, the score must
+// beat minScore and a later one wins only with more, and the cell must be open to the superweapon
+// (MaySuperweaponHit). The filter is the candidate's own extra test. True when it is fired.
+template <typename TArray, typename TFilter, typename TScore>
+static bool LaunchAtBestEnemyCluster(const TArray& array, HouseClass* pHouse, SuperClass* pSuper, int minScore,
+	TFilter&& filter, TScore&& scoreOf)
+{
+	CellStruct bestCell = CellStruct::Empty;
+	int bestScore = minScore;
+
+	for (auto const pEnemy : array)
+	{
+		if (!pEnemy || pEnemy->InLimbo || !pEnemy->IsAlive || !pEnemy->Owner || !pEnemy->Type)
+			continue;
+
+		if (pEnemy->Owner == pHouse || pHouse->IsAlliedWith(pEnemy->Owner) || pEnemy->Owner->IsNeutral())
+			continue;
+
+		if (!pEnemy->GetCell() || !IsCellVisibleToAI(pHouse, pEnemy->GetCell()) || !filter(pEnemy))
+			continue;
+
+		const CellStruct center = pEnemy->GetMapCoords();
+		int score = 0;
+
+		for (auto const pOther : array)
+		{
+			if (!pOther || pOther->InLimbo || !pOther->IsAlive || !pOther->Owner)
+				continue;
+
+			if (pOther->Owner == pHouse || pHouse->IsAlliedWith(pOther->Owner) || !IsCellVisibleToAI(pHouse, pOther->GetCell()))
+				continue;
+
+			const CellStruct oc = pOther->GetMapCoords();
+
+			if (std::abs(center.X - oc.X) <= 1 && std::abs(center.Y - oc.Y) <= 1)
+				score += scoreOf(pOther);
+		}
+
+		if (score > bestScore)
+		{
+			bestScore = score;
+			bestCell = center;
+		}
+	}
+
+	if (bestCell == CellStruct::Empty || !MaySuperweaponHit(pHouse, bestCell))
+		return false;
+
+	pSuper->Launch(bestCell, false);
+	pSuper->Reset();
+
+	return true;
+}
+
 namespace
 {
 	// Where a transport stands to load. Passengers cannot step onto every cell: where nothing on
@@ -19622,56 +19678,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				// C) YURI GENETIC MUTATOR: Mutate enemy infantry clusters into Brutes!
 				if (swType == SuperWeaponType::GeneticMutator)
 				{
-					CellStruct bestMutateCell = CellStruct::Empty;
-					int bestInfCluster = 1;
-
-					for (auto const pEnemyInf : InfantryClass::Array)
+					// The cluster scores its enemy soldiers.
+					if (LaunchAtBestEnemyCluster(InfantryClass::Array, pHouse, pSuper, 1,
+						[](const InfantryClass*) { return true; },
+						[](const InfantryClass*) { return 1; }))
 					{
-						if (!pEnemyInf || pEnemyInf->InLimbo || !pEnemyInf->IsAlive || !pEnemyInf->Owner
-							|| !pEnemyInf->Type)
-						{
-							continue;
-						}
-
-						if (pEnemyInf->Owner == pHouse || pHouse->IsAlliedWith(pEnemyInf->Owner)
-							|| pEnemyInf->Owner->IsNeutral())
-						{
-							continue;
-						}
-
-						if (pEnemyInf->GetCell() && IsCellVisibleToAI(pHouse, pEnemyInf->GetCell()))
-						{
-							const CellStruct ic = pEnemyInf->GetMapCoords();
-							int cnt = 0;
-
-							for (auto const pOtherInf : InfantryClass::Array)
-							{
-								if (!pOtherInf || pOtherInf->InLimbo || !pOtherInf->IsAlive || !pOtherInf->Owner)
-									continue;
-
-								if (pOtherInf->Owner == pHouse || pHouse->IsAlliedWith(pOtherInf->Owner) || !IsCellVisibleToAI(pHouse, pOtherInf->GetCell()))
-									continue;
-
-								const CellStruct oc = pOtherInf->GetMapCoords();
-
-								if (std::abs(ic.X - oc.X) <= 1 && std::abs(ic.Y - oc.Y) <= 1)
-									cnt++;
-							}
-
-							if (cnt > bestInfCluster)
-							{
-								bestInfCluster = cnt;
-
-								bestMutateCell = ic;
-							}
-						}
-					}
-
-					if (bestMutateCell != CellStruct::Empty && MaySuperweaponHit(pHouse, bestMutateCell))
-					{
-						pSuper->Launch(bestMutateCell, false);
-						pSuper->Reset();
-
 						break;
 					}
 				}
@@ -19680,57 +19691,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				// enemy tanks/MCVs while crushing nearby structures!
 				if (swType == SuperWeaponType::PsychicDominator)
 				{
-					CellStruct bestDomCell = CellStruct::Empty;
-					int bestDomValue = 1200;
-
-					for (auto const pEnemyU : UnitClass::Array)
+					// The cluster, centred on a unit open to psionics, scores the summed cost of its enemy units.
+					if (LaunchAtBestEnemyCluster(UnitClass::Array, pHouse, pSuper, 1200,
+						[](const UnitClass* pEnemyU) { return !pEnemyU->Type->ImmuneToPsionics; },
+						[](const UnitClass* pOtherU) { return pOtherU->Type ? pOtherU->Type->Cost : 0; }))
 					{
-						if (!pEnemyU || pEnemyU->InLimbo || !pEnemyU->IsAlive || !pEnemyU->Owner || !pEnemyU->Type)
-							continue;
-
-						if (pEnemyU->Owner == pHouse || pHouse->IsAlliedWith(pEnemyU->Owner)
-							|| pEnemyU->Owner->IsNeutral())
-						{
-							continue;
-						}
-
-						if (pEnemyU->GetCell() && IsCellVisibleToAI(pHouse, pEnemyU->GetCell())
-							&& !pEnemyU->Type->ImmuneToPsionics)
-						{
-							const CellStruct uc = pEnemyU->GetMapCoords();
-							int val = 0;
-
-							for (auto const pOtherU : UnitClass::Array)
-							{
-								if (!pOtherU || pOtherU->InLimbo || !pOtherU->IsAlive || !pOtherU->Owner
-									|| !pOtherU->Type)
-								{
-									continue;
-								}
-
-								if (pOtherU->Owner == pHouse || pHouse->IsAlliedWith(pOtherU->Owner) || !IsCellVisibleToAI(pHouse, pOtherU->GetCell()))
-									continue;
-
-								const CellStruct oc = pOtherU->GetMapCoords();
-
-								if (std::abs(uc.X - oc.X) <= 1 && std::abs(uc.Y - oc.Y) <= 1)
-									val += pOtherU->Type->Cost;
-							}
-
-							if (val > bestDomValue)
-							{
-								bestDomValue = val;
-
-								bestDomCell = uc;
-							}
-						}
-					}
-
-					if (bestDomCell != CellStruct::Empty && MaySuperweaponHit(pHouse, bestDomCell))
-					{
-						pSuper->Launch(bestDomCell, false);
-						pSuper->Reset();
-
 						break;
 					}
 				}
