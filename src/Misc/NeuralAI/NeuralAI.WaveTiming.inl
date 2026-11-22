@@ -899,9 +899,9 @@ namespace
 				}
 
 				auto const pVehicle = itVehicle->second;
-				const bool entering = (pInf->CurrentMission == Mission::Enter || pInf->QueuedMission == Mission::Enter)
-					&& (pInf->Destination == pVehicle || pInf->ArchiveTarget == pVehicle || pInf->ContainsLink(pVehicle)
-						|| (pInf->Destination && CellClass::Coord2Cell(pInf->Destination->GetCoords()).DistanceFrom(pVehicle->GetMapCoords()) <= 3.5));
+				const bool entering = IsFootBoarding(pInf, pVehicle)
+					|| ((pInf->CurrentMission == Mission::Enter || pInf->QueuedMission == Mission::Enter) && pInf->Destination
+						&& CellClass::Coord2Cell(pInf->Destination->GetCoords()).DistanceFrom(pVehicle->GetMapCoords()) <= 3.5);
 
 				if (entering)
 				{

@@ -1125,43 +1125,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	// Any ground-only unit or infantry whose action target is on a disconnected
 	// landmass (footZone != targetZone) is handed to a transport operation, which
 	// lands it on the target's ground; there its client gives it its mission again.
-	auto countPendingBoardersOn = [&](TechnoClass* pT, FootClass* pExcludeFoot, int& outCount, int& outSize)
-	{
-		outCount = 0;
-		outSize = 0;
-		for (auto const pCheckU : UnitClass::Array)
-		{
-			if (!pCheckU || pCheckU->Owner != pHouse || pCheckU->InLimbo || !pCheckU->IsAlive || !pCheckU->Type
-				|| pCheckU == pT || pCheckU == pExcludeFoot)
-			{
-				continue;
-			}
-
-			if ((pCheckU->CurrentMission == Mission::Enter || pCheckU->QueuedMission == Mission::Enter)
-				&& (pCheckU->ContainsLink(pT) || pCheckU->ArchiveTarget == pT || pCheckU->Destination == pT))
-			{
-				outCount++;
-				outSize += std::max(1, static_cast<int>(pCheckU->Type->TechnoTypeClass::Size));
-			}
-		}
-
-		for (auto const pCheckI : InfantryClass::Array)
-		{
-			if (!pCheckI || pCheckI->Owner != pHouse || pCheckI->InLimbo || !pCheckI->IsAlive || !pCheckI->Type
-				|| pCheckI == pExcludeFoot)
-			{
-				continue;
-			}
-
-			if ((pCheckI->CurrentMission == Mission::Enter || pCheckI->QueuedMission == Mission::Enter)
-				&& (pCheckI->ContainsLink(pT) || pCheckI->ArchiveTarget == pT || pCheckI->Destination == pT))
-			{
-				outCount++;
-				outSize += std::max(1, static_cast<int>(pCheckI->Type->TechnoTypeClass::Size));
-			}
-		}
-	};
-
 	auto CanFootCrossWaterDirectly = [](const FootClass* pF) -> bool
 	{
 		if (!pF)
@@ -8348,12 +8311,14 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				if (unitPassSize > static_cast<int>(pOTVeh->Type->SizeLimit))
 					continue;
 
+				// Soldiers with a queued Enter or already in radio contact count too, or a seated
+				// vehicle gets more boarders than it has seats.
 				int pendingCount = 0;
 				int pendingSize = 0;
 				for (auto const pOtherI : InfantryClass::Array)
 				{
 					if (pOtherI && pOtherI->Owner == pHouse && !pOtherI->InLimbo && pOtherI->IsAlive
-						&& pOtherI->CurrentMission == Mission::Enter && pOtherI->Destination == pOTVeh)
+						&& IsFootBoarding(pOtherI, pOTVeh))
 					{
 						pendingCount++;
 						pendingSize += std::max(1, static_cast<int>(pOtherI->Type->TechnoTypeClass::Size));
@@ -8363,7 +8328,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				for (auto const pOtherU : UnitClass::Array)
 				{
 					if (pOtherU && pOtherU != pUnit && pOtherU->Owner == pHouse && !pOtherU->InLimbo && pOtherU->IsAlive
-						&& pOtherU->CurrentMission == Mission::Enter && pOtherU->Destination == pOTVeh)
+						&& IsFootBoarding(pOtherU, pOTVeh))
 					{
 						pendingCount++;
 						pendingSize += std::max(1, static_cast<int>(pOtherU->Type->TechnoTypeClass::Size));
@@ -8622,11 +8587,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 	const bool bioReactorNeedsPower
 		= pBioReactor && (pHouse->HasLowPower() || (pHouse->PowerOutput - pHouse->PowerDrain) < 350);
-	if (false)
-	{
-		{
-		}
-	}
 
 	// Soldiers that fight and also carry Sensors (a mod may give them to whole infantry lines) on the
 	// detector duties of this tick (DetectorPatrolCombatMost).
@@ -9935,13 +9895,14 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				if (infPassengerSize > static_cast<int>(pCombVeh->Type->SizeLimit))
 					continue;
 
+				// Soldiers with a queued Enter or already in radio contact count too, or a seated
+				// vehicle gets more boarders than it has seats.
 				int pendingBoardersCount = 0;
 				int pendingBoardersSize = 0;
 				for (auto const pOtherInf : InfantryClass::Array)
 				{
 					if (pOtherInf && pOtherInf != pInf && pOtherInf->Owner == pHouse && !pOtherInf->InLimbo
-						&& pOtherInf->IsAlive && pOtherInf->CurrentMission == Mission::Enter
-						&& pOtherInf->Destination == pCombVeh)
+						&& pOtherInf->IsAlive && IsFootBoarding(pOtherInf, pCombVeh))
 					{
 						pendingBoardersCount++;
 						pendingBoardersSize += std::max(1, static_cast<int>(pOtherInf->Type->TechnoTypeClass::Size));
@@ -9951,8 +9912,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				for (auto const pOtherU : UnitClass::Array)
 				{
 					if (pOtherU && pOtherU != pCombVeh && pOtherU->Owner == pHouse && !pOtherU->InLimbo
-						&& pOtherU->IsAlive && pOtherU->CurrentMission == Mission::Enter
-						&& pOtherU->Destination == pCombVeh)
+						&& pOtherU->IsAlive && IsFootBoarding(pOtherU, pCombVeh))
 					{
 						pendingBoardersCount++;
 						pendingBoardersSize += std::max(1, static_cast<int>(pOtherU->Type->TechnoTypeClass::Size));
@@ -10101,17 +10061,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			infAlreadyHeadingToBioReactor++;
 			if (pBioReactor->Passengers.NumPassengers + infAlreadyHeadingToBioReactor >= pBioReactor->Type->Passengers)
 				pBioReactor = nullptr;
-
-			continue;
-		}
-
-		if (false && pBioReactor && isIdle && pInf->Type->Cost <= 250 && pInf->DistanceFrom(pBioReactor) <= 3072)
-		{
-			pInf->SetDestination(pBioReactor, true);
-
-			pInf->QueueMission(Mission::Enter, true);
-
-			pBioReactor = nullptr;
 
 			continue;
 		}
@@ -11090,8 +11039,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			for (auto const pCheckI : InfantryClass::Array)
 			{
 				if (pCheckI && pCheckI->Owner == pHouse && !pCheckI->InLimbo && pCheckI->IsAlive
-					&& pCheckI->CurrentMission == Mission::Enter && pCheckI->Destination == pUnit
-					&& pCheckI->DistanceFrom(pUnit) <= 3840)
+					&& IsFootBoarding(pCheckI, pUnit) && pCheckI->DistanceFrom(pUnit) <= 3840)
 				{
 					passengerWalkingToBoard = true;
 					break;
@@ -14429,10 +14377,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			if (!pCand || pCand->Owner != pHouse || pCand->InLimbo || !pCand->IsAlive || pCand == pTransport)
 				return;
 
-			const bool isEnteringThis = (pCand->CurrentMission == Mission::Enter || pCand->QueuedMission == Mission::Enter)
-				&& (pCand->ContainsLink(pTransport) || pCand->ArchiveTarget == pTransport
-					|| pCand->Destination == pTransport);
-			if (!isEnteringThis)
+			if (!IsFootBoarding(pCand, pTransport))
 				return;
 
 			const int cz = ObjectZone(pCand, MovementZone::Normal);
@@ -14462,10 +14407,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				return;
 			}
 
-			const bool isTargetingThis = (pCand->CurrentMission == Mission::Enter || pCand->QueuedMission == Mission::Enter)
-				&& (pCand->ContainsLink(pTransport) || pCand->ArchiveTarget == pTransport
-					|| pCand->Destination == pTransport);
-			if (!isTargetingThis)
+			if (!IsFootBoarding(pCand, pTransport))
 				return;
 
 			if (pCand->ContainsLink(pTransport))
@@ -16715,8 +16657,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				&& CanPassengerFitInTransport(pTrans, pHomeIslandEngineer->Type)
 				&& CanTransportTypeLink(pTrans->Type, pHomeIslandEngineer->GetMapCoords(), pIslandTechGoalCell->MapCoords)
 				&& !((pHomeIslandEngineer->CurrentMission == Mission::Enter || pHomeIslandEngineer->QueuedMission == Mission::Enter)
-					&& !pHomeIslandEngineer->ContainsLink(pTrans) && pHomeIslandEngineer->ArchiveTarget != pTrans
-					&& pHomeIslandEngineer->Destination != pTrans))
+					&& !IsFootBoarding(pHomeIslandEngineer, pTrans)))
 			{
 				engineerTransportAssigned = true;
 				const int engZone = ObjectZone(pHomeIslandEngineer, MovementZone::Normal);
@@ -16785,8 +16726,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 						return;
 
 					if ((pCand->CurrentMission == Mission::Enter || pCand->QueuedMission == Mission::Enter)
-						&& !pCand->ContainsLink(pTrans) && pCand->ArchiveTarget != pTrans
-						&& pCand->Destination != pTrans)
+						&& !IsFootBoarding(pCand, pTrans))
 					{
 						return; // Already boarding a different transport
 					}
@@ -17683,33 +17623,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			else
 			{
 				ReturnIdleCarryallToBase(pHouse, pAir);
-			}
-
-			continue;
-		}
-
-		if (false && pAir->Type->Carryall && isAirIdle && pAir->Passengers.NumPassengers == 0
-			&& (IsAITickWindow(90, carryallWindow)))
-		{
-			for (auto const pU : UnitClass::Array)
-			{
-				if (!pU || pU->Owner != pHouse || pU->InLimbo || !pU->IsAlive || !pU->Type || pU->Type->Naval)
-					continue;
-
-				const bool isCriticallyDamagedTank
-					= (pRepairDepot && pU->Type->Cost >= 1000 && pU->GetHealthPercentage() < 0.40);
-
-				const bool isLoadedStrikeAPC
-					= (pU->Type->Passengers >= 3 && pU->Passengers.NumPassengers >= 2 && pWaveTargetCell);
-
-				if (isCriticallyDamagedTank || isLoadedStrikeAPC)
-				{
-					pAir->SetTarget(pU);
-
-					pAir->QueueMission(Mission::Capture, true);
-
-					break;
-				}
 			}
 
 			continue;
@@ -19211,61 +19124,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		}
 	}
 
-	// Frontline Primary Factory Switching & Charged Superweapon Execution
+	// Charged Superweapon Execution
 	if (pWaveTargetCell && (IsAITickWindow(150, 30)))
 	{
-		BuildingClass* pBestWarFac = nullptr;
-		BuildingClass* pBestBarracks = nullptr;
-		int bestWarDist = 999999;
-		int bestBarDist = 999999;
-
-		for (auto const pBld : pHouse->Buildings)
-		{
-			if (!pBld || pBld->InLimbo || !pBld->IsAlive || !pBld->Type)
-				continue;
-
-			if (pBld->Type->Factory == AbstractType::UnitType && !pBld->Type->Naval)
-			{
-				const int d = pBld->DistanceFrom(pWaveTargetCell);
-
-				if (d < bestWarDist)
-				{
-					bestWarDist = d;
-
-					pBestWarFac = pBld;
-				}
-			}
-			else if (pBld->Type->Factory == AbstractType::InfantryType)
-			{
-				const int d = pBld->DistanceFrom(pWaveTargetCell);
-
-				if (d < bestBarDist)
-				{
-					bestBarDist = d;
-
-					pBestBarracks = pBld;
-				}
-			}
-		}
-
-		if (false && pBestWarFac && !pBestWarFac->IsPrimaryFactory)
-		{
-			for (auto const pBld : pHouse->Buildings)
-			{
-				if (pBld && pBld->Type && pBld->Type->Factory == AbstractType::UnitType && !pBld->Type->Naval)
-					pBld->IsPrimaryFactory = (pBld == pBestWarFac);
-			}
-		}
-
-		if (false && pBestBarracks && !pBestBarracks->IsPrimaryFactory)
-		{
-			for (auto const pBld : pHouse->Buildings)
-			{
-				if (pBld && pBld->Type && pBld->Type->Factory == AbstractType::InfantryType)
-					pBld->IsPrimaryFactory = (pBld == pBestBarracks);
-			}
-		}
-
 		{
 			SuperClass* pChronoWarp = pHouse->FindSuperWeapon(SuperWeaponType::ChronoWarp);
 
