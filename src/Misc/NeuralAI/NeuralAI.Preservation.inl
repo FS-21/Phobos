@@ -563,9 +563,9 @@ namespace
 
 		std::erase_if(state.Trips, [&](NeuralRepairTrip& trip)
 			{
-				auto const pFoot = abstract_cast<FootClass*>(findTechno(trip.UID));
+				auto const pFoot = FindOwnFootByID(pHouse, trip.UID);
 
-				if (!pFoot || pFoot->Owner != pHouse)
+				if (!pFoot || pFoot->Health <= 0)
 				{
 					CountDecision(NeuralDecision::RepairLostOnTrip, houseIdx);
 					return true;

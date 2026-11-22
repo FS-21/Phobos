@@ -637,18 +637,9 @@ namespace
 			if (uid == engineerUid || claim.first != pBld->UniqueID)
 				continue;
 
-			InfantryClass* pEngineer = nullptr;
+			auto const pEngineer = abstract_cast<InfantryClass*>(FindOwnFootByID(pHouse, uid));
 
-			for (auto const pInf : InfantryClass::Array)
-			{
-				if (pInf && pInf->UniqueID == uid)
-				{
-					pEngineer = pInf;
-					break;
-				}
-			}
-
-			if (!pEngineer || !pEngineer->IsAlive || pEngineer->Owner != pHouse)
+			if (!pEngineer)
 				continue;
 
 			const bool inOp = IsInTransportOp(pHouse, uid);
@@ -1247,20 +1238,6 @@ namespace
 		});
 
 		return value;
-	}
-
-	FootClass* FindOwnFootByID(HouseClass* pHouse, DWORD id)
-	{
-		if (!id)
-			return nullptr;
-
-		for (auto const pFoot : FootClass::Array)
-		{
-			if (pFoot && pFoot->UniqueID == id)
-				return (pFoot->Owner == pHouse && pFoot->IsAlive) ? pFoot : nullptr;
-		}
-
-		return nullptr;
 	}
 
 	// A failed capture blocks that tech for a while (longer after each failure) and its neighbours

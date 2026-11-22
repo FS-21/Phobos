@@ -2139,6 +2139,21 @@ namespace
 		return IsKnownByVisionRule(CurrentSightMap[idx] != 0, VisionMap[idx] != 0, false);
 	}
 
+	// The living unit, soldier or aircraft of this house with this UniqueID (in limbo too), or null.
+	FootClass* FindOwnFootByID(HouseClass* pHouse, DWORD id)
+	{
+		if (!id)
+			return nullptr;
+
+		for (auto const pFoot : FootClass::Array)
+		{
+			if (pFoot && pFoot->UniqueID == id)
+				return (pFoot->Owner == pHouse && pFoot->IsAlive) ? pFoot : nullptr;
+		}
+
+		return nullptr;
+	}
+
 	// A spy: it enters enemy buildings for the spy effects (Agent=). The engine also sets Infiltrate
 	// on engineers and C4 commandos, which fight or capture instead.
 	bool IsSpyInfantryType(const InfantryTypeClass* pType)
