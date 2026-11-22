@@ -6412,10 +6412,6 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					score += ferryDelta;
 				}
 			}
-			else if (false && pUnit->Passengers > 0)
-			{
-				score += scores[28] + (isAmphibTransport ? 350 : (features[21] > 0 ? -500 : 0));
-			}
 			else if (isUnarmedSupportVehicle)
 			{
 				score += scores[60] - 250;
