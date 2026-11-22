@@ -820,10 +820,12 @@ namespace
 		return false;
 	}
 
-	// Held to fill at home (PassengerFill*): the waves leave it out.
+	// Held to fill (PassengerFill*): the waves and the plans leave it out.
 	bool IsPassengerFillHeld(HouseClass* pHouse, DWORD uid)
 	{
-		return GetMacroState(pHouse).PassengerFillHolds.contains(uid);
+		auto const& macro = GetMacroState(pHouse);
+
+		return macro.PassengerFillHolds.contains(uid) || macro.PassengerFillUntilFull.contains(uid);
 	}
 
 	bool OrderPlanSoldierAboard(FootClass* pSoldier, UnitClass* pVehicle);
@@ -990,6 +992,10 @@ namespace
 
 			return it != memberPlan.end() ? it->second : -1;
 		};
+
+		// Soldiers to come: a barracks of ours (an open-topped vehicle waits to fill only then).
+		const bool fieldsSoldiers = std::any_of(pHouse->Buildings.begin(), pHouse->Buildings.end(), [](BuildingClass* pBld)
+			{ return pBld && pBld->IsAlive && !pBld->InLimbo && pBld->Type && pBld->Type->Factory == AbstractType::InfantryType; });
 		int seatsWanted = 0;
 		int vehicles = 0;
 		int full = 0;
@@ -1117,6 +1123,53 @@ namespace
 				&& !pUnit->Destination && !pUnit->Locomotor->Is_Moving();
 			const int vehiclePlan = IsPlanMember(pHouse, uid) ? planOf(uid) : -1;
 
+			// An open-topped vehicle fills before any new mission takes it (PassengerFillUntilFull*): it
+			// stays held while it has seats left, free of the waves, plans and operations, standing or on its
+			// way home to fill (a vehicle already held may fight where it stands).
+			if (pUnit->Type->OpenTopped)
+			{
+				const bool wasHeld = macro.PassengerFillUntilFull.contains(uid);
+				const Mission mission = pUnit->CurrentMission;
+				const bool idle = mission == Mission::Guard || mission == Mission::Area_Guard || mission == Mission::Sleep;
+				const bool keep = seatsLeft > 0 && fieldsSoldiers && !inWave && vehiclePlan < 0 && !IsPlanMember(pHouse, uid)
+					&& !IsInTransportOp(pHouse, uid) && (wasHeld ? (idle || mission == Mission::Move) : (idle && !pUnit->Target));
+
+				if (keep)
+				{
+					macro.PassengerFillUntilFull.insert(uid);
+					const int seats = seatsLeft - boardingFor(pUnit);
+					seatsWanted += std::max(0, seats);
+
+					if (seats > 0 && vehicleStanding)
+					{
+						const int ordersBefore = macro.PassengerBoardOrders;
+						board(pUnit, seats, PassengerFillUntilFullReachCells, PassengerGroupHome);
+
+						if (macro.PassengerBoardOrders == ordersBefore && home != CellStruct::Empty
+							&& pUnit->GetMapCoords().DistanceFrom(home) > PassengerFillHomeCells)
+						{
+							if (auto const pHomeCell = MapClass::Instance.TryGetCellAt(home))
+								IssueMoveOrder(pUnit, pHomeCell, PassengerFillHomeKeepCells);
+						}
+					}
+				}
+				else
+				{
+					macro.PassengerFillUntilFull.erase(uid);
+
+					if (seatsLeft > 0 && (inWave || vehiclePlan >= 0) && !IsInTransportOp(pHouse, uid) && vehicleStanding)
+					{
+						// A wave or a plan standing at its gathering point.
+						const int seats = seatsLeft - boardingFor(pUnit);
+
+						if (seats > 0)
+							board(pUnit, seats, PassengerStagingReachCells, inWave ? PassengerGroupWave : vehiclePlan);
+					}
+				}
+
+				continue;
+			}
+
 			// Held at home: the first time it is there with seats left; again, standing out of the plans
 			// with fit soldiers within reach, PassengerFillReholdFrames after its last hold.
 			auto const mayHoldAtHome = [&]()
@@ -1182,6 +1235,12 @@ namespace
 					{ return pUnit && pUnit->UniqueID == entry.first && pUnit->Owner == pHouse && pUnit->IsAlive; });
 			});
 
+		std::erase_if(macro.PassengerFillUntilFull, [pHouse](DWORD uid)
+			{
+				return std::none_of(UnitClass::Array.begin(), UnitClass::Array.end(), [pHouse, uid](const UnitClass* pUnit)
+					{ return pUnit && pUnit->UniqueID == uid && pUnit->Owner == pHouse && pUnit->IsAlive && !pUnit->InLimbo; });
+			});
+
 		macro.PassengerSeatsWanted = seatsWanted;
 
 		// TEMP diagnostic: the seated fighting vehicles and how full they go, and how the boarding orders
@@ -1201,9 +1260,9 @@ namespace
 				callerText += (i ? ", " : "") + divertCallers[i].second + " x" + std::to_string(divertCallers[i].first);
 
 			Debug::Log("[NeuralAI] House %d passenger DIAG: seated fighting vehicles %d (full %d, partly %d, empty %d; empty in a wave %d), held %zu, "
-				"seats wanted %d, boarding orders %d since the last line (%d to a plan vehicle, held again %d), frame %d.\n", pHouse->ArrayIndex, vehicles,
-				full, partly, empty, emptyInWave, macro.PassengerFillHolds.size(), seatsWanted, macro.PassengerBoardOrders,
-				macro.PassengerPlanBoardOrders, macro.PassengerReholds, now);
+				"held until full %zu, seats wanted %d, boarding orders %d since the last line (%d to a plan vehicle, held again %d), frame %d.\n",
+				pHouse->ArrayIndex, vehicles, full, partly, empty, emptyInWave, macro.PassengerFillHolds.size(), macro.PassengerFillUntilFull.size(),
+				seatsWanted, macro.PassengerBoardOrders, macro.PassengerPlanBoardOrders, macro.PassengerReholds, now);
 			Debug::Log("[NeuralAI] House %d passenger boarding DIAG: aboard %d, in another vehicle %d, soldier lost %d, vehicle lost %d, timed out %d, "
 				"diverted %d (%s), still going %zu, frame %d.\n", pHouse->ArrayIndex, macro.PassengerBoardAboard, macro.PassengerBoardElsewhere,
 				macro.PassengerBoardSoldierLost, macro.PassengerBoardVehicleLost, macro.PassengerBoardTimedOut, macro.PassengerBoardDiverted,

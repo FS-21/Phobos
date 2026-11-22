@@ -2565,8 +2565,10 @@ namespace
 		auto isFreeForPlan = [&](FootClass* pFoot) -> bool
 		{
 			// A unit or transport of a transport operation is the operation's until it hands it back.
+			// A seated fighting vehicle held to fill (IsPassengerFillHeld) goes once full.
 			if (!pFoot || macro.PlanMembers.contains(pFoot->UniqueID) || IsOnRepairTrip(pHouse, pFoot->UniqueID)
-				|| IsInTransportOp(pHouse, pFoot->UniqueID) || macro.TankGuard.contains(pFoot->UniqueID))
+				|| IsInTransportOp(pHouse, pFoot->UniqueID) || macro.TankGuard.contains(pFoot->UniqueID)
+				|| IsPassengerFillHeld(pHouse, pFoot->UniqueID))
 				return false;
 
 			// A slave obeys its slave master only: it goes back to work whatever a plan orders, and
