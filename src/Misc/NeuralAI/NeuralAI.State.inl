@@ -3793,10 +3793,12 @@ namespace
 	// Eco Raid: the fastest armed vehicles, EcoRaidVehiclesLeast to EcoRaidVehiclesMost; with soldiers
 	// among them EcoRaidSoldiersLeast to EcoRaidSoldiersMost, since they hit harvesters softer (user,
 	// 2026-11-22, «Everything»: raids of 3 to 6 averaged 4.8 units, 34% of 102 ended well, the others lost
-	// on the way about 55 cells from the target).
-	constexpr size_t EcoRaidVehiclesLeast = 6;
+	// on the way about 55 cells from the target). With 6 and 8 at least the raids nearly stopped (6 in
+	// 40 matches against 102 in 80; user, 2026-11-22: «ecoRaid»): it sets out from 4 and 6, as many as
+	// there are up to the most.
+	constexpr size_t EcoRaidVehiclesLeast = 4;
 	constexpr size_t EcoRaidVehiclesMost = 10;
-	constexpr size_t EcoRaidSoldiersLeast = 8;
+	constexpr size_t EcoRaidSoldiersLeast = 6;
 	constexpr size_t EcoRaidSoldiersMost = 12;
 	// Tech Tree Cut and Factory Decapitation by land: TechTreeCutMinGround to TechTreeCutMaxGround idle
 	// ground units; a decapitation takes FactoryDecapitationLeastPerFactory to
