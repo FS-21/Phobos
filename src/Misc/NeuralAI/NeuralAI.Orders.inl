@@ -153,17 +153,7 @@ namespace
 		// (RequestLink + RequestLoading) or ArchiveTarget when CurrentMission ==
 		// Mission::Enter or QueuedMission == Mission::Enter BEFORE SetDestination!
 		pFoot->ClearMegaMissionData();
-
-		if (pFoot->CurrentMission == Mission::Guard || pFoot->CurrentMission == Mission::Area_Guard
-			|| pFoot->CurrentMission == Mission::None || pFoot->CurrentMission == Mission::Sleep)
-		{
-			pFoot->ForceMission(Mission::Enter);
-		}
-		else
-		{
-			pFoot->QueueMission(Mission::Enter, false);
-		}
-
+		ForceOrQueueMission(pFoot, Mission::Enter, false);
 		pFoot->SetArchiveTarget(nullptr);
 		pFoot->ClearNavigationList();
 		pFoot->SetTarget(nullptr);
@@ -1143,32 +1133,11 @@ namespace
 		}
 
 		CountDecision(NeuralDecision::MoveOrderIssued, pFoot->Owner ? pFoot->Owner->ArrayIndex : -1);
-		pFoot->SetTarget(nullptr);
-		pFoot->SetArchiveTarget(nullptr);
-		pFoot->MegaMission = Mission::AttackMove;
 
 		if (pResolvedDest->WhatAmI() == AbstractType::Cell)
-		{
-			pFoot->MegaDestination = pResolvedDest;
-			pFoot->MegaTarget = nullptr;
-		}
+			SetUpAttackMove(pFoot, pResolvedDest, nullptr, pResolvedDest);
 		else
-		{
-			pFoot->MegaDestination = pDestCell;
-			pFoot->MegaTarget = pResolvedDest;
-		}
-
-		pFoot->HaveAttackMoveTarget = false;
-		pFoot->SetDestination(pFoot->MegaDestination ? pFoot->MegaDestination : pResolvedDest, true);
-		if (pFoot->CurrentMission == Mission::Guard || pFoot->CurrentMission == Mission::Area_Guard
-			|| pFoot->CurrentMission == Mission::None || pFoot->CurrentMission == Mission::Sleep)
-		{
-			pFoot->ForceMission(Mission::Move);
-		}
-		else
-		{
-			pFoot->QueueMission(Mission::Move, true);
-		}
+			SetUpAttackMove(pFoot, pDestCell, pResolvedDest, pResolvedDest);
 
 		NoteOrderCaller(pFoot, "attackMove", callerFile, callerLine);
 	}

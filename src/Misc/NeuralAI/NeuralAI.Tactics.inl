@@ -228,24 +228,7 @@ namespace
 			return false;
 
 		auto const pCell = SpreadDestination(pFoot, pHop);
-		pFoot->SetTarget(nullptr);
-		pFoot->SetArchiveTarget(nullptr);
-		pFoot->MegaMission = Mission::AttackMove;
-		pFoot->MegaDestination = pCell;
-		pFoot->MegaTarget = nullptr;
-		pFoot->HaveAttackMoveTarget = false;
-		pFoot->SetDestination(pCell, true);
-
-		if (pFoot->CurrentMission == Mission::Guard || pFoot->CurrentMission == Mission::Area_Guard
-			|| pFoot->CurrentMission == Mission::None || pFoot->CurrentMission == Mission::Sleep)
-		{
-			pFoot->ForceMission(Mission::Move);
-		}
-		else
-		{
-			pFoot->QueueMission(Mission::Move, true);
-		}
-
+		SetUpAttackMove(pFoot, pCell, nullptr, pCell);
 		CountDecision(NeuralDecision::MoveOrderIssued, pFoot->Owner ? pFoot->Owner->ArrayIndex : -1);
 		NoteOrderCaller(pFoot, "attackMoveHop");
 
