@@ -1025,43 +1025,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	// Any ground-only unit or infantry whose action target is on a disconnected
 	// landmass (footZone != targetZone) is handed to a transport operation, which
 	// lands it on the target's ground; there its client gives it its mission again.
-	auto countPendingBoardersOn = [&](TechnoClass* pT, FootClass* pExcludeFoot, int& outCount, int& outSize)
-	{
-		outCount = 0;
-		outSize = 0;
-		for (auto const pCheckU : UnitClass::Array)
-		{
-			if (!pCheckU || pCheckU->Owner != pHouse || pCheckU->InLimbo || !pCheckU->IsAlive || !pCheckU->Type
-				|| pCheckU == pT || pCheckU == pExcludeFoot)
-			{
-				continue;
-			}
-
-			if ((pCheckU->CurrentMission == Mission::Enter || pCheckU->QueuedMission == Mission::Enter)
-				&& (pCheckU->ContainsLink(pT) || pCheckU->ArchiveTarget == pT || pCheckU->Destination == pT))
-			{
-				outCount++;
-				outSize += std::max(1, static_cast<int>(pCheckU->Type->TechnoTypeClass::Size));
-			}
-		}
-
-		for (auto const pCheckI : InfantryClass::Array)
-		{
-			if (!pCheckI || pCheckI->Owner != pHouse || pCheckI->InLimbo || !pCheckI->IsAlive || !pCheckI->Type
-				|| pCheckI == pExcludeFoot)
-			{
-				continue;
-			}
-
-			if ((pCheckI->CurrentMission == Mission::Enter || pCheckI->QueuedMission == Mission::Enter)
-				&& (pCheckI->ContainsLink(pT) || pCheckI->ArchiveTarget == pT || pCheckI->Destination == pT))
-			{
-				outCount++;
-				outSize += std::max(1, static_cast<int>(pCheckI->Type->TechnoTypeClass::Size));
-			}
-		}
-	};
-
 	auto CanFootCrossWaterDirectly = [](const FootClass* pF) -> bool
 	{
 		return pF && CrossesWaterAlone(pF->GetTechnoType());
@@ -8521,11 +8484,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 	const bool bioReactorNeedsPower
 		= pBioReactor && (pHouse->HasLowPower() || (pHouse->PowerOutput - pHouse->PowerDrain) < 350);
-	if (false)
-	{
-		{
-		}
-	}
 
 	// Soldiers that fight and also carry Sensors (a mod may give them to whole infantry lines) on the
 	// detector duties of this tick (DetectorPatrolCombatMost).
@@ -10048,17 +10006,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			infAlreadyHeadingToBioReactor++;
 			if (pBioReactor->Passengers.NumPassengers + infAlreadyHeadingToBioReactor >= pBioReactor->Type->Passengers)
 				pBioReactor = nullptr;
-
-			continue;
-		}
-
-		if (false && pBioReactor && isIdle && pInf->Type->Cost <= 250 && pInf->DistanceFrom(pBioReactor) <= 3072)
-		{
-			pInf->SetDestination(pBioReactor, true);
-
-			pInf->QueueMission(Mission::Enter, true);
-
-			pBioReactor = nullptr;
 
 			continue;
 		}
@@ -17635,33 +17582,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			continue;
 		}
 
-		if (false && pAir->Type->Carryall && isAirIdle && pAir->Passengers.NumPassengers == 0
-			&& (IsAITickWindow(90, carryallWindow)))
-		{
-			for (auto const pU : UnitClass::Array)
-			{
-				if (!pU || pU->Owner != pHouse || pU->InLimbo || !pU->IsAlive || !pU->Type || pU->Type->Naval)
-					continue;
-
-				const bool isCriticallyDamagedTank
-					= (pRepairDepot && pU->Type->Cost >= 1000 && pU->GetHealthPercentage() < 0.40);
-
-				const bool isLoadedStrikeAPC
-					= (pU->Type->Passengers >= 3 && pU->Passengers.NumPassengers >= 2 && pWaveTargetCell);
-
-				if (isCriticallyDamagedTank || isLoadedStrikeAPC)
-				{
-					pAir->SetTarget(pU);
-
-					pAir->QueueMission(Mission::Capture, true);
-
-					break;
-				}
-			}
-
-			continue;
-		}
-
 		// Aircraft with unlimited ammo (Ammo=-1) have no load to spend and are always ready. One
 		// with no weapon has no load at all: a carryall was sent to attack harvesters and sat on
 		// Attack until the stall watchdog released it, again and again.
@@ -19158,61 +19078,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		}
 	}
 
-	// Frontline Primary Factory Switching & Charged Superweapon Execution
+	// Charged Superweapon Execution
 	if (pWaveTargetCell && (IsAITickWindow(150, 30)))
 	{
-		BuildingClass* pBestWarFac = nullptr;
-		BuildingClass* pBestBarracks = nullptr;
-		int bestWarDist = 999999;
-		int bestBarDist = 999999;
-
-		for (auto const pBld : pHouse->Buildings)
-		{
-			if (!pBld || pBld->InLimbo || !pBld->IsAlive || !pBld->Type)
-				continue;
-
-			if (pBld->Type->Factory == AbstractType::UnitType && !pBld->Type->Naval)
-			{
-				const int d = pBld->DistanceFrom(pWaveTargetCell);
-
-				if (d < bestWarDist)
-				{
-					bestWarDist = d;
-
-					pBestWarFac = pBld;
-				}
-			}
-			else if (pBld->Type->Factory == AbstractType::InfantryType)
-			{
-				const int d = pBld->DistanceFrom(pWaveTargetCell);
-
-				if (d < bestBarDist)
-				{
-					bestBarDist = d;
-
-					pBestBarracks = pBld;
-				}
-			}
-		}
-
-		if (false && pBestWarFac && !pBestWarFac->IsPrimaryFactory)
-		{
-			for (auto const pBld : pHouse->Buildings)
-			{
-				if (pBld && pBld->Type && pBld->Type->Factory == AbstractType::UnitType && !pBld->Type->Naval)
-					pBld->IsPrimaryFactory = (pBld == pBestWarFac);
-			}
-		}
-
-		if (false && pBestBarracks && !pBestBarracks->IsPrimaryFactory)
-		{
-			for (auto const pBld : pHouse->Buildings)
-			{
-				if (pBld && pBld->Type && pBld->Type->Factory == AbstractType::InfantryType)
-					pBld->IsPrimaryFactory = (pBld == pBestBarracks);
-			}
-		}
-
 		{
 			SuperClass* pChronoWarp = pHouse->FindSuperWeapon(SuperWeaponType::ChronoWarp);
 
