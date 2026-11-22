@@ -704,6 +704,62 @@ namespace
 				pKiller ? static_cast<int>(pKiller->GetMapCoords().DistanceFrom(at)) : -1, static_cast<int>(enemyCells), caller);
 		}
 	}
+
+	// TEMP diagnostic (PlanMarchDeathLines): a member of an active plan of ours killed before its plan
+	// arrived, with the killer, how far it stood, whether we saw it, and how far the target still was.
+	void NotePlanMarchDeath(HouseClass* pOwner, FootClass* pVictim, TechnoClass* pKiller)
+	{
+		auto& macro = GetMacroState(pOwner);
+
+		if (macro.PlanMarchDeathLogCount >= PlanMarchDeathLines)
+			return;
+
+		const DWORD uid = pVictim->UniqueID;
+
+		for (size_t i = 0; i < macro.Plans.size(); ++i)
+		{
+			auto const& plan = macro.Plans[i];
+
+			if (!plan.Active || plan.Arrived || std::find(plan.Members.begin(), plan.Members.end(), uid) == plan.Members.end())
+				continue;
+
+			const char* kind = "other";
+
+			if (pKiller)
+			{
+				switch (pKiller->WhatAmI())
+				{
+				case AbstractType::Building:
+					kind = static_cast<BuildingClass*>(pKiller)->Type->IsBaseDefense ? "defense" : "building";
+					break;
+				case AbstractType::Aircraft:
+					kind = "aircraft";
+					break;
+				case AbstractType::Infantry:
+					kind = "infantry";
+					break;
+				case AbstractType::Unit:
+					kind = "vehicle";
+					break;
+				default:
+					break;
+				}
+			}
+
+			const CellStruct at = pVictim->GetMapCoords();
+			auto const pKillerCell = pKiller ? pKiller->GetCell() : nullptr;
+			macro.PlanMarchDeathLogCount++;
+			Debug::Log("[NeuralAI] TEMP plan march death: house %d plan %s %s killed by %s %s of house %d %d cells away (seen %d, cloaked %d),"
+				" %d cells from the plan target, %d members left, frame %d.\n", pOwner->ArrayIndex, NeuralPlanNames[i],
+				pVictim->GetTechnoType()->ID, kind, pKiller && pKiller->GetTechnoType() ? pKiller->GetTechnoType()->ID : "-",
+				pKiller && pKiller->Owner ? pKiller->Owner->ArrayIndex : -1, pKiller ? static_cast<int>(pKiller->GetMapCoords().DistanceFrom(at)) : -1,
+				pKillerCell && IsCellVisibleToAI(pOwner, pKillerCell) ? 1 : 0,
+				pKiller && (pKiller->CloakState == CloakState::Cloaked || pKiller->IsDisguised()) ? 1 : 0,
+				plan.TargetCell != CellStruct::Empty ? static_cast<int>(plan.TargetCell.DistanceFrom(at)) : -1,
+				static_cast<int>(plan.Members.size()) - 1, Unsorted::CurrentFrame);
+			break;
+		}
+	}
 }
 
 // Defense ledger: kills of our towers (by UniqueID) and towers lost, from the engine's destruction
@@ -722,6 +778,13 @@ void NeuralAI::OnTechnoDestroyed(TechnoClass* pVictim, TechnoClass* pKiller)
 
 		if (pTank->Type && IsMainBattleTankType(pTank->Type))
 			NoteMainTankDeath(pVictimOwner, pTank, pKiller);
+	}
+
+	// TEMP diagnostic (PlanMarchDeathLines): the plan members we lose on the way.
+	if (pVictimOwner && (pVictim->WhatAmI() == AbstractType::Unit || pVictim->WhatAmI() == AbstractType::Infantry)
+		&& NeuralAI::IsEnabledForHouse(pVictimOwner))
+	{
+		NotePlanMarchDeath(pVictimOwner, static_cast<FootClass*>(pVictim), pKiller);
 	}
 
 	// TEMP diagnostic (air wings): the air force aircraft we lose and the enemy buildings our

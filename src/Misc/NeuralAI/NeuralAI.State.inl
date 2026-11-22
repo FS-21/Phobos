@@ -1048,6 +1048,8 @@ namespace
 		int ClockPurgeFrame { 0 };
 		// TEMP diagnostic: the Edge Blitz starts logged this match (EdgeBlitzLogLines).
 		int EdgeBlitzLogCount { 0 };
+		// TEMP diagnostic: the plan march deaths logged this match (PlanMarchDeathLines).
+		int PlanMarchDeathLogCount { 0 };
 		// The size of the next Edge Blitz group, doubled after each failure (0: EdgeBlitzGroupLeast).
 		int EdgeBlitzSize { 0 };
 		// Deployed slave miners (UpdateStrandedSlaveMiners): ore samples in their slaves' reach (read
@@ -1932,6 +1934,7 @@ namespace
 			this->ClockSerialCounter = 0;
 			this->ClockPurgeFrame = 0;
 			this->EdgeBlitzLogCount = 0;
+			this->PlanMarchDeathLogCount = 0;
 			this->EdgeBlitzSize = 0;
 			this->MinerOreSamples.clear();
 			this->StrandedMinerSince.clear();
@@ -3763,6 +3766,10 @@ namespace
 	constexpr int PlanLessonFrames = 9000;
 	// A raid the gate of startPlan held back is weighed again after this long.
 	constexpr int PlanGateRetryFrames = 900;
+	// TEMP diagnostic (user approved, 2026-11-22, «Everything»: the raids lose their groups about 50
+	// cells from the target while no stronger enemy is seen around them): each member of a plan that dies
+	// before its plan arrived, with its killer, at most PlanMarchDeathLines a house and match.
+	constexpr int PlanMarchDeathLines = 60;
 	constexpr int PlanLessonAdvantagePercent = 150;
 	// Rotating Raids: two groups of half the members each. The group starts at RaidBaseGroup units and
 	// doubles after each raid an enemy house beat (it lost value and destroyed no more than it lost), up
