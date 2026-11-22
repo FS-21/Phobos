@@ -952,6 +952,8 @@ namespace
 		CellStruct Goal { CellStruct::Empty };
 		NeuralPlacementGoalKind Kind { NeuralPlacementGoalKind::None };
 		int Frame { -1 };
+		// Asked for the second queue (beside the yard's pick): built only while the army has no priority.
+		bool Parallel { false };
 	};
 
 	struct NeuralHouseMacroState
@@ -3418,10 +3420,16 @@ namespace
 	constexpr int PlacementGoalFrames = 900;
 	constexpr double DeployerNearSpotCells = 8.0;
 	constexpr int DeployerNearCostPct = 125;
-	// At most DeployerOrdersMost deployers of a house carry an order or wait for their factory at once;
-	// one the vehicle factory has not delivered in DeployerBuildWaitFrames is given up.
+	// At most DeployerOrdersMost deployers of a house, and one more per war factory of ours, carry an order
+	// or wait for their factory at once; one the vehicle factory has not delivered in
+	// DeployerBuildWaitFrames is given up. The second queue (user, 2026-11-22: «la idea de los nanocore es
+	// implantación de base rápida o expansión rápida ya que puede casi duplicar la velocidad de crecimiento
+	// de una base siempre que no haya prioridad en producción de unidades ofensivas») asks a deployer for
+	// the best other building wanted beside the yard's pick, its score above zero; DeployerSameTypeMost of
+	// one refinery, power plant or defense may be on their way at once, one of any other building.
 	constexpr int DeployerOrdersMost = 2;
 	constexpr int DeployerBuildWaitFrames = 2700;
+	constexpr int DeployerSameTypeMost = 2;
 	// On the way: with no cell closer to its site for DeployerStallFrames (a blocked path, a ferry that
 	// never comes) it deploys at the nearest valid cell where it stands. On or next to the site it gives
 	// DeployerSiteMostTries unpack orders and stands McvIdleArriveFrames at most; after

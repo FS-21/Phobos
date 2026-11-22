@@ -3239,6 +3239,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		int yardBestScore = INT_MIN;
 		int yardSecondIdx = -1;
 		int yardSecondScore = INT_MIN;
+		std::vector<std::pair<int, int>> deployerCandidates;
 
 		for (auto const& build : GetMacroState(pHouse).DeployerBuilds)
 			buildingsOnTheWay.push_back(build.BuildingType);
@@ -4290,6 +4291,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				yardSecondIdx = pBld->ArrayIndex;
 				yardSecondScore = score;
 			}
+
+			// The wanted buildings a deployer can bring, for the second queue.
+			if (score > 0 && deployerOfBuilding.contains(pBld->ArrayIndex))
+				deployerCandidates.emplace_back(score, pBld->ArrayIndex);
 		}
 
 		const int scoredBldIdx = bestBldIdx;
@@ -4601,10 +4606,11 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			const bool yardBuildsPick = CanBuildUnderHumanRules(pHouse, pPick);
 			const bool yardBuildingPick = inProgressBldIdx == bestBldIdx || inProgressDefIdx == bestBldIdx;
 			const int ordersUnderWay = static_cast<int>(orderMacro.DeployerBuilds.size() + orderMacro.DeployOrders.size());
+			const int ordersMost = DeployerOrdersMost + pHouse->NumWarFactories;
 			const int yardNextIdx = yardBestIdx != bestBldIdx ? yardBestIdx : yardSecondIdx;
 			bool deployerBrings = false;
 
-			if (itDeployer != deployerOfBuilding.end() && !yardBuildingPick && !isOnTheWay(bestBldIdx) && ordersUnderWay < DeployerOrdersMost)
+			if (itDeployer != deployerOfBuilding.end() && !yardBuildingPick && !isOnTheWay(bestBldIdx) && ordersUnderWay < ordersMost)
 			{
 				auto const pDeployerType = itDeployer->second;
 				NeuralPlacementGoalKind goalKind = NeuralPlacementGoalKind::None;
@@ -4635,6 +4641,64 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 			if (deployerBrings || !yardBuildsPick)
 				bestBldIdx = yardNextIdx;
+		}
+
+		// The second queue (DeployerSameTypeMost, user, 2026-11-22: a Nanocore nearly doubles how fast a base
+		// grows while the army has no priority): beside the yard's pick, the best other wanted building a
+		// deployer can bring is asked of the vehicle factory too, near or far, one a tick. The vehicle pick
+		// builds it only while the army has no priority (Parallel).
+		{
+			auto& orderMacro = GetMacroState(pHouse);
+			const int ordersMost = DeployerOrdersMost + pHouse->NumWarFactories;
+
+			std::stable_sort(deployerCandidates.begin(), deployerCandidates.end(),
+				[](const std::pair<int, int>& a, const std::pair<int, int>& b) { return a.first > b.first; });
+
+			for (auto const& [candidateScore, candidateIdx] : deployerCandidates)
+			{
+				if (static_cast<int>(orderMacro.DeployerBuilds.size() + orderMacro.DeployOrders.size()) >= ordersMost)
+					break;
+
+				if (candidateIdx == bestBldIdx || candidateIdx == inProgressBldIdx || candidateIdx == inProgressDefIdx)
+					continue;
+
+				auto const pCandidate = BuildingTypeClass::Array.GetItem(candidateIdx);
+				const DeployerRole candidateRole = DeployedBuildingRole(pCandidate);
+				const int sameMost = (candidateRole == DeployerRole::Refinery || candidateRole == DeployerRole::Power
+					|| candidateRole == DeployerRole::Defense) ? DeployerSameTypeMost : 1;
+				int onTheWay = 0;
+
+				for (auto const& build : orderMacro.DeployerBuilds)
+					onTheWay += build.BuildingType == candidateIdx ? 1 : 0;
+
+				for (auto const& [uid, order] : orderMacro.DeployOrders)
+					onTheWay += order.BuildingType == candidateIdx ? 1 : 0;
+
+				if (onTheWay >= sameMost)
+					continue;
+
+				auto const pDeployerType = deployerOfBuilding.at(candidateIdx);
+				NeuralPlacementGoalKind goalKind = NeuralPlacementGoalKind::None;
+				const CellStruct goal = FindDeployerGoal(pHouse, pCandidate, pDeployerType, nullptr, goalKind);
+
+				if (goal == CellStruct::Empty)
+					continue;
+
+				NeuralDeployerBuild build { pDeployerType->ArrayIndex, candidateIdx, goal, goalKind, Unsorted::CurrentFrame };
+				build.Parallel = true;
+				orderMacro.DeployerBuilds.push_back(build);
+
+				// TEMP diagnostic: each deployer of the second queue.
+				if (DeployerLogAllowed(pHouse))
+				{
+					Debug::Log("[NeuralAI] House %d deployer order (second queue): %s from %s, %s goal (%d,%d), score %d, beside the yard's %s, "
+						"%d credits, frame %d.\n",
+						pHouse->ArrayIndex, pCandidate->ID, pDeployerType->ID, PlacementGoalKindName(goalKind), goal.X, goal.Y, candidateScore,
+						bestBldIdx >= 0 ? BuildingTypeClass::Array.GetItem(bestBldIdx)->ID : "nothing", money, Unsorted::CurrentFrame);
+				}
+
+				break;
+			}
 		}
 
 		pExt->NeuralAI_NextBuildingTarget = bestBldIdx;
@@ -6760,7 +6824,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	// scored pick, its floors and complements: the building pick weighed it as the building it becomes.
 	// Under attack only a defense keeps that place, and anything for a house without a yard; an MCV that
 	// such a house can build comes first. One the factory has not started in DeployerBuildWaitFrames is
-	// given up, and so is one no factory of ours can build any more.
+	// given up, and so is one no factory of ours can build any more. One of the second queue waits while
+	// the army has priority.
 	{
 		auto& builds = GetMacroState(pHouse).DeployerBuilds;
 		const int now = Unsorted::CurrentFrame;
@@ -6777,13 +6842,28 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		auto const pScored = bestUnitIdx >= 0 ? UnitTypeClass::Array.GetItem(bestUnitIdx) : nullptr;
 		const bool yardMcvFirst = pHouse->NumConYards == 0 && pScored && pScored->DeploysInto && pScored->DeploysInto->ConstructionYard;
 
-		if (!builds.empty() && !yardMcvFirst)
-		{
-			auto const& build = builds.front();
-			auto const pBuilding = BuildingTypeClass::Array.GetItem(build.BuildingType);
+		// One of the second queue (Parallel) only while the army has no priority: no attack on us and the
+		// tank floor reached; a house without a yard keeps its base up with deployers first (user,
+		// 2026-11-22: «son ambas cosas segunda cola o de emergencias ya que si pierde el conyard a
+		// diferencia de otras casas podría mantenerse con nanocores»).
+		const bool underAttack = GetMacroState(pHouse).CounterUnderAttack;
+		const bool armyFirst = (underAttack || belowTankFloor) && pHouse->NumConYards > 0;
 
-			if (!GetMacroState(pHouse).CounterUnderAttack || pBuilding->IsBaseDefense || pHouse->NumConYards == 0)
+		for (auto const& build : builds)
+		{
+			if (yardMcvFirst)
+				break;
+
+			auto const pBuilding = BuildingTypeClass::Array.GetItem(build.BuildingType);
+			const bool mayGo = build.Parallel
+				? (!armyFirst || build.UnitType == inProgressUnitIdx)
+				: (!underAttack || pBuilding->IsBaseDefense || pHouse->NumConYards == 0);
+
+			if (mayGo)
+			{
 				bestUnitIdx = build.UnitType;
+				break;
+			}
 		}
 	}
 
