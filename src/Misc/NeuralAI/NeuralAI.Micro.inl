@@ -369,6 +369,45 @@ static void CollectCellFoots(CellClass* pCell, std::vector<FootClass*>& foots)
 	}
 }
 
+// The order fields of another foot that CountOwnFootsGoingFor compares with the target.
+enum NeuralGoingFor : unsigned int
+{
+	GoingForDestination = 1u << 0,
+	GoingForTarget = 1u << 1,
+	GoingForArchive = 1u << 2,
+	GoingForLink = 1u << 3,
+};
+
+// How many other foots of pHouse in the array (InfantryClass::Array or UnitClass::Array, in array
+// order), alive and out of limbo, the filter accepts and that go for pTarget by one of the fields:
+// its destination, its target, its archived target or a radio link. With stopAtFirst the walk ends
+// at the first one, so the count is 0 or 1.
+template <typename TArray, typename TFilter>
+static int CountOwnFootsGoingFor(const TArray& array, const HouseClass* pHouse, const TechnoClass* pTarget, const FootClass* pSelf,
+	unsigned int fields, bool stopAtFirst, TFilter&& filter)
+{
+	int count = 0;
+
+	for (auto const pOther : array)
+	{
+		if (!pOther || pOther == pSelf || pOther->Owner != pHouse || pOther->InLimbo || !pOther->IsAlive || !filter(pOther))
+			continue;
+
+		if (((fields & GoingForDestination) && pOther->Destination == pTarget)
+			|| ((fields & GoingForTarget) && pOther->Target == pTarget)
+			|| ((fields & GoingForArchive) && pOther->ArchiveTarget == pTarget)
+			|| ((fields & GoingForLink) && pOther->ContainsLink(pTarget)))
+		{
+			++count;
+
+			if (stopAtFirst)
+				break;
+		}
+	}
+
+	return count;
+}
+
 namespace
 {
 	// Where a transport stands to load. Passengers cannot step onto every cell: where nothing on
@@ -7980,19 +8019,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				if (unitZoneForBunker >= 0 && bz >= 0 && bz != unitZoneForBunker)
 					continue;
 
-				bool anotherTankAlreadyEntering = false;
-
-				for (auto const pOtherU : UnitClass::Array)
-				{
-					if (pOtherU && pOtherU != pUnit && pOtherU->Owner == pHouse && !pOtherU->InLimbo && pOtherU->IsAlive
-						&& (pOtherU->CurrentMission == Mission::Enter || pOtherU->QueuedMission == Mission::Enter)
-						&& (pOtherU->Destination == pBld || pOtherU->ArchiveTarget == pBld
-							|| pOtherU->ContainsLink(pBld)))
-					{
-						anotherTankAlreadyEntering = true;
-						break;
-					}
-				}
+				const bool anotherTankAlreadyEntering = CountOwnFootsGoingFor(UnitClass::Array, pHouse, pBld, pUnit,
+					GoingForDestination | GoingForArchive | GoingForLink, true,
+					[](const UnitClass* pOtherU) { return pOtherU->CurrentMission == Mission::Enter || pOtherU->QueuedMission == Mission::Enter; }) > 0;
 
 				if (anotherTankAlreadyEntering)
 					continue;
@@ -9025,20 +9054,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				// another engineer of ours already goes for: walking to it, attacking it, or claimed for it
 				// (EngineerCaptureTargets: waiting for a transport, aboard, sent lately).
 				{
-					bool alreadyTargetedByOtherEng = IsCaptureClaimedByOther(pHouse, pBld, pInf->UniqueID, false);
-
-					for (auto const pOtherInf : InfantryClass::Array)
-					{
-						if (alreadyTargetedByOtherEng)
-							break;
-
-						if (pOtherInf && pOtherInf != pInf && pOtherInf->Owner == pHouse && !pOtherInf->InLimbo
-							&& pOtherInf->IsAlive && pOtherInf->Type && IsCaptureInfantryType(pOtherInf->Type)
-							&& (pOtherInf->Destination == pBld || pOtherInf->Target == pBld))
-						{
-							alreadyTargetedByOtherEng = true;
-						}
-					}
+					const bool alreadyTargetedByOtherEng = IsCaptureClaimedByOther(pHouse, pBld, pInf->UniqueID, false)
+						|| CountOwnFootsGoingFor(InfantryClass::Array, pHouse, pBld, pInf, GoingForDestination | GoingForTarget, true,
+							[](const InfantryClass* pOtherInf) { return pOtherInf->Type && IsCaptureInfantryType(pOtherInf->Type); }) > 0;
 
 					if (alreadyTargetedByOtherEng)
 						continue;
@@ -9442,15 +9460,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					if (pEnemyBld->Owner->Available_Money() >= 600)
 						thiefScore += 3000;
 
-					for (auto const pOtherThief : InfantryClass::Array)
+					if (CountOwnFootsGoingFor(InfantryClass::Array, pHouse, pEnemyBld, pInf, GoingForDestination | GoingForArchive, true,
+						[](const InfantryClass* pOtherThief) { return pOtherThief->Type && pOtherThief->Type->Thief; }) > 0)
 					{
-						if (pOtherThief && pOtherThief != pInf && pOtherThief->Owner == pHouse && !pOtherThief->InLimbo
-							&& pOtherThief->IsAlive && pOtherThief->Type && pOtherThief->Type->Thief
-							&& (pOtherThief->Destination == pEnemyBld || pOtherThief->ArchiveTarget == pEnemyBld))
-						{
-							thiefScore -= 8000;
-							break;
-						}
+						thiefScore -= 8000;
 					}
 
 					if (thiefScore > bestThiefScore)
@@ -9491,18 +9504,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				if (pEnemyU->GetCell() && IsCellVisibleToAI(pHouse, pEnemyU->GetCell())
 					&& pInf->DistanceFrom(pEnemyU) <= 5120)
 				{
-					bool alreadyTargetedByOtherHijacker = false;
-
-					for (auto const pOtherHij : InfantryClass::Array)
-					{
-						if (pOtherHij && pOtherHij != pInf && pOtherHij->Owner == pHouse && !pOtherHij->InLimbo
-							&& pOtherHij->IsAlive && pOtherHij->Type && pOtherHij->Type->VehicleThief
-							&& (pOtherHij->Destination == pEnemyU || pOtherHij->ArchiveTarget == pEnemyU))
-						{
-							alreadyTargetedByOtherHijacker = true;
-							break;
-						}
-					}
+					const bool alreadyTargetedByOtherHijacker = CountOwnFootsGoingFor(InfantryClass::Array, pHouse, pEnemyU, pInf,
+						GoingForDestination | GoingForArchive, true,
+						[](const InfantryClass* pOtherHij) { return pOtherHij->Type && pOtherHij->Type->VehicleThief; }) > 0;
 
 					const int stealScore = pEnemyU->Type->Cost - (alreadyTargetedByOtherHijacker ? 5000 : 0);
 
@@ -9561,16 +9565,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					if (d > 4608)
 						continue;
 
-					int dogsAlreadyChasing = 0;
-
-					for (auto const pOtherDog : InfantryClass::Array)
-					{
-						if (pOtherDog && pOtherDog != pInf && pOtherDog->Owner == pHouse && !pOtherDog->InLimbo
-							&& pOtherDog->IsAlive && (pOtherDog->Target == pCandInf || pOtherDog->Destination == pCandInf))
-						{
-							dogsAlreadyChasing++;
-						}
-					}
+					const int dogsAlreadyChasing = CountOwnFootsGoingFor(InfantryClass::Array, pHouse, pCandInf, pInf,
+						GoingForTarget | GoingForDestination, false, [](const InfantryClass*) { return true; });
 
 					const int distScore = d + (dogsAlreadyChasing * 1536);
 
@@ -9662,17 +9658,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 			auto IsTargetedByOtherC4 = [pInf, pHouse](const TechnoClass* pCand) -> bool
 			{
-				for (auto const pOtherC4 : InfantryClass::Array)
-				{
-					if (pOtherC4 && pOtherC4 != pInf && pOtherC4->Owner == pHouse && !pOtherC4->InLimbo
-						&& pOtherC4->IsAlive && pOtherC4->Type && pOtherC4->Type->C4
-						&& (pOtherC4->Target == pCand || pOtherC4->Destination == pCand))
-					{
-						return true;
-					}
-				}
-
-				return false;
+				return CountOwnFootsGoingFor(InfantryClass::Array, pHouse, pCand, pInf, GoingForTarget | GoingForDestination, true,
+					[](const InfantryClass* pOtherC4) { return pOtherC4->Type && pOtherC4->Type->C4; }) > 0;
 			};
 
 			if (canSwim)
@@ -9781,17 +9768,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				if (infZoneForBunker >= 0 && bz >= 0 && bz != infZoneForBunker)
 					continue;
 
-				int pendingInfEntering = 0;
-
-				for (auto const pOtherI : InfantryClass::Array)
-				{
-					if (pOtherI && pOtherI != pInf && pOtherI->Owner == pHouse && !pOtherI->InLimbo && pOtherI->IsAlive
-						&& (pOtherI->CurrentMission == Mission::Enter || pOtherI->QueuedMission == Mission::Enter)
-						&& (pOtherI->Destination == pBld || pOtherI->ArchiveTarget == pBld))
-					{
-						pendingInfEntering++;
-					}
-				}
+				const int pendingInfEntering = CountOwnFootsGoingFor(InfantryClass::Array, pHouse, pBld, pInf,
+					GoingForDestination | GoingForArchive, false,
+					[](const InfantryClass* pOtherI) { return pOtherI->CurrentMission == Mission::Enter || pOtherI->QueuedMission == Mission::Enter; });
 
 				if (pBld->Occupants.Count + pendingInfEntering >= maxOcc)
 					continue;
