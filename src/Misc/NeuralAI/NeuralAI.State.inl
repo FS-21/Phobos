@@ -918,7 +918,8 @@ namespace
 	// the way) and it follows the next wave there and since when it waits for one, when the order was
 	// given and last run, the cell it was last sent to and the closest it got to it and when, the unpack
 	// orders on its site and the frame of the last one, since when it stands on or next to the site, how
-	// many sites it took for its goal and the ones that refused it.
+	// many sites it took for its goal and the ones that refused it, the cell it last stood on and since
+	// when, whether it is held in a pocket, and its TEMP diagnostic lines.
 	struct NeuralDeployOrder
 	{
 		int BuildingType { -1 };
@@ -946,6 +947,25 @@ namespace
 		int NearSince { -1 };
 		int SitePicks { 0 };
 		std::vector<CellStruct> FailedSites {};
+		CellStruct LastCell { CellStruct::Empty };
+		int LastCellFrame { -1 };
+		bool HeldIn { false };
+		bool PocketLogged { false };
+		bool NeighboursLogged { false };
+		int LogLines { 0 };
+	};
+
+	// The cells a deployer gets to by itself within Radius of Center (DeployerReachCells), row by row,
+	// on its movement zone Zone; Open: its walk left that square.
+	struct NeuralDeployerReach
+	{
+		CellStruct Center { CellStruct::Empty };
+		int Radius { 0 };
+		MovementZone ZoneType { MovementZone::Normal };
+		int Zone { -1 };
+		std::vector<bool> Cells {};
+		int Count { 0 };
+		bool Open { false };
 	};
 
 	// A deployer the building pick asked of a vehicle factory, until one comes out (OnTechnoProduced).
@@ -3448,6 +3468,13 @@ namespace
 	constexpr int DeployerStallFrames = 1800;
 	constexpr int DeployerRefusedAvoidCells = 1;
 	constexpr int DeployerFrontCells = 16;
+	// A site only where the deployer gets (user, 2026-11-22: a Nanocore stood 10000 frames in a pocket our
+	// buildings closed, sent each time to a valid cell it could not reach; the zones of the engine do not
+	// split when buildings close a pocket): within DeployerReachCells of it, the cells it walks to by
+	// itself (NeuralDeployerReach). On its way with no new cell for DeployerNoMoveFrames it is held in
+	// and its next site is looked for around it.
+	constexpr int DeployerReachCells = 24;
+	constexpr int DeployerNoMoveFrames = 450;
 	// Escort: a trip with known enemies on the way (DeployerTripRisk: their value near the site and the
 	// midpoint, DeployerTripRiskDefense for a known enemy defense that reaches the site) weighs going now
 	// against following the next wave sent its way, DeployerEscortFollowFrames after it; it waits
@@ -3463,8 +3490,9 @@ namespace
 	constexpr int DeployerTripLoss = 20;
 	constexpr int DeployerTripWeightMin = 20;
 	constexpr int DeployerTripWeightMax = 200;
-	// TEMP diagnostic lines a match (orders, trips, pack-ups).
+	// TEMP diagnostic lines a match (orders, trips, pack-ups), and of each deployer on its way.
 	constexpr int DeployerLogLinesMost = 120;
+	constexpr int DeployerLogLinesEach = 40;
 	// Reversible buildings in danger (user, 2026-11-21: conservative, with the criteria of the yard): one
 	// attacked with an enemy unit within ReversibleFleeEnemyLeptons (the last yard's rule) packs up when
 	// its health is under ReversibleFleeHealth (the last yard's rule) or falls so fast it would be gone

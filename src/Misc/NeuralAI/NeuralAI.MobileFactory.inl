@@ -129,12 +129,220 @@ namespace
 			&& IsTrueBaseStructureTarget(pBld);
 	}
 
+	// The cells pUnit gets to by itself within DeployerReachCells (NeuralDeployerReach): a walk over the
+	// cells clear for its speed type, with units left out (they step aside for a deploy) and buildings,
+	// walls and terrain in the way; a diagonal step only past two clear sides, as the engine drives.
+	void FillDeployerReach(UnitClass* pUnit, NeuralDeployerReach& reach)
+	{
+		reach = NeuralDeployerReach {};
+
+		if (!pUnit || !pUnit->Type)
+			return;
+
+		auto const pType = pUnit->Type;
+		const int radius = DeployerReachCells;
+		const int side = radius * 2 + 1;
+		reach.Center = pUnit->GetMapCoords();
+		reach.Radius = radius;
+		reach.ZoneType = pType->MovementZone;
+		reach.Zone = ObjectZone(pUnit, pType->MovementZone);
+		reach.Cells.assign(static_cast<size_t>(side * side), false);
+
+		auto const indexOf = [&reach, radius, side](const CellStruct& cell) -> int
+		{
+			const int dx = cell.X - reach.Center.X + radius;
+			const int dy = cell.Y - reach.Center.Y + radius;
+
+			return (dx < 0 || dy < 0 || dx >= side || dy >= side) ? -1 : dy * side + dx;
+		};
+
+		auto const clear = [pType](const CellStruct& cell) -> bool
+		{
+			auto const pCell = MapClass::Instance.TryGetCellAt(cell);
+
+			return pCell && !pCell->GetBuilding()
+				&& pCell->IsClearToMove(pType->SpeedType, true, true, -1, pType->MovementZone, -1, false);
+		};
+
+		std::vector<CellStruct> walk { reach.Center };
+		reach.Cells[static_cast<size_t>(indexOf(reach.Center))] = true;
+		reach.Count = 1;
+
+		for (size_t next = 0; next < walk.size(); ++next)
+		{
+			const CellStruct at = walk[next];
+
+			for (int dy = -1; dy <= 1; ++dy)
+			{
+				for (int dx = -1; dx <= 1; ++dx)
+				{
+					if (dx == 0 && dy == 0)
+						continue;
+
+					const CellStruct cell { static_cast<short>(at.X + dx), static_cast<short>(at.Y + dy) };
+					const int index = indexOf(cell);
+
+					if (index >= 0 && reach.Cells[static_cast<size_t>(index)])
+						continue;
+
+					if (!MapClass::Instance.CoordinatesLegal(cell) || !clear(cell))
+						continue;
+
+					if (dx != 0 && dy != 0
+						&& (!clear(CellStruct { static_cast<short>(at.X + dx), at.Y })
+							|| !clear(CellStruct { at.X, static_cast<short>(at.Y + dy) })))
+					{
+						continue;
+					}
+
+					if (index < 0)
+					{
+						reach.Open = true;
+						continue;
+					}
+
+					reach.Cells[static_cast<size_t>(index)] = true;
+					++reach.Count;
+					walk.push_back(cell);
+				}
+			}
+		}
+	}
+
+	// Does the deployer of this reach get to the cell by itself? A cell on another ground of its
+	// movement zone is for a transport to carry it to; past the square, only when its walk left it.
+	bool DeployerReaches(const NeuralDeployerReach& reach, const CellStruct& cell)
+	{
+		if (reach.Cells.empty())
+			return true;
+
+		if (MapClass::Instance.GetMovementZoneType(cell, reach.ZoneType, false) != reach.Zone)
+			return true;
+
+		const int side = reach.Radius * 2 + 1;
+		const int dx = cell.X - reach.Center.X + reach.Radius;
+		const int dy = cell.Y - reach.Center.Y + reach.Radius;
+
+		if (dx < 0 || dy < 0 || dx >= side || dy >= side)
+			return reach.Open;
+
+		return reach.Cells[static_cast<size_t>(dy * side + dx)];
+	}
+
+	// TEMP diagnostic: what stands on the 8 cells around `at`, clockwise from the north: a building
+	// (its type), a unit (its type), terrain the deployer cannot cross ('#') or a clear cell ('.').
+	std::string DescribeCellsAround(UnitClass* pUnit, const CellStruct& at)
+	{
+		static constexpr int Around[8][2] { { 0, -1 }, { 1, -1 }, { 1, 0 }, { 1, 1 }, { 0, 1 }, { -1, 1 }, { -1, 0 }, { -1, -1 } };
+		std::string text;
+
+		for (auto const& offset : Around)
+		{
+			const CellStruct cell { static_cast<short>(at.X + offset[0]), static_cast<short>(at.Y + offset[1]) };
+			auto const pCell = MapClass::Instance.TryGetCellAt(cell);
+
+			if (!text.empty())
+				text += ' ';
+
+			if (!pCell)
+			{
+				text += "off";
+				continue;
+			}
+
+			if (auto const pBld = pCell->GetBuilding())
+			{
+				text += pBld->Type->ID;
+				continue;
+			}
+
+			const char* footName = nullptr;
+
+			for (ObjectClass* pObj = pCell->FirstObject; pObj; pObj = pObj->NextObject)
+			{
+				if (auto const pFoot = abstract_cast<FootClass*>(pObj); pFoot && pFoot != pUnit)
+				{
+					footName = pFoot->GetTechnoType()->ID;
+					break;
+				}
+			}
+
+			if (footName)
+				text += footName;
+			else if (pUnit && !pCell->IsClearToMove(pUnit->Type->SpeedType, true, true, -1, pUnit->Type->MovementZone, -1, false))
+				text += '#';
+			else
+				text += '.';
+		}
+
+		return text;
+	}
+
+	// TEMP diagnostic: the pocket a deployer is held in, by the building types on its edge (up to four)
+	// and how often its edge meets terrain it cannot cross.
+	std::string DescribeDeployerPocket(const NeuralDeployerReach& reach)
+	{
+		const int side = reach.Radius * 2 + 1;
+		std::vector<const char*> types;
+		int terrain = 0;
+
+		for (int y = 0; y < side; ++y)
+		{
+			for (int x = 0; x < side; ++x)
+			{
+				if (!reach.Cells[static_cast<size_t>(y * side + x)])
+					continue;
+
+				for (int dy = -1; dy <= 1; ++dy)
+				{
+					for (int dx = -1; dx <= 1; ++dx)
+					{
+						const int nx = x + dx;
+						const int ny = y + dy;
+
+						if ((dx == 0 && dy == 0) || nx < 0 || ny < 0 || nx >= side || ny >= side
+							|| reach.Cells[static_cast<size_t>(ny * side + nx)])
+						{
+							continue;
+						}
+
+						const CellStruct cell { static_cast<short>(reach.Center.X - reach.Radius + nx),
+							static_cast<short>(reach.Center.Y - reach.Radius + ny) };
+						auto const pCell = MapClass::Instance.TryGetCellAt(cell);
+						auto const pBld = pCell ? pCell->GetBuilding() : nullptr;
+
+						if (!pBld)
+						{
+							++terrain;
+							continue;
+						}
+
+						if (types.size() < 4 && std::find(types.begin(), types.end(), pBld->Type->ID) == types.end())
+							types.push_back(pBld->Type->ID);
+					}
+				}
+			}
+		}
+
+		std::string text;
+
+		for (auto const pName : types)
+		{
+			text += pName;
+			text += ' ';
+		}
+
+		return text + std::to_string(terrain) + " terrain";
+	}
+
 	// The legal deploy stand nearest originCell, within 28 rings, on requiredZone (-1: any): the building
 	// can stand there (CanCreateHere and every foundation cell), the deployer can stand on the cell, our
 	// exit corridors stay open and no other deployer or transport of ours is on the foundation. pAvoid:
-	// sites tried before; a candidate within avoidCells of one is passed over.
+	// sites tried before; a candidate within avoidCells of one is passed over. pReach: only a stand the
+	// deployer gets to by itself (DeployerReaches).
 	CellStruct FindDeployFoundationNear(HouseClass* pHouse, BuildingTypeClass* pBldType, const CellStruct& originCell, int requiredZone,
-		UnitClass* pDeployerUnit, const std::vector<CellStruct>* pAvoid = nullptr, int avoidCells = 6)
+		UnitClass* pDeployerUnit, const std::vector<CellStruct>* pAvoid = nullptr, int avoidCells = 6,
+		const NeuralDeployerReach* pReach = nullptr)
 	{
 		if (!pHouse || !pBldType || originCell == CellStruct::Empty)
 			return CellStruct::Empty;
@@ -167,6 +375,9 @@ namespace
 					{
 						continue;
 					}
+
+					if (pReach && !DeployerReaches(*pReach, cand))
+						continue;
 
 					if (pDeployerUnit && pDeployerUnit->Type && cand != curUnitCell)
 					{
@@ -1028,9 +1239,10 @@ namespace
 	// ground for a goal on no ground), no adjacency asked (FindDeployFoundationNear); for a building on
 	// water the nearest one the deployer reaches by its own moves. A site refused, the search starts at
 	// `from` (where the deployer stands; Empty: the goal) on the goal's ground and passes over the cells
-	// within avoidCells of the sites in pAvoid.
+	// within avoidCells of the sites in pAvoid. pReach: only a site the deployer gets to by itself.
 	CellStruct FindDeployerSiteNear(HouseClass* pHouse, BuildingTypeClass* pBld, UnitClass* pUnit, const CellStruct& goal,
-		const std::vector<CellStruct>* pAvoid, const CellStruct& from = CellStruct::Empty, int avoidCells = 6)
+		const std::vector<CellStruct>* pAvoid, const CellStruct& from = CellStruct::Empty, int avoidCells = 6,
+		const NeuralDeployerReach* pReach = nullptr)
 	{
 		if (!pHouse || !pBld || goal == CellStruct::Empty)
 			return CellStruct::Empty;
@@ -1045,7 +1257,7 @@ namespace
 
 			for (int search = 0; search < DeployerWaterSiteTries; ++search)
 			{
-				const CellStruct cell = FindDeployFoundationNear(pHouse, pBld, origin, -1, pUnit, &avoid, avoidCells);
+				const CellStruct cell = FindDeployFoundationNear(pHouse, pBld, origin, -1, pUnit, &avoid, avoidCells, pReach);
 
 				if (cell == CellStruct::Empty)
 					break;
@@ -1063,7 +1275,8 @@ namespace
 		const CellStruct home = GetHouseHomeCell(pHouse);
 		const int homeZone = home != CellStruct::Empty ? MapClass::Instance.GetMovementZoneType(home, MovementZone::Normal, false) : -1;
 
-		return FindDeployFoundationNear(pHouse, pBld, origin, IsGroundZone(goalZone) ? goalZone : homeZone, pUnit, pAvoid, avoidCells);
+		return FindDeployFoundationNear(pHouse, pBld, origin, IsGroundZone(goalZone) ? goalZone : homeZone, pUnit, pAvoid, avoidCells,
+			pReach);
 	}
 
 	// What a deployer risks on its way from `from` to `site`: the value of the known armed enemies near
