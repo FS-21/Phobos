@@ -132,9 +132,9 @@ namespace
 	// The legal deploy stand nearest originCell, within 28 rings, on requiredZone (-1: any): the building
 	// can stand there (CanCreateHere and every foundation cell), the deployer can stand on the cell, our
 	// exit corridors stay open and no other deployer or transport of ours is on the foundation. pAvoid:
-	// sites tried before; a candidate within 6 cells of one is passed over.
+	// sites tried before; a candidate within avoidCells of one is passed over.
 	CellStruct FindDeployFoundationNear(HouseClass* pHouse, BuildingTypeClass* pBldType, const CellStruct& originCell, int requiredZone,
-		UnitClass* pDeployerUnit, const std::vector<CellStruct>* pAvoid = nullptr)
+		UnitClass* pDeployerUnit, const std::vector<CellStruct>* pAvoid = nullptr, int avoidCells = 6)
 	{
 		if (!pHouse || !pBldType || originCell == CellStruct::Empty)
 			return CellStruct::Empty;
@@ -162,8 +162,8 @@ namespace
 					if (requiredZone >= 0 && MapClass::Instance.GetMovementZoneType(cand, MovementZone::Normal, false) != requiredZone)
 						continue;
 
-					if (pAvoid && std::any_of(pAvoid->begin(), pAvoid->end(), [&cand](const CellStruct& avoid)
-						{ return std::max(std::abs(avoid.X - cand.X), std::abs(avoid.Y - cand.Y)) <= 6; }))
+					if (pAvoid && std::any_of(pAvoid->begin(), pAvoid->end(), [&cand, avoidCells](const CellStruct& avoid)
+						{ return std::max(std::abs(avoid.X - cand.X), std::abs(avoid.Y - cand.Y)) <= avoidCells; }))
 					{
 						continue;
 					}
@@ -1026,12 +1026,16 @@ namespace
 
 	// The site of a deployer for that goal: the legal deploy stand nearest it on its ground (our home
 	// ground for a goal on no ground), no adjacency asked (FindDeployFoundationNear); for a building on
-	// water the nearest one the deployer reaches by its own moves.
+	// water the nearest one the deployer reaches by its own moves. A site refused, the search starts at
+	// `from` (where the deployer stands; Empty: the goal) on the goal's ground and passes over the cells
+	// within avoidCells of the sites in pAvoid.
 	CellStruct FindDeployerSiteNear(HouseClass* pHouse, BuildingTypeClass* pBld, UnitClass* pUnit, const CellStruct& goal,
-		const std::vector<CellStruct>* pAvoid)
+		const std::vector<CellStruct>* pAvoid, const CellStruct& from = CellStruct::Empty, int avoidCells = 6)
 	{
 		if (!pHouse || !pBld || goal == CellStruct::Empty)
 			return CellStruct::Empty;
+
+		const CellStruct origin = from != CellStruct::Empty ? from : goal;
 
 		if (IsWaterBuildingType(pBld))
 		{
@@ -1041,7 +1045,7 @@ namespace
 
 			for (int search = 0; search < DeployerWaterSiteTries; ++search)
 			{
-				const CellStruct cell = FindDeployFoundationNear(pHouse, pBld, goal, -1, pUnit, &avoid);
+				const CellStruct cell = FindDeployFoundationNear(pHouse, pBld, origin, -1, pUnit, &avoid, avoidCells);
 
 				if (cell == CellStruct::Empty)
 					break;
@@ -1059,7 +1063,7 @@ namespace
 		const CellStruct home = GetHouseHomeCell(pHouse);
 		const int homeZone = home != CellStruct::Empty ? MapClass::Instance.GetMovementZoneType(home, MovementZone::Normal, false) : -1;
 
-		return FindDeployFoundationNear(pHouse, pBld, goal, IsGroundZone(goalZone) ? goalZone : homeZone, pUnit, pAvoid);
+		return FindDeployFoundationNear(pHouse, pBld, origin, IsGroundZone(goalZone) ? goalZone : homeZone, pUnit, pAvoid, avoidCells);
 	}
 
 	// What a deployer risks on its way from `from` to `site`: the value of the known armed enemies near

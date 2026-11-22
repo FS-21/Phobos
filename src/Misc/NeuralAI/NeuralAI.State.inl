@@ -3432,12 +3432,13 @@ namespace
 	constexpr int DeployerSameTypeMost = 2;
 	// On the way: with no cell closer to its site for DeployerStallFrames (a blocked path, a ferry that
 	// never comes) it deploys at the nearest valid cell where it stands. On or next to the site it gives
-	// DeployerSiteMostTries unpack orders and stands McvIdleArriveFrames at most; after
-	// DeployerSitePicksMost refused sites it asks again where the building goes. A defense sent to the
-	// front stands at most DeployerFrontCells past our forward building, short of the known enemy
-	// defenses.
+	// DeployerSiteMostTries unpack orders and stands McvIdleArriveFrames at most; refused, it takes the
+	// valid cell nearest where it stands, passing over only the cells within DeployerRefusedAvoidCells of
+	// the refused sites, and its goal is never asked again (user, 2026-11-22: the same Nanocore is not
+	// sent back and forth before it deploys). A defense sent to the front stands at most
+	// DeployerFrontCells past our forward building, short of the known enemy defenses.
 	constexpr int DeployerStallFrames = 1800;
-	constexpr int DeployerSitePicksMost = 3;
+	constexpr int DeployerRefusedAvoidCells = 1;
 	constexpr int DeployerFrontCells = 16;
 	// Escort: a trip with known enemies on the way (DeployerTripRisk: their value near the site and the
 	// midpoint, DeployerTripRiskDefense for a known enemy defense that reaches the site) weighs going now

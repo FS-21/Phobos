@@ -1636,9 +1636,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	// operation carries it across water. With enemies on the way it may wait for the next wave sent
 	// toward its site and follow it (DeployerTripFollowsWave, learned). On its site it unfolds
 	// (DeployerSiteMostTries unpack orders, McvIdleArriveFrames on or next to it at most); refused, it
-	// takes the nearest valid cell away from the refused ones, and after DeployerSitePicksMost sites it
-	// asks again where the building goes. With no cell closer for DeployerStallFrames it unfolds at the
-	// nearest valid cell where it stands.
+	// takes the valid cell nearest where it stands, past the refused ones (DeployerRefusedAvoidCells),
+	// and its goal is never asked again (user, 2026-11-22: the same Nanocore is not sent back and forth
+	// before it deploys). With no cell closer for DeployerStallFrames it unfolds at the nearest valid
+	// cell where it stands. Each cell it is sent to is its post too, as for the members of an operation:
+	// at the end of a move the engine puts a unit of the AI on Area Guard, which walks it back to its
+	// old post by the factory (ee5434156: 15 such turns of one deployer, 32 cells from its site then 42).
 	auto const runBaseDeployer = [&](UnitClass* pUnit)
 	{
 		auto const pType = pUnit->Type;
@@ -1710,13 +1713,26 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				|| MapClass::Instance.GetMovementZoneType(cell, pType->MovementZone, false) == ObjectZone(pUnit, pType->MovementZone);
 
 			if (reachesOnItsOwn)
+			{
+				pUnit->SetArchiveTarget(pCell);
 				IssueMoveOrder(pUnit, pCell, 0.0);
+			}
 			else
+			{
 				DispatchFootToTargetOrTransport(pUnit, pCell, Mission::Move, false);
+			}
 		};
 
-		auto const failSite = [&]()
+		auto const failSite = [&](const char* why)
 		{
+			// TEMP diagnostic: what refused each site.
+			if (DeployerLogAllowed(pHouse))
+			{
+				Debug::Log("[NeuralAI] House %d deployer site refused: %s %u (%s) site (%d,%d), at (%d,%d), %s, %d unpack orders, frame %d.\n",
+					pHouse->ArrayIndex, pType->ID, pUnit->UniqueID, buildingName, order.Site.X, order.Site.Y, here.X, here.Y,
+					why, order.Tries, now);
+			}
+
 			order.FailedSites.push_back(order.Site);
 			order.Site = CellStruct::Empty;
 			order.PickFrame = -1;
@@ -1805,7 +1821,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			while (order.FailedSites.size() > 12)
 				order.FailedSites.erase(order.FailedSites.begin());
 
-			if (order.Goal == CellStruct::Empty || order.SitePicks >= DeployerSitePicksMost)
+			if (order.Goal == CellStruct::Empty)
 			{
 				const bool islandExpansion = pIslandResourceGoalCell != nullptr && IsGroundZone(resourceIslandZone)
 					&& unitZone != resourceIslandZone && deployerExpandsWith(pBld) && CanHouseFerryTypeAcrossWater(pHouse, pType)
@@ -1824,7 +1840,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				order.SitePicks = 0;
 			}
 
-			order.Site = FindDeployerSiteNear(pHouse, pBld, pUnit, order.Goal, &order.FailedSites);
+			// A site refused on arrival: the valid cell nearest where it stands, past the refused cells only.
+			const bool refused = order.SitePicks > 0 && !order.FailedSites.empty()
+				&& here.DistanceFrom(order.FailedSites.back()) <= McvIdleNearCells;
+			order.Site = refused
+				? FindDeployerSiteNear(pHouse, pBld, pUnit, order.Goal, &order.FailedSites, here, DeployerRefusedAvoidCells)
+				: FindDeployerSiteNear(pHouse, pBld, pUnit, order.Goal, &order.FailedSites);
 			order.SitePicks++;
 			order.Tries = 0;
 			order.NearSince = -1;
@@ -1950,7 +1971,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		{
 			if (order.Tries >= DeployerSiteMostTries)
 			{
-				failSite();
+				failSite("the engine never unfolded it");
 				return;
 			}
 
@@ -1969,7 +1990,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 			if (now - order.NearSince >= McvIdleArriveFrames)
 			{
-				failSite();
+				const char* why = "it never stepped onto the site";
+
+				if (here == order.Site)
+					CanDeployerUnpackHere(pHouse, pBld, pUnit, &why);
+
+				failSite(why);
 				return;
 			}
 
@@ -1979,6 +2005,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			if (auto const pSiteCell = MapClass::Instance.TryGetCellAt(order.Site); pSiteCell && pUnit->Destination != pSiteCell)
 			{
 				const NeuralOrderPriorityScope orderPriority { NeuralOrderPriority::Operation };
+				pUnit->SetArchiveTarget(pSiteCell);
 				pUnit->SetDestination(pSiteCell, true);
 				pUnit->QueueMission(Mission::Move, true);
 				NoteOrderCaller(pUnit, "move");
