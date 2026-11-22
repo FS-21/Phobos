@@ -9618,8 +9618,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					if (d > 4608)
 						continue;
 
+					// Only dogs count: a soldier of ours shooting the infiltrator does not chase it.
 					const int dogsAlreadyChasing = CountOwnFootsGoingFor(InfantryClass::Array, pHouse, pCandInf, pInf,
-						GoingForTarget | GoingForDestination, false, [](const InfantryClass*) { return true; });
+						GoingForTarget | GoingForDestination, false,
+						[](const InfantryClass* pOtherDog) { return pOtherDog->Type && pOtherDog->Type->Doggie; });
 
 					const int distScore = d + (dogsAlreadyChasing * 1536);
 
