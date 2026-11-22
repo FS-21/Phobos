@@ -1642,6 +1642,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	// cell where it stands. Each cell it is sent to is its post too, as for the members of an operation:
 	// at the end of a move the engine puts a unit of the AI on Area Guard, which walks it back to its
 	// old post by the factory (ee5434156: 15 such turns of one deployer, 32 cells from its site then 42).
+	// Every site is one it gets to by itself (FillDeployerReach: our buildings may close a pocket the
+	// zones of the engine still join to the rest), and with no new cell for DeployerNoMoveFrames on its
+	// way it is held in: its next site is the nearest valid cell it gets to.
 	auto const runBaseDeployer = [&](UnitClass* pUnit)
 	{
 		auto const pType = pUnit->Type;
@@ -1723,14 +1726,26 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 		};
 
+		// TEMP diagnostic lines of this deployer (DeployerLogLinesEach).
+		auto const deployerLog = [&]() -> bool
+		{
+			if (order.LogLines >= DeployerLogLinesEach)
+				return false;
+
+			++order.LogLines;
+			return true;
+		};
+
 		auto const failSite = [&](const char* why)
 		{
-			// TEMP diagnostic: what refused each site.
-			if (DeployerLogAllowed(pHouse))
+			// TEMP diagnostic: what refused each site, and the first time what stands around the deployer.
+			if (deployerLog())
 			{
-				Debug::Log("[NeuralAI] House %d deployer site refused: %s %u (%s) site (%d,%d), at (%d,%d), %s, %d unpack orders, frame %d.\n",
+				const std::string around = order.NeighboursLogged ? std::string {} : DescribeCellsAround(pUnit, here);
+				order.NeighboursLogged = true;
+				Debug::Log("[NeuralAI] House %d deployer site refused: %s %u (%s) site (%d,%d), at (%d,%d), %s, %d unpack orders%s%s, frame %d.\n",
 					pHouse->ArrayIndex, pType->ID, pUnit->UniqueID, buildingName, order.Site.X, order.Site.Y, here.X, here.Y,
-					why, order.Tries, now);
+					why, order.Tries, around.empty() ? "" : ", around it ", around.c_str(), now);
 			}
 
 			order.FailedSites.push_back(order.Site);
@@ -1840,20 +1855,35 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				order.SitePicks = 0;
 			}
 
-			// A site refused on arrival: the valid cell nearest where it stands, past the refused cells only.
+			// Only a site it gets to by itself. A site refused on arrival, or a deployer held in where it
+			// stands: the valid cell nearest it, past the refused cells only.
+			NeuralDeployerReach reach;
+			FillDeployerReach(pUnit, reach);
 			const bool refused = order.SitePicks > 0 && !order.FailedSites.empty()
 				&& here.DistanceFrom(order.FailedSites.back()) <= McvIdleNearCells;
-			order.Site = refused
-				? FindDeployerSiteNear(pHouse, pBld, pUnit, order.Goal, &order.FailedSites, here, DeployerRefusedAvoidCells)
-				: FindDeployerSiteNear(pHouse, pBld, pUnit, order.Goal, &order.FailedSites);
+			order.Site = refused || order.HeldIn
+				? FindDeployerSiteNear(pHouse, pBld, pUnit, order.Goal, &order.FailedSites, here, DeployerRefusedAvoidCells, &reach)
+				: FindDeployerSiteNear(pHouse, pBld, pUnit, order.Goal, &order.FailedSites, CellStruct::Empty, 6, &reach);
+			order.HeldIn = false;
 			order.SitePicks++;
 			order.Tries = 0;
 			order.NearSince = -1;
 			order.BestDist = INT_MAX;
 			order.ProgressFrame = now;
+			order.LastCell = here;
+			order.LastCellFrame = now;
 
 			if (order.Site == CellStruct::Empty)
 			{
+				// TEMP diagnostic: held in a pocket with no room for the building (once a deployer).
+				if (!reach.Open && !order.PocketLogged && deployerLog())
+				{
+					order.PocketLogged = true;
+					Debug::Log("[NeuralAI] House %d deployer held in: %s %u (%s) at (%d,%d), a pocket of %d cells with no room for it, closed by %s, frame %d.\n",
+						pHouse->ArrayIndex, pType->ID, pUnit->UniqueID, buildingName, here.X, here.Y, reach.Count,
+						DescribeDeployerPocket(reach).c_str(), now);
+				}
+
 				// No site for now: it deploys where it stands when it can.
 				if (CanDeployerUnpackHere(pHouse, pBld, pUnit))
 				{
@@ -1880,14 +1910,15 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 
 			// TEMP diagnostic: each site a deployer takes.
-			if (DeployerLogAllowed(pHouse))
+			if (deployerLog())
 			{
 				Debug::Log("[NeuralAI] House %d deployer site: %s %u -> %s at (%d,%d), %d cells away, %s goal (%d,%d), pick %d, route %s%d waypoints "
-					"(danger %d against %d straight), risk %d, %s, weights %d/%d, frame %d.\n",
+					"(danger %d against %d straight), risk %d, %s, reach %d cells%s, weights %d/%d, frame %d.\n",
 					pHouse->ArrayIndex, pType->ID, pUnit->UniqueID, buildingName, order.Site.X, order.Site.Y,
 					static_cast<int>(here.DistanceFrom(order.Site)), PlacementGoalKindName(order.Kind), order.Goal.X, order.Goal.Y,
 					order.SitePicks, routed ? "" : "none, ", static_cast<int>(order.Route.size()), order.RouteDanger, order.StraightDanger, risk,
-					order.BehindWave ? "behind the next wave" : "alone", macro.DeployerTripWeight[0], macro.DeployerTripWeight[1], now);
+					order.BehindWave ? "behind the next wave" : "alone", reach.Count, reach.Open ? "" : " (closed)",
+					macro.DeployerTripWeight[0], macro.DeployerTripWeight[1], now);
 			}
 		}
 
@@ -1902,6 +1933,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			{
 				order.WaitSince = -1;
 				order.ProgressFrame = now;
+				order.LastCellFrame = now;
 			}
 			else if (now - order.WaitSince >= DeployerEscortWaitFrames)
 			{
@@ -1909,6 +1941,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				order.BehindWave = false;
 				order.Weighed = false;
 				order.ProgressFrame = now;
+				order.LastCellFrame = now;
 			}
 			else
 			{
@@ -1947,11 +1980,39 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			order.ProgressFrame = now;
 		}
 
+		// Held in on its way: no new cell for DeployerNoMoveFrames toward a site on its own ground (not
+		// waiting for a transport). Its next site is looked for around it, among the cells it gets to.
+		if (here != order.LastCell || order.LastCellFrame < 0)
+		{
+			order.LastCell = here;
+			order.LastCellFrame = now;
+		}
+		else if (now - order.LastCellFrame >= DeployerNoMoveFrames && siteDist > McvIdleNearCells
+			&& MapClass::Instance.GetMovementZoneType(order.Site, pType->MovementZone, false) == ObjectZone(pUnit, pType->MovementZone))
+		{
+			// TEMP diagnostic: a deployer that does not move, and what stands around it.
+			if (deployerLog())
+			{
+				Debug::Log("[NeuralAI] House %d deployer not moving: %s %u (%s) at (%d,%d) for %d frames, site (%d,%d) %d cells away, mission %d, "
+					"around it %s, frame %d.\n",
+					pHouse->ArrayIndex, pType->ID, pUnit->UniqueID, buildingName, here.X, here.Y, now - order.LastCellFrame,
+					order.Site.X, order.Site.Y, static_cast<int>(siteDist), static_cast<int>(pUnit->CurrentMission),
+					DescribeCellsAround(pUnit, here).c_str(), now);
+			}
+
+			order.FailedSites.push_back(order.Site);
+			order.HeldIn = true;
+			order.Site = CellStruct::Empty;
+			order.PickFrame = -1;
+			order.Route.clear();
+			return;
+		}
+
 		// Stalled on the way: the nearest valid cell where it stands.
 		if (now - order.ProgressFrame > DeployerStallFrames && siteDist > McvIdleNearCells)
 		{
 			// TEMP diagnostic: a deployer that stopped getting closer.
-			if (DeployerLogAllowed(pHouse))
+			if (deployerLog())
 			{
 				Debug::Log("[NeuralAI] House %d deployer stalled: %s %u (%s) at (%d,%d), site (%d,%d) %d cells away, mission %d, frame %d.\n",
 					pHouse->ArrayIndex, pType->ID, pUnit->UniqueID, buildingName, here.X, here.Y, order.Site.X, order.Site.Y,
