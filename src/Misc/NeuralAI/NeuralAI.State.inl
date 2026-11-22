@@ -1618,6 +1618,8 @@ namespace
 		// with the frame the hold began, and the ones whose last hold is over, with the frame it ended.
 		std::unordered_map<DWORD, int> PassengerFillHolds {};
 		std::unordered_map<DWORD, int> PassengerFillDone {};
+		// The open-topped vehicles kept out of every mission until full (UpdatePassengerFill).
+		std::unordered_set<DWORD> PassengerFillUntilFull {};
 		int PassengerFillFrame { -1 };
 		// Seats the held vehicles still have (the infantry pick reads it).
 		int PassengerSeatsWanted { 0 };
@@ -2215,6 +2217,7 @@ namespace
 			this->AirAttackSectorWeight.fill(0);
 			this->PassengerFillHolds.clear();
 			this->PassengerFillDone.clear();
+			this->PassengerFillUntilFull.clear();
 			this->PassengerFillFrame = -1;
 			this->PassengerSeatsWanted = 0;
 			this->PassengerLogFrame = -1;
@@ -3241,7 +3244,15 @@ namespace
 	// standing or walking within PassengerStagingReachCells; a plan counts its soldiers aboard its
 	// vehicles in its strength. TEMP "passenger DIAG" every PassengerLogFrames, with the end of each
 	// boarding order (a soldier not aboard after PassengerBoardTrackFrames timed out).
+	// An open-topped vehicle with seats left that stands free of the waves, plans and operations is kept
+	// out of every new mission until full (user, 2026-11-22: «los vehículos opentopped que están esperando
+	// tropas para ser llenados deberían no contar en las nuevas misiones hasta que se llenasen»), while the
+	// house has a barracks: our fit soldiers within PassengerFillUntilFullReachCells board it, and one
+	// farther than PassengerFillHomeCells from home with none in reach drives home to fill, to within
+	// PassengerFillHomeKeepCells. The timed hold above is for the gunner vehicles.
 	constexpr int PassengerFillHomeCells = 20;
+	constexpr int PassengerFillUntilFullReachCells = 24;
+	constexpr double PassengerFillHomeKeepCells = 6.0;
 	constexpr int PassengerFillHoldFrames = 1200;
 	constexpr int PassengerFillReholdFrames = 900;
 	constexpr int PassengerBoardTrackFrames = 900;
