@@ -1604,6 +1604,36 @@ namespace
 		return MapClass::Instance.TryGetCellAt(cells[next]);
 	}
 
+	// An idle unit (Guard, Area_Guard, None, Sleep) takes the mission now; a busy one gets it queued.
+	void ForceOrQueueMission(FootClass* pFoot, Mission mission, bool startQueued)
+	{
+		if (pFoot->CurrentMission == Mission::Guard || pFoot->CurrentMission == Mission::Area_Guard
+			|| pFoot->CurrentMission == Mission::None || pFoot->CurrentMission == Mission::Sleep)
+		{
+			pFoot->ForceMission(mission);
+		}
+		else
+		{
+			pFoot->QueueMission(mission, startQueued);
+		}
+	}
+
+	// The attack-move as the engine's mega mission sets it up: no target, the mega destination (a cell)
+	// and the mega target (an object, or null), then the destination (the mega destination, or the
+	// fallback when there is none) and the Move mission.
+	void SetUpAttackMove(FootClass* pFoot, AbstractClass* pMegaDestination, AbstractClass* pMegaTarget,
+		AbstractClass* pFallbackDestination)
+	{
+		pFoot->SetTarget(nullptr);
+		pFoot->SetArchiveTarget(nullptr);
+		pFoot->MegaMission = Mission::AttackMove;
+		pFoot->MegaDestination = pMegaDestination;
+		pFoot->MegaTarget = pMegaTarget;
+		pFoot->HaveAttackMoveTarget = false;
+		pFoot->SetDestination(pFoot->MegaDestination ? pFoot->MegaDestination : pFallbackDestination, true);
+		ForceOrQueueMission(pFoot, Mission::Move, true);
+	}
+
 	bool IssueMoveOrder(FootClass* pFoot, AbstractClass* pDest, double keepWithinCells = 1.5,
 		const char* callerFile = __builtin_FILE(), int callerLine = __builtin_LINE())
 	{
