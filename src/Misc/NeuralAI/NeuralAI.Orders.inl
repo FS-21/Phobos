@@ -1192,40 +1192,32 @@ namespace
 
 		const CellStruct tc = pTrans->GetMapCoords();
 
+		// Boarding pTrans, or on an Enter mission whose destination is beside it.
+		auto boardsThis = [pTrans, tc](FootClass* pFoot)
+		{
+			if (!pFoot || pFoot->Owner != pTrans->Owner || pFoot->InLimbo || !pFoot->IsAlive)
+				return false;
+
+			if (pFoot->CurrentMission != Mission::Enter && pFoot->QueuedMission != Mission::Enter)
+				return false;
+
+			if (IsFootBoarding(pFoot, pTrans))
+				return true;
+
+			return pFoot->Destination != nullptr && pFoot->GetMapCoords().DistanceFrom(tc) <= 6.0
+				&& CellClass::Coord2Cell(pFoot->Destination->GetCoords()).DistanceFrom(tc) <= 3.0;
+		};
+
 		for (auto const pU : UnitClass::Array)
 		{
-			if (!pU || pU == pTrans || pU->Owner != pTrans->Owner || pU->InLimbo || !pU->IsAlive)
-				continue;
-
-			if (pU->CurrentMission != Mission::Enter && pU->QueuedMission != Mission::Enter)
-				continue;
-
-			if (pU->ContainsLink(pTrans) || pU->ArchiveTarget == pTrans || pU->Destination == pTrans)
+			if (pU != pTrans && boardsThis(pU))
 				return true;
-
-			if (pU->Destination != nullptr && pU->GetMapCoords().DistanceFrom(tc) <= 6.0
-				&& CellClass::Coord2Cell(pU->Destination->GetCoords()).DistanceFrom(tc) <= 3.0)
-			{
-				return true;
-			}
 		}
 
 		for (auto const pI : InfantryClass::Array)
 		{
-			if (!pI || pI->Owner != pTrans->Owner || pI->InLimbo || !pI->IsAlive)
-				continue;
-
-			if (pI->CurrentMission != Mission::Enter && pI->QueuedMission != Mission::Enter)
-				continue;
-
-			if (pI->ContainsLink(pTrans) || pI->ArchiveTarget == pTrans || pI->Destination == pTrans)
+			if (boardsThis(pI))
 				return true;
-
-			if (pI->Destination != nullptr && pI->GetMapCoords().DistanceFrom(tc) <= 6.0
-				&& CellClass::Coord2Cell(pI->Destination->GetCoords()).DistanceFrom(tc) <= 3.0)
-			{
-				return true;
-			}
 		}
 
 		return false;

@@ -2139,6 +2139,14 @@ namespace
 		return IsKnownByVisionRule(CurrentSightMap[idx] != 0, VisionMap[idx] != 0, false);
 	}
 
+	// The unit is boarding pTarget: an Enter mission (current or queued) bound to it by radio
+	// contact, archive target or destination.
+	bool IsFootBoarding(const FootClass* pFoot, const TechnoClass* pTarget)
+	{
+		return (pFoot->CurrentMission == Mission::Enter || pFoot->QueuedMission == Mission::Enter)
+			&& (pFoot->ContainsLink(pTarget) || pFoot->ArchiveTarget == pTarget || pFoot->Destination == pTarget);
+	}
+
 	// A spy: it enters enemy buildings for the spy effects (Agent=). The engine also sets Infiltrate
 	// on engineers and C4 commandos, which fight or capture instead.
 	bool IsSpyInfantryType(const InfantryTypeClass* pType)

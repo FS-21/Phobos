@@ -14360,10 +14360,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			if (!pCand || pCand->Owner != pHouse || pCand->InLimbo || !pCand->IsAlive || pCand == pTransport)
 				return;
 
-			const bool isEnteringThis = (pCand->CurrentMission == Mission::Enter || pCand->QueuedMission == Mission::Enter)
-				&& (pCand->ContainsLink(pTransport) || pCand->ArchiveTarget == pTransport
-					|| pCand->Destination == pTransport);
-			if (!isEnteringThis)
+			if (!IsFootBoarding(pCand, pTransport))
 				return;
 
 			const int cz = ObjectZone(pCand, MovementZone::Normal);
@@ -14393,10 +14390,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				return;
 			}
 
-			const bool isTargetingThis = (pCand->CurrentMission == Mission::Enter || pCand->QueuedMission == Mission::Enter)
-				&& (pCand->ContainsLink(pTransport) || pCand->ArchiveTarget == pTransport
-					|| pCand->Destination == pTransport);
-			if (!isTargetingThis)
+			if (!IsFootBoarding(pCand, pTransport))
 				return;
 
 			if (pCand->ContainsLink(pTransport))
@@ -16646,8 +16640,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				&& CanPassengerFitInTransport(pTrans, pHomeIslandEngineer->Type)
 				&& CanTransportTypeLink(pTrans->Type, pHomeIslandEngineer->GetMapCoords(), pIslandTechGoalCell->MapCoords)
 				&& !((pHomeIslandEngineer->CurrentMission == Mission::Enter || pHomeIslandEngineer->QueuedMission == Mission::Enter)
-					&& !pHomeIslandEngineer->ContainsLink(pTrans) && pHomeIslandEngineer->ArchiveTarget != pTrans
-					&& pHomeIslandEngineer->Destination != pTrans))
+					&& !IsFootBoarding(pHomeIslandEngineer, pTrans)))
 			{
 				engineerTransportAssigned = true;
 				const int engZone = ObjectZone(pHomeIslandEngineer, MovementZone::Normal);
@@ -16716,8 +16709,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 						return;
 
 					if ((pCand->CurrentMission == Mission::Enter || pCand->QueuedMission == Mission::Enter)
-						&& !pCand->ContainsLink(pTrans) && pCand->ArchiveTarget != pTrans
-						&& pCand->Destination != pTrans)
+						&& !IsFootBoarding(pCand, pTrans))
 					{
 						return; // Already boarding a different transport
 					}
