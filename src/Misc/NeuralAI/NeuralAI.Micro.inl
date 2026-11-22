@@ -410,9 +410,10 @@ static int CountOwnFootsGoingFor(const TArray& array, const HouseClass* pHouse, 
 
 // Fires the superweapon at the visible enemy foot of the array (InfantryClass::Array or
 // UnitClass::Array) whose cell with its 3x3 neighbours scores most: scoreOf is summed over every
-// visible enemy foot of the array in that square. The candidates go in array order, the score must
-// beat minScore and a later one wins only with more, and the cell must be open to the superweapon
-// (MaySuperweaponHit). The filter is the candidate's own extra test. True when it is fired.
+// visible enemy foot of the array in that square, neutrals left out. The candidates go in array
+// order, the score must beat minScore and a later one wins only with more, and the cell must be open
+// to the superweapon (MaySuperweaponHit). The filter is the candidate's own extra test. True when it
+// is fired.
 template <typename TArray, typename TFilter, typename TScore>
 static bool LaunchAtBestEnemyCluster(const TArray& array, HouseClass* pHouse, SuperClass* pSuper, int minScore,
 	TFilter&& filter, TScore&& scoreOf)
@@ -439,8 +440,12 @@ static bool LaunchAtBestEnemyCluster(const TArray& array, HouseClass* pHouse, Su
 			if (!pOther || pOther->InLimbo || !pOther->IsAlive || !pOther->Owner)
 				continue;
 
-			if (pOther->Owner == pHouse || pHouse->IsAlliedWith(pOther->Owner) || !IsCellVisibleToAI(pHouse, pOther->GetCell()))
+			// Neutrals are left out here as they are of the candidates: they do not make the cluster.
+			if (pOther->Owner == pHouse || pHouse->IsAlliedWith(pOther->Owner) || pOther->Owner->IsNeutral()
+				|| !IsCellVisibleToAI(pHouse, pOther->GetCell()))
+			{
 				continue;
+			}
 
 			const CellStruct oc = pOther->GetMapCoords();
 
