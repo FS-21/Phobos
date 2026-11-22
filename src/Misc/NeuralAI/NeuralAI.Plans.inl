@@ -5,6 +5,8 @@ namespace
 {
 	int AirSortieDamageVs(AircraftClass* pAir, BuildingClass* pTarget);
 	bool IsWingStrikeType(AircraftTypeClass* pType);
+	bool PlanSafeGroundRoute(HouseClass* pHouse, FootClass* pLead, const CellStruct& goal, std::vector<CellStruct>& waypoints,
+		int& danger, int& straightDanger);
 
 	bool IsPlanMember(HouseClass* pHouse, DWORD uid)
 	{
@@ -3294,6 +3296,89 @@ namespace
 				|| groupValue * 100 >= it->second.Strength * PlanLessonAdvantagePercent;
 		};
 
+		// The leg of a raid's safe route its ground members march along now (PlanRoute*): the next waypoint
+		// ahead of the group's centre, Empty once past the last one or with no route.
+		auto routeLeg = [&](NeuralPlanId id, NeuralPlanInstance& plan, const CellStruct& goal) -> CellStruct
+		{
+			int sumX = 0;
+			int sumY = 0;
+			std::vector<FootClass*> ground;
+
+			for (const DWORD uid : plan.Members)
+			{
+				auto const itFoot = ownFoots.find(uid);
+				auto const pFoot = itFoot != ownFoots.end() ? itFoot->second : nullptr;
+
+				if (!pFoot || pFoot->WhatAmI() == AbstractType::Aircraft || pFoot->IsInAir())
+					continue;
+
+				const CellStruct at = pFoot->GetMapCoords();
+				sumX += at.X;
+				sumY += at.Y;
+				ground.push_back(pFoot);
+			}
+
+			if (ground.empty() || goal == CellStruct::Empty)
+				return CellStruct::Empty;
+
+			const int count = static_cast<int>(ground.size());
+			const CellStruct centre { static_cast<short>(sumX / count), static_cast<short>(sumY / count) };
+			const int now = Unsorted::CurrentFrame;
+
+			if (plan.RouteFrame < 0 || now < plan.RouteFrame || now - plan.RouteFrame >= PlanRouteReplanFrames)
+			{
+				// The member nearest the centre leads (the first such in member order).
+				FootClass* pLead = ground.front();
+				double leadGap = pLead->GetMapCoords().DistanceFrom(centre);
+
+				for (auto const pFoot : ground)
+				{
+					const double gap = pFoot->GetMapCoords().DistanceFrom(centre);
+
+					if (gap < leadGap)
+					{
+						leadGap = gap;
+						pLead = pFoot;
+					}
+				}
+
+				const bool first = plan.RouteFrame < 0;
+				int danger = 0;
+				int straightDanger = 0;
+				plan.RouteFrame = now;
+
+				if (!PlanSafeGroundRoute(pHouse, pLead, goal, plan.Route, danger, straightDanger))
+					plan.Route.clear();
+
+				// TEMP diagnostic: the first route of each raid.
+				if (first)
+				{
+					Debug::Log("[NeuralAI] House %d plan %s safe route: %d waypoints, danger %d (straight %d), %d cells to go, frame %d.\n",
+						houseIdx, NeuralPlanNames[static_cast<size_t>(id)], static_cast<int>(plan.Route.size()), danger, straightDanger,
+						static_cast<int>(centre.DistanceFrom(goal)), now);
+				}
+			}
+
+			while (!plan.Route.empty() && centre.DistanceFrom(plan.Route.front()) <= PlanRouteWaypointCells)
+				plan.Route.erase(plan.Route.begin());
+
+			return plan.Route.empty() ? CellStruct::Empty : plan.Route.front();
+		};
+
+		// Whether a ground member marching alone has to be sent (again) toward goal: it dropped out of its
+		// attack-move, or with a route (routed) its attack-move goes elsewhere by more than PlanRouteLegSlackCells.
+		auto marchNeedsOrder = [](FootClass* pFoot, const CellStruct& goal, bool routed) -> bool
+		{
+			if (pFoot->Target != nullptr)
+				return false;
+
+			if (pFoot->MegaMission != Mission::AttackMove)
+				return true;
+
+			return routed && (!pFoot->MegaDestination
+				|| CellClass::Coord2Cell(pFoot->MegaDestination->GetCoords()).DistanceFrom(goal) > PlanRouteLegSlackCells);
+		};
+
 		// ---------------------------------------------------------------- Plan 1: Eco Raid
 		// A small group of the fastest idle armed units attack-moves into a known enemy
 		// refinery that has no known defenses around it, kills harvesters, then goes home.
@@ -3320,6 +3405,10 @@ namespace
 					int sumX = 0;
 					int sumY = 0;
 					int alive = 0;
+					// The leg of its safe route (routeLeg), then the refinery.
+					const CellStruct leg = routeLeg(NeuralPlanId::EcoRaid, plan, plan.TargetCell);
+					auto const pLegCell = leg != CellStruct::Empty ? MapClass::Instance.TryGetCellAt(leg) : nullptr;
+					auto const pGoalCell = pLegCell ? pLegCell : pTargetCell;
 
 					for (const DWORD uid : plan.Members)
 					{
@@ -3334,10 +3423,11 @@ namespace
 						sumY += fc.Y;
 						alive++;
 
-						// Re-issue only when the unit dropped out of its attack-move (the order resolves a
-						// building cell to an adjacent free cell, so comparing destinations would churn).
-						if (pFoot->Target == nullptr && pFoot->MegaMission != Mission::AttackMove && !IsOnRepairTrip(pHouse, uid))
-							OrderFootToAttackMove(pFoot, pTargetCell);
+						// Re-issue when the unit dropped out of its attack-move, or when its attack-move goes
+						// elsewhere than the leg or the refinery by more than PlanRouteLegSlackCells (the order
+						// resolves a building cell to an adjacent free cell, so an exact comparison would churn).
+						if (!IsOnRepairTrip(pHouse, uid) && marchNeedsOrder(pFoot, pGoalCell->MapCoords, plan.RouteFrame >= 0))
+							OrderFootToAttackMove(pFoot, pGoalCell);
 					}
 
 					if (alive > 0 && !plan.Arrived
@@ -5120,8 +5210,9 @@ namespace
 			return strikers;
 		};
 
-		// Aircraft re-strike their target after re-arming; ground members attack it when close.
-		auto strikeWithMembers = [&](const std::vector<DWORD>& uids, TechnoClass* pTarget)
+		// Aircraft re-strike their target after re-arming; ground members attack it when close. With pLeg
+		// (a raid by a safe route, routeLeg) the ground members far from the target march along it.
+		auto strikeWithMembers = [&](const std::vector<DWORD>& uids, TechnoClass* pTarget, const CellStruct* pLeg = nullptr)
 		{
 			if (!pTarget)
 				return;
@@ -5150,7 +5241,12 @@ namespace
 						pFoot->QueueMission(Mission::Attack, true);
 					}
 				}
-				else if (pFoot->Target == nullptr && pFoot->MegaMission != Mission::AttackMove)
+				else if (pLeg && *pLeg != CellStruct::Empty)
+				{
+					if (marchNeedsOrder(pFoot, *pLeg, true))
+						OrderFootToAttackMove(pFoot, MapClass::Instance.TryGetCellAt(*pLeg));
+				}
+				else if (marchNeedsOrder(pFoot, pTarget->GetMapCoords(), pLeg != nullptr))
 				{
 					OrderFootToAttackMove(pFoot, pTarget->GetCell());
 				}
@@ -11628,10 +11724,13 @@ namespace
 				}
 				else
 				{
+					// The ground members march along the safe route to the first factory (routeLeg).
+					const CellStruct leg = routeLeg(NeuralPlanId::FactoryDecapitation, plan, plan.TargetCell);
+
 					for (size_t i = 0; i < plan.Members.size(); ++i)
 					{
 						auto const pAssigned = FindBuildingByID(plan.Targets[i * plan.Targets.size() / plan.Members.size()]);
-						strikeWithMembers({ plan.Members[i] }, pAssigned ? pAssigned : standing.front());
+						strikeWithMembers({ plan.Members[i] }, pAssigned ? pAssigned : standing.front(), &leg);
 					}
 				}
 			}
@@ -12038,9 +12137,15 @@ namespace
 				if (!pTarget)
 					finishPlan(NeuralPlanId::TechTreeCut, true, true);
 				else if (memberValue(plan) * 100 < plan.InitialValue * 40 || Unsorted::CurrentFrame >= plan.Deadline)
+				{
 					finishPlan(NeuralPlanId::TechTreeCut, false, true);
+				}
 				else
-					strikeWithMembers(plan.Members, pTarget);
+				{
+					// The ground members march along the safe route to the target (routeLeg).
+					const CellStruct leg = routeLeg(NeuralPlanId::TechTreeCut, plan, pTarget->GetMapCoords());
+					strikeWithMembers(plan.Members, pTarget, &leg);
+				}
 			}
 			else if (planReady(NeuralPlanId::TechTreeCut))
 			{

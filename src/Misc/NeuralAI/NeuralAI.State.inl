@@ -173,6 +173,10 @@ namespace
 		int InitialStrength { 0 };
 		// The house that owns the target building (-1 none), for the lesson a beaten raid leaves.
 		int TargetOwner { -1 };
+		// The safe route of a raid (PlanRouteLeg): the waypoints still ahead, and when it was planned
+		// (-1 never).
+		std::vector<CellStruct> Route {};
+		int RouteFrame { -1 };
 		// Airborne Front: its transport has parked by its soldiers to take them in.
 		bool BoardingParked { false };
 		// Airborne Front: the frame its transport first parked by its soldiers (-1 not yet).
@@ -3779,6 +3783,16 @@ namespace
 	constexpr int PlanLessonFrames = 9000;
 	// A raid the gate of startPlan held back is weighed again after this long.
 	constexpr int PlanGateRetryFrames = 900;
+	// Raids by safe routes (user, 2026-11-22: «Yes, safe routes»: eco raids lost their groups about 47 cells
+	// from the target to enemies in sight): Eco Raid, Tech Tree Cut and Factory Decapitation march their
+	// ground members waypoint by waypoint along the route PlanOpRoute gives over the danger map of the
+	// known enemy defenses and units, planned again every PlanRouteReplanFrames from the member nearest
+	// the group's centre; a waypoint is behind them once that centre is within PlanRouteWaypointCells of
+	// it, and after the last one they go for the target as before.
+	constexpr int PlanRouteReplanFrames = 900;
+	constexpr double PlanRouteWaypointCells = 6.0;
+	// A member on its way to another goal than its leg's by more than this is sent along the leg.
+	constexpr double PlanRouteLegSlackCells = 4.0;
 	// TEMP diagnostic (user approved, 2026-11-22, «Everything»: the raids lose their groups about 50
 	// cells from the target while no stronger enemy is seen around them): each member of a plan that dies
 	// before its plan arrived, with its killer, at most PlanMarchDeathLines a house and match.
