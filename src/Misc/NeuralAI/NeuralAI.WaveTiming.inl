@@ -820,12 +820,22 @@ namespace
 		return false;
 	}
 
-	// Held to fill (PassengerFill*): the waves and the plans leave it out.
-	bool IsPassengerFillHeld(HouseClass* pHouse, DWORD uid)
+	// Held to fill (PassengerFill*): the waves and the plans leave it out. An open-topped vehicle free of
+	// the waves and operations with seats left is held from the moment it is free, between two checks of
+	// UpdatePassengerFill too (a new one came out of its factory and a wave took it first).
+	bool IsPassengerFillHeld(HouseClass* pHouse, FootClass* pFoot)
 	{
 		auto const& macro = GetMacroState(pHouse);
+		const DWORD uid = pFoot->UniqueID;
 
-		return macro.PassengerFillHolds.contains(uid) || macro.PassengerFillUntilFull.contains(uid);
+		if (macro.PassengerFillHolds.contains(uid) || macro.PassengerFillUntilFull.contains(uid))
+			return true;
+
+		auto const pUnit = abstract_cast<UnitClass*>(pFoot);
+
+		return pUnit && pUnit->Type->OpenTopped && IsSeatedFightingVehicleType(pUnit->Type) && macro.PassengerFieldsSoldiers
+			&& SeatedFightingVehicleSeatsLeft(pUnit) > 0 && !macro.WaveGoals.contains(uid) && !IsInTransportOp(pHouse, uid)
+			&& !IsPlanMember(pHouse, uid);
 	}
 
 	bool OrderPlanSoldierAboard(FootClass* pSoldier, UnitClass* pVehicle);
@@ -996,6 +1006,7 @@ namespace
 		// Soldiers to come: a barracks of ours (an open-topped vehicle waits to fill only then).
 		const bool fieldsSoldiers = std::any_of(pHouse->Buildings.begin(), pHouse->Buildings.end(), [](BuildingClass* pBld)
 			{ return pBld && pBld->IsAlive && !pBld->InLimbo && pBld->Type && pBld->Type->Factory == AbstractType::InfantryType; });
+		macro.PassengerFieldsSoldiers = fieldsSoldiers;
 		int seatsWanted = 0;
 		int vehicles = 0;
 		int full = 0;

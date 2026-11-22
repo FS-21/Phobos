@@ -1618,8 +1618,10 @@ namespace
 		// with the frame the hold began, and the ones whose last hold is over, with the frame it ended.
 		std::unordered_map<DWORD, int> PassengerFillHolds {};
 		std::unordered_map<DWORD, int> PassengerFillDone {};
-		// The open-topped vehicles kept out of every mission until full (UpdatePassengerFill).
+		// The open-topped vehicles kept out of every mission until full (UpdatePassengerFill), and whether
+		// the house has a barracks (read when one is recruited between two checks).
 		std::unordered_set<DWORD> PassengerFillUntilFull {};
+		bool PassengerFieldsSoldiers { false };
 		int PassengerFillFrame { -1 };
 		// Seats the held vehicles still have (the infantry pick reads it).
 		int PassengerSeatsWanted { 0 };
@@ -2218,6 +2220,7 @@ namespace
 			this->PassengerFillHolds.clear();
 			this->PassengerFillDone.clear();
 			this->PassengerFillUntilFull.clear();
+			this->PassengerFieldsSoldiers = false;
 			this->PassengerFillFrame = -1;
 			this->PassengerSeatsWanted = 0;
 			this->PassengerLogFrame = -1;

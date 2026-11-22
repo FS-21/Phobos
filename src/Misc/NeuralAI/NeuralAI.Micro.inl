@@ -11263,7 +11263,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			|| (pUnit->CurrentMission == Mission::Move && pUnit->MegaMission == Mission::AttackMove) || isFinishedMove(pUnit))
 		{
 			// A seated fighting vehicle held at home to fill (UpdatePassengerFill) waits for its soldiers.
-			if (IsPassengerFillHeld(pHouse, pUnit->UniqueID))
+			if (IsPassengerFillHeld(pHouse, pUnit))
 				++notIdlePlan;
 			else if (!IsPlanMember(pHouse, pUnit->UniqueID))
 				idleCombatUnits.push_back(pUnit);

@@ -2568,7 +2568,7 @@ namespace
 			// A seated fighting vehicle held to fill (IsPassengerFillHeld) goes once full.
 			if (!pFoot || macro.PlanMembers.contains(pFoot->UniqueID) || IsOnRepairTrip(pHouse, pFoot->UniqueID)
 				|| IsInTransportOp(pHouse, pFoot->UniqueID) || macro.TankGuard.contains(pFoot->UniqueID)
-				|| IsPassengerFillHeld(pHouse, pFoot->UniqueID))
+				|| IsPassengerFillHeld(pHouse, pFoot))
 				return false;
 
 			// A slave obeys its slave master only: it goes back to work whatever a plan orders, and
