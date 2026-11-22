@@ -3420,18 +3420,18 @@ namespace
 							return sa != sb ? sa > sb : a->UniqueID < b->UniqueID;
 						});
 
-					// Three vehicles make a raid; with soldiers among the fastest five it takes four of
-					// them and up to six, since they hit harvesters softer.
-					size_t raidSize = std::min<size_t>(candidates.size(), 5);
+					// EcoRaidVehiclesLeast vehicles make a raid; with soldiers among the fastest it takes
+					// EcoRaidSoldiersLeast of them or more, since they hit harvesters softer.
+					size_t raidSize = std::min(candidates.size(), EcoRaidVehiclesMost);
 					bool onFoot = false;
 
 					for (size_t i = 0; i < raidSize; ++i)
 						onFoot = onFoot || candidates[i]->WhatAmI() == AbstractType::Infantry;
 
 					if (onFoot)
-						raidSize = std::min<size_t>(candidates.size(), 6);
+						raidSize = std::min(candidates.size(), EcoRaidSoldiersMost);
 
-					if (raidSize >= (onFoot ? 4u : 3u))
+					if (raidSize >= (onFoot ? EcoRaidSoldiersLeast : EcoRaidVehiclesLeast))
 					{
 						candidates.resize(raidSize);
 						startPlan(NeuralPlanId::EcoRaid, candidates, pBestRefinery->GetMapCoords(), CellStruct::Empty,
@@ -11648,9 +11648,9 @@ namespace
 					sortFastest(ground);
 					group.insert(group.end(), ground.begin(), ground.end());
 				}
-				group.resize(std::min(group.size(), std::max(factories.size() * 3, group.size() / PlanStrikeIdleShare)));
+				group.resize(std::min(group.size(), std::max(factories.size() * FactoryDecapitationMostPerFactory, group.size() / PlanStrikeIdleShare)));
 
-				const int utility = (factories.size() >= 2 && group.size() >= factories.size() * 2) ? 310 : -1000;
+				const int utility = (factories.size() >= 2 && group.size() >= factories.size() * FactoryDecapitationLeastPerFactory) ? 310 : -1000;
 
 				if (utility > 0 && shouldTryStart(NeuralPlanId::FactoryDecapitation, utility))
 				{
@@ -12066,7 +12066,7 @@ namespace
 					}
 				}
 
-				std::vector<FootClass*> group = pickStrikeGroup(pTarget, 5, 10);
+				std::vector<FootClass*> group = pickStrikeGroup(pTarget, TechTreeCutMinGround, TechTreeCutMaxGround);
 				const int utility = (pTarget && !group.empty()) ? (300 + std::min(250, bestValue)) : -1000;
 
 				if (utility > 0 && shouldTryStart(NeuralPlanId::TechTreeCut, utility))
