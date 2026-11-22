@@ -3,6 +3,20 @@
 
 namespace
 {
+	// A unit that needs no transport over water or cliffs: amphibious, hovering, flying, burrowing,
+	// teleporting, or a ship.
+	bool CrossesWaterAlone(const TechnoTypeClass* pType)
+	{
+		if (!pType)
+			return false;
+
+		return pType->MovementZone == MovementZone::Amphibious || pType->MovementZone == MovementZone::AmphibiousDestroyer
+			|| pType->MovementZone == MovementZone::AmphibiousCrusher || pType->MovementZone == MovementZone::Fly
+			|| pType->MovementZone == MovementZone::Subterrannean || pType->MovementZone == MovementZone::Water
+			|| pType->SpeedType == SpeedType::Hover || pType->SpeedType == SpeedType::Winged || pType->JumpJet || pType->Teleporter
+			|| pType->Naval;
+	}
+
 	bool IsAmphibiousOrAirTransport(const TechnoTypeClass* pType)
 	{
 		if (!pType || pType->Passengers < 4)
@@ -282,11 +296,7 @@ namespace
 		const unsigned sources = query.Sources;
 		const unsigned rules = query.Rules;
 
-		if ((rules & CarryAloneIsYes) && pCargo && (pCargo->MovementZone == MovementZone::Amphibious
-			|| pCargo->MovementZone == MovementZone::AmphibiousDestroyer || pCargo->MovementZone == MovementZone::AmphibiousCrusher
-			|| pCargo->MovementZone == MovementZone::Fly || pCargo->MovementZone == MovementZone::Subterrannean
-			|| pCargo->MovementZone == MovementZone::Water || pCargo->SpeedType == SpeedType::Hover
-			|| pCargo->SpeedType == SpeedType::Winged || pCargo->JumpJet || pCargo->Teleporter || pCargo->Naval))
+		if ((rules & CarryAloneIsYes) && CrossesWaterAlone(pCargo))
 		{
 			return true;
 		}
