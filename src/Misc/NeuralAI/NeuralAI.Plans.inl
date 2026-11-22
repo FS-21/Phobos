@@ -9259,6 +9259,34 @@ namespace
 				return missing;
 			};
 
+			// A cell for pType at the site next to pYard now (FindSpatialTetrisBuildCell, as placement reads
+			// the site): a site plan starts only with room there for its first building, and with none it
+			// waits PlanGateRetryFrames (user approved, 2026-11-22, «Everything»: 63 of 73 site plans ended
+			// badly, 20 of them for want of a cell at the site).
+			auto const siteHasRoom = [&](NeuralPlanId id, BuildingClass* pYard, const CellStruct& site, BuildingTypeClass* pType, int deadline)
+			{
+				macro.AllySiteBuildType = pType->ArrayIndex;
+				macro.AllySiteCell = site;
+				macro.AllySiteYardCell = pYard->GetMapCoords();
+				macro.AllySiteUntilFrame = deadline;
+				const bool room = NeuralAI::FindSpatialTetrisBuildCell(pHouse, pType) != CellStruct::Empty;
+				clearSite();
+
+				if (!room)
+					macro.PlanNextAttemptFrame[static_cast<size_t>(id)] = Unsorted::CurrentFrame + PlanGateRetryFrames;
+
+				return room;
+			};
+
+			// TEMP diagnostic: why a site plan ended badly.
+			auto const endSiteBadly = [&](NeuralPlanId id, NeuralPlanInstance& plan, const char* reason)
+			{
+				Debug::Log("[NeuralAI] House %d plan %s site ended: %s, after %d frames, frame %d.\n", houseIdx,
+					NeuralPlanNames[static_cast<size_t>(id)], reason, Unsorted::CurrentFrame - plan.StartFrame, Unsorted::CurrentFrame);
+				clearSite();
+				finishPlan(id, false, false);
+			};
+
 			// Drives an active site plan: the next missing building, or the end of the plan.
 			auto runSite = [&](NeuralPlanId id, NeuralPlanInstance& plan, std::vector<BuildingTypeClass*> const& missing, bool ok)
 			{
@@ -9267,8 +9295,9 @@ namespace
 				if (!pYard || !pYard->Owner || !pHouse->IsAlliedWith(pYard->Owner) || pHouse->ConYards.Count == 0
 					|| Unsorted::CurrentFrame >= plan.Deadline || !ok || macro.AllySiteFailedFrame >= plan.StartFrame)
 				{
-					clearSite();
-					finishPlan(id, false, false);
+					endSiteBadly(id, plan, !pYard ? "ally yard gone" : (!pYard->Owner || !pHouse->IsAlliedWith(pYard->Owner)) ? "no longer allied"
+						: pHouse->ConYards.Count == 0 ? "no ConYard of ours" : Unsorted::CurrentFrame >= plan.Deadline ? "deadline"
+						: !ok ? "building list unavailable" : "placement found no room");
 					return;
 				}
 
@@ -9283,8 +9312,7 @@ namespace
 
 				if (placementBlocked(pNext) || !AllyKeepsRoomFor(pYard, pNext))
 				{
-					clearSite();
-					finishPlan(id, false, false);
+					endSiteBadly(id, plan, placementBlocked(pNext) ? "placement blocked" : "ally needs the room");
 					return;
 				}
 
@@ -9305,10 +9333,7 @@ namespace
 					macro.AllySiteReservedCell = NeuralAI::FindSpatialTetrisBuildCell(pHouse, pNext);
 
 					if (macro.AllySiteReservedCell == CellStruct::Empty)
-					{
-						clearSite();
-						finishPlan(id, false, false);
-					}
+						endSiteBadly(id, plan, "no cell at the site");
 				}
 			};
 
@@ -9370,9 +9395,11 @@ namespace
 						? 380 + (activeExpert == 9 || activeExpert == 1 ? 200 : 0) + (pHouse->ConYards.Count == 1 ? 150 : 0)
 						: -1000;
 
-					if (utility > 0 && shouldTryStart(NeuralPlanId::AllyBackup, utility))
+					const CellStruct site = fits ? AllySiteCellFor(pBest, threat, true, 0) : CellStruct::Empty;
+
+					if (utility > 0 && siteHasRoom(NeuralPlanId::AllyBackup, pBest, site, missing.front(), Unsorted::CurrentFrame + 9000)
+						&& shouldTryStart(NeuralPlanId::AllyBackup, utility))
 					{
-						const CellStruct site = AllySiteCellFor(pBest, threat, true, 0);
 						startPlan(NeuralPlanId::AllyBackup, std::vector<FootClass*> {}, pBest->GetMapCoords(), site, pBest->UniqueID, 9000);
 					}
 				}
@@ -9421,11 +9448,13 @@ namespace
 					const bool fits = !missing.empty() && money >= missingCost + 1500 && AllyKeepsRoomFor(pBest, missing.front());
 					const int utility = fits ? 330 + 150 + static_cast<int>(std::min(120.0, ourFront - bestDist)) : -1000;
 
-					if (utility > 0 && shouldTryStart(NeuralPlanId::AllyForwardOutpost, utility))
+					// On the flank toward the enemy, not in the ally's line of fire or its exits.
+					const int side = (houseIdx % 2 == 0) ? 6 : -6;
+					const CellStruct site = fits ? AllySiteCellFor(pBest, knownEnemyCentroid, false, side) : CellStruct::Empty;
+
+					if (utility > 0 && siteHasRoom(NeuralPlanId::AllyForwardOutpost, pBest, site, missing.front(), Unsorted::CurrentFrame + 9000)
+						&& shouldTryStart(NeuralPlanId::AllyForwardOutpost, utility))
 					{
-						// On the flank toward the enemy, not in the ally's line of fire or its exits.
-						const int side = (houseIdx % 2 == 0) ? 6 : -6;
-						const CellStruct site = AllySiteCellFor(pBest, knownEnemyCentroid, false, side);
 						startPlan(NeuralPlanId::AllyForwardOutpost, std::vector<FootClass*> {}, pBest->GetMapCoords(), site, pBest->UniqueID, 9000);
 					}
 				}
