@@ -3336,7 +3336,9 @@ namespace
 	// at most EdgeBlitzTargetDefenses known defenses within EdgeBlitzDefenseCells. It ends after
 	// EdgeBlitzFrames, or when the group keeps less than EdgeBlitzKeepPercent of its value. TEMP: the starts,
 	// EdgeBlitzLogLines a match.
-	constexpr size_t EdgeBlitzGroupLeast = 4;
+	// The first blitz goes with EdgeBlitzGroupLeast (user, 2026-11-22, «Everything»: 57% of 309 blitzes
+	// set out with 4 units or fewer and 28% ended well).
+	constexpr size_t EdgeBlitzGroupLeast = 8;
 	// The group a house sends (EdgeBlitzSize) doubles after each failed blitz, up to EdgeBlitzGroupMost,
 	// as the tank mass grows: the bigger group wins (user, 2026-11-20). It waits for that many idle units.
 	constexpr size_t EdgeBlitzGroupMost = 32;
@@ -3772,6 +3774,22 @@ namespace
 	// 2026-11-18 none sent a raid of 16.
 	// The targets change RaidSwitchFrames after a group reached its own (or once one falls).
 	constexpr int RaidBaseGroup = 8;
+	// Eco Raid: the fastest armed vehicles, EcoRaidVehiclesLeast to EcoRaidVehiclesMost; with soldiers
+	// among them EcoRaidSoldiersLeast to EcoRaidSoldiersMost, since they hit harvesters softer (user,
+	// 2026-11-22, «Everything»: raids of 3 to 6 averaged 4.8 units, 34% of 102 ended well, the others lost
+	// on the way about 55 cells from the target).
+	constexpr size_t EcoRaidVehiclesLeast = 6;
+	constexpr size_t EcoRaidVehiclesMost = 10;
+	constexpr size_t EcoRaidSoldiersLeast = 8;
+	constexpr size_t EcoRaidSoldiersMost = 12;
+	// Tech Tree Cut and Factory Decapitation by land: TechTreeCutMinGround to TechTreeCutMaxGround idle
+	// ground units; a decapitation takes FactoryDecapitationLeastPerFactory to
+	// FactoryDecapitationMostPerFactory units per factory it goes for (2026-11-22: 36% of 144 and of 221
+	// ended well, most losing the group on the way).
+	constexpr size_t TechTreeCutMinGround = 8;
+	constexpr size_t TechTreeCutMaxGround = 16;
+	constexpr size_t FactoryDecapitationLeastPerFactory = 4;
+	constexpr size_t FactoryDecapitationMostPerFactory = 6;
 	constexpr int RaidMostGroup = 24;
 	constexpr int RaidLessonMaxSteps = 2;
 	constexpr int RaidLessonStepFrames = PlanLessonFrames;
@@ -4637,7 +4655,8 @@ namespace
 	constexpr int CounterSquadSeenFrames = 450;
 	constexpr int CounterSquadFitMin = 80;
 	constexpr int CounterSquadFitEdge = 25;
-	constexpr size_t CounterSquadMinMembers = 4;
+	// 37% of 46 squads of 4 or more ended well (2026-11-22): the bigger group wins.
+	constexpr size_t CounterSquadMinMembers = 6;
 	constexpr size_t CounterSquadMaxMembers = 20;
 	constexpr int CounterSquadAdvantagePercent = 110;
 	constexpr int CounterSquadEnoughPercent = 200;
