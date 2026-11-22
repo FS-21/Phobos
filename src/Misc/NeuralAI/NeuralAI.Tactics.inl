@@ -2819,6 +2819,18 @@ namespace
 		}
 	}
 
+	// The standing building of this house (alive, on the map) with this UniqueID, or null.
+	BuildingClass* FindOwnStandingBuildingByID(HouseClass* pHouse, DWORD id)
+	{
+		for (auto const pBld : pHouse->Buildings)
+		{
+			if (pBld && pBld->IsAlive && !pBld->InLimbo && pBld->UniqueID == id)
+				return pBld;
+		}
+
+		return nullptr;
+	}
+
 	// Offensive crawl bookkeeping: confirm the cells chosen for stones toward the enemy once a
 	// structure of ours stands there, then count the confirmed stones that are destroyed. The
 	// trainer credits slots 38 / 81 with how well forward stones survive.
@@ -2916,18 +2928,7 @@ namespace
 
 		for (const DWORD id : macro.OffensiveStones)
 		{
-			bool found = false;
-
-			for (auto const pB : pHouse->Buildings)
-			{
-				if (pB && pB->IsAlive && !pB->InLimbo && pB->UniqueID == id)
-				{
-					found = true;
-					break;
-				}
-			}
-
-			if (found)
+			if (FindOwnStandingBuildingByID(pHouse, id))
 				alive.push_back(id);
 			else
 				CountDecision(NeuralDecision::CrawlStoneLost, pHouse->ArrayIndex);
@@ -2944,13 +2945,9 @@ namespace
 		if (stones.empty())
 			return CellStruct::Empty;
 
-		for (auto const pOwnB : pHouse->Buildings)
-		{
-			if (pOwnB && pOwnB->IsAlive && !pOwnB->InLimbo && pOwnB->UniqueID == stones.back())
-				return pOwnB->GetMapCoords();
-		}
+		auto const pFront = FindOwnStandingBuildingByID(pHouse, stones.back());
 
-		return CellStruct::Empty;
+		return pFront ? pFront->GetMapCoords() : CellStruct::Empty;
 	}
 
 	// Resource hoarder (Expert 6 at full strength, every house a little): the best ore field we

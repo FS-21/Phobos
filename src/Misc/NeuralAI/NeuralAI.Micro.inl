@@ -17259,18 +17259,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					}
 
 					// The vehicle still ours and on the ground: the pickup went wrong, else it is simply gone.
-					UnitClass* pJobCargo = nullptr;
+					UnitClass* pJobCargo = abstract_cast<UnitClass*>(FindOwnFootByID(pHouse, job.CargoID));
 
-					for (auto const pUnit : UnitClass::Array)
-					{
-						if (pUnit && pUnit->UniqueID == job.CargoID)
-						{
-							if (pUnit->IsAlive && !pUnit->InLimbo && pUnit->Owner == pHouse)
-								pJobCargo = pUnit;
-
-							break;
-						}
-					}
+					if (pJobCargo && pJobCargo->InLimbo)
+						pJobCargo = nullptr;
 
 					if (!timedOut && pJobCargo && job.Accepted && job.Retries < CarryallPickupRetries
 						&& CanCarryallLiftUnit(pAir, pJobCargo) && CarryallRideAccepted(pJobCargo, pAir))

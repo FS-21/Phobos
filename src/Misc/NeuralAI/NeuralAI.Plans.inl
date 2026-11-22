@@ -12230,16 +12230,10 @@ namespace
 
 				if (!over && followUp.TargetID != 0)
 				{
-					for (auto const pBld : BuildingClass::Array)
-					{
-						if (pBld && pBld->UniqueID == followUp.TargetID)
-						{
-							if (pBld->IsAlive && !pBld->InLimbo && pBld->Owner && !pHouse->IsAlliedWith(pBld->Owner))
-								pTarget = pBld;
+					auto const pBld = FindBuildingByID(followUp.TargetID);
 
-							break;
-						}
-					}
+					if (pBld && pBld->Owner && !pHouse->IsAlliedWith(pBld->Owner))
+						pTarget = pBld;
 				}
 
 				if (!over && !pTarget)
