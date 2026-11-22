@@ -8295,12 +8295,14 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				if (unitPassSize > static_cast<int>(pOTVeh->Type->SizeLimit))
 					continue;
 
+				// Soldiers with a queued Enter or already in radio contact count too, or a seated
+				// vehicle gets more boarders than it has seats.
 				int pendingCount = 0;
 				int pendingSize = 0;
 				for (auto const pOtherI : InfantryClass::Array)
 				{
 					if (pOtherI && pOtherI->Owner == pHouse && !pOtherI->InLimbo && pOtherI->IsAlive
-						&& pOtherI->CurrentMission == Mission::Enter && pOtherI->Destination == pOTVeh)
+						&& IsFootBoarding(pOtherI, pOTVeh))
 					{
 						pendingCount++;
 						pendingSize += std::max(1, static_cast<int>(pOtherI->Type->TechnoTypeClass::Size));
@@ -8310,7 +8312,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				for (auto const pOtherU : UnitClass::Array)
 				{
 					if (pOtherU && pOtherU != pUnit && pOtherU->Owner == pHouse && !pOtherU->InLimbo && pOtherU->IsAlive
-						&& pOtherU->CurrentMission == Mission::Enter && pOtherU->Destination == pOTVeh)
+						&& IsFootBoarding(pOtherU, pOTVeh))
 					{
 						pendingCount++;
 						pendingSize += std::max(1, static_cast<int>(pOtherU->Type->TechnoTypeClass::Size));
@@ -9877,13 +9879,14 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				if (infPassengerSize > static_cast<int>(pCombVeh->Type->SizeLimit))
 					continue;
 
+				// Soldiers with a queued Enter or already in radio contact count too, or a seated
+				// vehicle gets more boarders than it has seats.
 				int pendingBoardersCount = 0;
 				int pendingBoardersSize = 0;
 				for (auto const pOtherInf : InfantryClass::Array)
 				{
 					if (pOtherInf && pOtherInf != pInf && pOtherInf->Owner == pHouse && !pOtherInf->InLimbo
-						&& pOtherInf->IsAlive && pOtherInf->CurrentMission == Mission::Enter
-						&& pOtherInf->Destination == pCombVeh)
+						&& pOtherInf->IsAlive && IsFootBoarding(pOtherInf, pCombVeh))
 					{
 						pendingBoardersCount++;
 						pendingBoardersSize += std::max(1, static_cast<int>(pOtherInf->Type->TechnoTypeClass::Size));
@@ -9893,8 +9896,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				for (auto const pOtherU : UnitClass::Array)
 				{
 					if (pOtherU && pOtherU != pCombVeh && pOtherU->Owner == pHouse && !pOtherU->InLimbo
-						&& pOtherU->IsAlive && pOtherU->CurrentMission == Mission::Enter
-						&& pOtherU->Destination == pCombVeh)
+						&& pOtherU->IsAlive && IsFootBoarding(pOtherU, pCombVeh))
 					{
 						pendingBoardersCount++;
 						pendingBoardersSize += std::max(1, static_cast<int>(pOtherU->Type->TechnoTypeClass::Size));
@@ -11021,8 +11023,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			for (auto const pCheckI : InfantryClass::Array)
 			{
 				if (pCheckI && pCheckI->Owner == pHouse && !pCheckI->InLimbo && pCheckI->IsAlive
-					&& pCheckI->CurrentMission == Mission::Enter && pCheckI->Destination == pUnit
-					&& pCheckI->DistanceFrom(pUnit) <= 3840)
+					&& IsFootBoarding(pCheckI, pUnit) && pCheckI->DistanceFrom(pUnit) <= 3840)
 				{
 					passengerWalkingToBoard = true;
 					break;
