@@ -10985,6 +10985,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	// their cell leaves them be (match #14836: 300 units stood 20000 frames by three landed jets).
 	if (remnantPhase && IsAITickWindow(150, 15))
 	{
+		int huntedRemnants = 0;
+		int huntersOnThem = 0;
+		int huntersSent = 0;
+
 		auto const canHit = [](TechnoTypeClass* pType, bool air)
 		{
 			for (int i = 0; i < 2; ++i)
@@ -11020,13 +11024,21 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 
 			std::vector<std::pair<int, FootClass*>> hunters;
+			size_t onIt = 0;
+			huntedRemnants++;
 
 			for (auto const pTechno : TechnoClass::Array)
 			{
 				auto const pFoot = abstract_cast<FootClass*>(pTechno);
 
-				if (!pFoot || pFoot->Owner != pHouse || pFoot->InLimbo || !pFoot->IsAlive || pFoot->Target == pRemnant)
+				if (!pFoot || pFoot->Owner != pHouse || pFoot->InLimbo || !pFoot->IsAlive)
 					continue;
+
+				if (pFoot->Target == pRemnant)
+				{
+					onIt++;
+					continue;
+				}
 
 				auto const pType = pFoot->GetTechnoType();
 
@@ -11041,11 +11053,27 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					return a.first != b.first ? a.first < b.first : a.second->UniqueID < b.second->UniqueID;
 				});
 
-			for (size_t i = 0; i < hunters.size() && i < 12; ++i)
+			// The attack starts at once: only queued, the engine's area guard of the hunter, still running,
+			// dropped a target beyond its guard range before the attack began, and nobody ever fired at the
+			// last carryall of a house circling over our base (match #15411, 62 units able to hit it; user
+			// 2026-11-23). Up to 12 on each remnant.
+			const size_t wanted = onIt >= 12 ? 0 : 12 - onIt;
+			huntersOnThem += static_cast<int>(onIt);
+
+			for (size_t i = 0; i < hunters.size() && i < wanted; ++i)
 			{
-				hunters[i].second->SetTarget(pRemnant);
-				hunters[i].second->QueueMission(Mission::Attack, false);
+				auto const pHunter = hunters[i].second;
+				pHunter->ClearMegaMissionData();
+				pHunter->SetTarget(pRemnant);
+				pHunter->QueueMission(Mission::Attack, true);
+				huntersSent++;
 			}
+		}
+
+		if (huntedRemnants > 0 && IsAITickWindow(900, 15))
+		{
+			Debug::Log("[NeuralAI] Frame %d | House #%d remnant hunt DIAG: %d enemies in the air or landed aircraft, %d hunters on them, %d sent\n",
+				Unsorted::CurrentFrame, pHouse->ArrayIndex, huntedRemnants, huntersOnThem, huntersSent);
 		}
 	}
 
