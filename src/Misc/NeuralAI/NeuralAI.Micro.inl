@@ -11053,6 +11053,17 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				if (!pType || pType->Spawned || !canHit(pType, remnantInAir))
 					continue;
 
+				// Hunters that can act and get there (user approved, 2026-11-23, «Yes, all three»; match #14951:
+				// the nearest were two transports on an unload with nothing aboard): no unit of a transport
+				// operation, no transport unloading or carrying passengers, and none that neither has the remnant
+				// in reach already nor gets to its cell by itself (FootReachesAlone: a ship by its own sea).
+				if (IsInTransportOp(pHouse, pFoot->UniqueID) || pFoot->CurrentMission == Mission::Unload
+					|| (pType->Passengers > 0 && pFoot->Passengers.NumPassengers > 0)
+					|| (!pFoot->IsCloseEnoughToAttack(pRemnant) && !FootReachesAlone(pFoot, pRemnant->GetMapCoords())))
+				{
+					continue;
+				}
+
 				// After any ship of ours, a land unit hunts a remnant afloat from the shore.
 				const int shorePenalty = (remnantAfloat && !pType->Naval) ? AfloatRemnantLandPenaltyLeptons : 0;
 				hunters.emplace_back(pFoot->DistanceFrom(pRemnant) + shorePenalty, pFoot);
@@ -11233,6 +11244,16 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// it for the rest of the match. It goes back on guard and is idle from the next tick.
 		if (pUnit->CurrentMission == Mission::Attack && !pUnit->Target && !pUnit->IsFiring
 			&& Unsorted::CurrentFrame - pUnit->CurrentMissionStartTime >= AttackWithNoTargetFrames)
+		{
+			pUnit->QueueMission(Mission::Guard, true);
+		}
+
+		// Left on Unload with nothing aboard (EmptyUnloadFrames) a transport does nothing either and counts as
+		// busy for every rule; a unit carryall setting its cargo down (its cargo is no passenger) and the
+		// transports of an operation are left alone.
+		if (pUnit->CurrentMission == Mission::Unload && pUnit->Type->Passengers > 0 && pUnit->Passengers.NumPassengers == 0
+			&& !IsUnitCarryallAtWork(pUnit) && !IsInTransportOp(pHouse, pUnit->UniqueID)
+			&& Unsorted::CurrentFrame - pUnit->CurrentMissionStartTime >= EmptyUnloadFrames)
 		{
 			pUnit->QueueMission(Mission::Guard, true);
 		}
