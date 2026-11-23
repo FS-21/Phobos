@@ -11008,14 +11008,22 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		for (auto const pRemnant : TechnoClass::Array)
 		{
 			if (!pRemnant || pRemnant->InLimbo || !pRemnant->IsAlive || !pRemnant->Owner
-				|| (!pRemnant->IsInAir() && pRemnant->WhatAmI() != AbstractType::Aircraft)
 				|| pRemnant->WhatAmI() == AbstractType::Building)
 			{
 				continue;
 			}
 
-			auto const pRO = pRemnant->Owner;
+			// A unit afloat (a ship, a hovercraft on the water) is out of reach of the ground waves too:
+			// hunted like the landed aircraft, ships first (user 2026-11-23, match #15479: a hovercraft
+			// with seven soldiers aboard kept its house alive).
 			const bool remnantInAir = pRemnant->IsInAir();
+			auto const pRemnantCell = remnantInAir ? nullptr : pRemnant->GetCell();
+			const bool remnantAfloat = pRemnantCell && pRemnantCell->LandType == LandType::Water && !pRemnant->OnBridge;
+
+			if (!remnantInAir && !remnantAfloat && pRemnant->WhatAmI() != AbstractType::Aircraft)
+				continue;
+
+			auto const pRO = pRemnant->Owner;
 
 			if (pRO == pHouse || pHouse->IsAlliedWith(pRO) || pRO->IsNeutral() || pRO->IsObserver() || pRO->Defeated
 				|| (coalitionTarget >= 0 && IsTacitTrucePartner(pHouse, pRO->ArrayIndex)))
@@ -11045,7 +11053,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				if (!pType || pType->Spawned || !canHit(pType, remnantInAir))
 					continue;
 
-				hunters.emplace_back(pFoot->DistanceFrom(pRemnant), pFoot);
+				// After any ship of ours, a land unit hunts a remnant afloat from the shore.
+				const int shorePenalty = (remnantAfloat && !pType->Naval) ? AfloatRemnantLandPenaltyLeptons : 0;
+				hunters.emplace_back(pFoot->DistanceFrom(pRemnant) + shorePenalty, pFoot);
 			}
 
 			std::sort(hunters.begin(), hunters.end(), [](auto const& a, auto const& b)
@@ -11072,7 +11082,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		if (huntedRemnants > 0 && IsAITickWindow(900, 15))
 		{
-			Debug::Log("[NeuralAI] Frame %d | House #%d remnant hunt DIAG: %d enemies in the air or landed aircraft, %d hunters on them, %d sent\n",
+			Debug::Log("[NeuralAI] Frame %d | House #%d remnant hunt DIAG: %d enemies in the air, afloat or landed aircraft, %d hunters on them, %d sent\n",
 				Unsorted::CurrentFrame, pHouse->ArrayIndex, huntedRemnants, huntersOnThem, huntersSent);
 		}
 	}
@@ -12801,6 +12811,13 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				waveGunsCenter = CellStruct { static_cast<short>(sumX / guns), static_cast<short>(sumY / guns) };
 		}
 
+		// A wave target the engine calls Insignificant (a captured tech building: oil derrick, airport, lab)
+		// draws no fire from an attack-move: the units stood by it and the wave was launched again every
+		// tick (match #15479: a wave of 314 units 127 times at one oil derrick; user 2026-11-23). Its units
+		// attack it directly from anywhere on its ground.
+		BuildingClass* const pInsignificantWaveBld = (pVisibleEnemyBld && pVisibleEnemyBld->Type && pVisibleEnemyBld->Type->Insignificant
+			&& pVisibleEnemyBld->GetMapCoords().DistanceFrom(pWaveTargetCell->MapCoords) <= 4.0) ? pVisibleEnemyBld : nullptr;
+
 		for (size_t i = reserveCount; i < idleCombatUnits.size(); ++i)
 		{
 			auto const pU = idleCombatUnits[i];
@@ -12918,7 +12935,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					// The siege screen holds it out of the known defenses while the wave's guns work.
 				}
 				else if (pVisibleEnemyBld && pUnitWaveGoal == pWaveTargetCell && CanFootDamageBuildings(pU)
-					&& pU->DistanceFrom(pVisibleEnemyBld) <= std::max(1280, wpnRange + 384))
+					&& (pU->DistanceFrom(pVisibleEnemyBld) <= std::max(1280, wpnRange + 384)
+						|| (pInsignificantWaveBld && uz == waveTargetZone)))
 				{
 					pU->ClearMegaMissionData();
 					pU->SetTarget(pVisibleEnemyBld);
@@ -13012,7 +13030,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				? pI->Type->GetWeapon(0)->WeaponType->Range
 				: 1024;
 			if (pVisibleEnemyBld && pInfWaveGoal == pWaveTargetCell
-				&& pI->DistanceFrom(pVisibleEnemyBld) <= std::max(1024, infWpnRange + 384))
+				&& (pI->DistanceFrom(pVisibleEnemyBld) <= std::max(1024, infWpnRange + 384) || pInsignificantWaveBld))
 			{
 				pI->ClearMegaMissionData();
 				pI->SetTarget(pVisibleEnemyBld);

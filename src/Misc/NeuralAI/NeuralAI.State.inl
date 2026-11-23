@@ -4583,6 +4583,9 @@ namespace
 	// join the waves.
 	constexpr int DetectorPatrolCombatMost = 3;
 
+	// The hunt of a remnant afloat takes our ships first: a land unit counts as this much farther.
+	constexpr int AfloatRemnantLandPenaltyLeptons = 50 * 256;
+
 	constexpr int PathDeadFerryTryFrames = 5400;
 	constexpr int PathDeadFerryRestFrames = 9000;
 	constexpr double PathDeadFerryGoalCells = 24.0;
