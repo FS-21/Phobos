@@ -2975,8 +2975,11 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		const bool slotFieldMissed = slotFieldCell != CellStruct::Empty
 			&& std::any_of(missedFields.begin(), missedFields.end(), [&slotFieldCell](const std::pair<CellStruct, int>& missed)
 				{ return std::max(std::abs(missed.first.X - slotFieldCell.X), std::abs(missed.first.Y - slotFieldCell.Y)) <= RefineryMissedSameFieldCells; });
+		const int effectiveNewFieldRefineryFrames = (money >= 40000 && ownedRefineries >= 8)
+			? (RefineryNewFieldFrames * 2)
+			: ((money >= 18000 && ownedRefineries >= 6) ? (RefineryNewFieldFrames * 3 / 2) : RefineryNewFieldFrames);
 		const bool newFieldRefinerySlot = reachedNewOreField && slotFieldCell != CellStruct::Empty && !slotFieldMissed
-			&& Unsorted::CurrentFrame - slotMacro.LastRefineryPlacedFrame >= RefineryNewFieldFrames;
+			&& Unsorted::CurrentFrame - slotMacro.LastRefineryPlacedFrame >= effectiveNewFieldRefineryFrames;
 
 		// The field this slot is for: the next refinery placed is judged against it.
 		if (newFieldRefinerySlot)
@@ -3004,7 +3007,12 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		{
 			int refineryCost = 0;
 
-			if (reachedNewOreField && !permanentRefineryCapReached)
+			// Only arm the hard economy-hold/yard-override when cash is actually tight or income is falling;
+			// once rich, refineries still win normally by score without overriding War Factories, Tech or Defenses.
+			const bool urgentRefinerySave = money < 8500
+				&& (ownedRefineries < 6 || conYardWithNoRefineryInZone || GetMacroState(pHouse).IncomeFalling);
+
+			if (reachedNewOreField && !permanentRefineryCapReached && urgentRefinerySave)
 			{
 				for (auto const pType : BuildingTypeClass::Array)
 				{
@@ -3718,11 +3726,20 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				const bool outpostNeedsIt = (category == 0)
 					? (forwardConYardNeedsBarracks || frontNeedsBarracks || captureSiteNeedsBarracks)
 					: (category == 1 ? (forwardConYardNeedsWarFactory || frontNeedsWarFactory) : islandYardNeedsShipyard);
+				const bool bankUrgentWarFactory = (category == 1) && bankGovernorBuilds
+					&& BankFactoryDeficit(pHouse, BankQueue::Vehicle, pHouse->NumWarFactories) > 0
+					&& money >= 25000 && factoryCategoryCounts[category] < 24;
 				const bool newFactoryType = owned == 0;
 				const bool saleCooldownOver = Unsorted::CurrentFrame - GetMacroState(pHouse).LastFactoryCapSaleFrame >= 4500;
 
-				if (!(outpostNeedsIt || newFactoryType) || !saleCooldownOver || factoryCategoryCounts[category] > factoryCategoryCaps[category])
+				if (bankUrgentWarFactory)
+				{
+					// Allow the Bank Governor to add War Factories past the normal ceiling when swimming in unspent cash.
+				}
+				else if (!(outpostNeedsIt || newFactoryType) || !saleCooldownOver || factoryCategoryCounts[category] > factoryCategoryCaps[category])
+				{
 					continue;
+				}
 			}
 
 			// Tech before copies, as a human player: no second Barracks or War Factory of a type
@@ -3897,16 +3914,15 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				}
 				else if (reachedNewOreField && !permanentRefineryCapReached)
 				{
-					// AdvAI ShouldBuildRefinery: our BaseNormal chain or Expansion MCV reached
-					// a new Ore field! Claim it immediately! Like a forward Barracks, it is not
-					// penalized by the refineries of the home field (6 of them sank it below
-					// any other building, so expansion ConYards stood on unmined ore).
-					score = std::max(static_cast<int>(scores[1]), 300) + 1950;
+					// Claim every uncolonized ore field on the map to deny it to enemies, but taper
+					// the urgency bonus once we already own many refineries and a large bank so
+					// War Factories, Tech Centers, Superweapons and Defenses build in between.
+					const int wealthRefineryTaper = (GetMacroState(pHouse).IncomeFalling || conYardWithNoRefineryInZone)
+						? 0
+						: (std::min(750, std::max(0, ownedRefineries - 4) * 65)
+							+ (money >= 12000 ? std::min(750, (money - 12000) / 40) : 0));
+					score = std::max(static_cast<int>(scores[1]), 300) + std::max(450, 1950 - wealthRefineryTaper);
 
-					// The income falls (IncomeFalling) and the field is a real one or a yard's: its refinery
-					// comes before the other copies (user, 2026-11-18). A house whose income fell at frame
-					// 31500 with a real field 2 cells from an anchor took a second war factory four times
-					// (3650 to 6372 against 3522) before the refinery.
 					if (GetMacroState(pHouse).IncomeFalling && slotFieldCell != CellStruct::Empty)
 						score += IncomeFallingRefineryBonus;
 				}
@@ -6363,11 +6379,16 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		&& pHouse->NumConYards >= 1 && features[21] == 0;
 	int bankYardMcvIdx = -1;
 
-	// The tank floor (TankFloor*): how many main battle tanks this house keeps alive, the base defense
-	// and one escort for each artillery (unfolded siege guns too), anti-air and support vehicle.
-	const int tankFloor = std::min(TankFloorMost, std::max(TankFloorMin
+	// The tank floor (TankFloor*): base defense + escorts (kept in TankFloorBasePart/EscortPart up to
+	// TankFloorMost so Wide Guard never locks extra offensive tanks at home), plus a macro-bank offensive
+	// armor target when the house is rich or runs multiple War Factories so super-economies field real tank armies.
+	const int baseTankFloor = std::min(TankFloorMost, std::max(TankFloorMin
 		+ std::clamp(trueRefineries - TankFloorRefineries, 0, TankFloorEconomyMost), ownedGroundCombatUnits / TankFloorShare)
 		+ ownedArtilleryVehicles + ownedEscortedAntiAirVehicles + ownedEscortedSupportVehicles);
+	const int macroBankTankSurge = (money >= 15000 || GetMacroState(pHouse).BankSurplus > 0)
+		? std::min(26, std::max(0, money - 12000) / 3500 + std::max(0, pHouse->NumWarFactories - 2) * 2)
+		: 0;
+	const int tankFloor = baseTankFloor + macroBankTankSurge;
 	const bool belowTankFloor = ownedMainTanks < tankFloor;
 	GetMacroState(pHouse).TankFloorBasePart = TankFloorMin + std::clamp(trueRefineries - TankFloorRefineries, 0, TankFloorEconomyMost);
 	GetMacroState(pHouse).TankFloorEscortPart = ownedArtilleryVehicles + ownedEscortedAntiAirVehicles + ownedEscortedSupportVehicles;
@@ -6935,9 +6956,13 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			{
 				score += scores[24];
 
-				// A mass is many tanks of one type: the tank mass keeps only a share of the type penalty.
-				if (tankMass)
+				// A mass is many tanks of one type: the tank mass (or any house with a rich bank) keeps
+				// only a small share of the per-copy diversity penalty and scales MBT priority with cash.
+				if (tankMass || money >= 18000)
 					score += std::min(1200, ownedUnitWithConv * 55) * (100 - TankMassTypePenaltyPercent) / 100;
+
+				if (money >= 15000)
+					score += std::min(550, (money - 10000) / 55);
 			}
 
 			const int diagPostClass = score;
@@ -7277,7 +7302,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		// 2026-11-22: «son ambas cosas segunda cola o de emergencias ya que si pierde el conyard a
 		// diferencia de otras casas podría mantenerse con nanocores»).
 		const bool underAttack = GetMacroState(pHouse).CounterUnderAttack;
-		const bool armyFirst = (underAttack || belowTankFloor) && pHouse->NumConYards > 0;
+		const bool multiYardNeedsTanks = pHouse->NumConYards >= 2
+			&& ownedFrontLineVehicles < std::max(18, pHouse->NumWarFactories * 3);
+		const bool armyFirst = (underAttack || belowTankFloor || multiYardNeedsTanks) && pHouse->NumConYards > 0;
 
 		for (auto const& build : builds)
 		{
@@ -7285,9 +7312,11 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				break;
 
 			auto const pBuilding = BuildingTypeClass::Array.GetItem(build.BuildingType);
+			const bool addsWantedWarFactory = pBuilding && pBuilding->Factory == AbstractType::UnitType && !pBuilding->Naval
+				&& (pHouse->NumWarFactories < 3 || BankFactoryDeficit(pHouse, BankQueue::Vehicle, pHouse->NumWarFactories) > 0);
 			const bool mayGo = build.Parallel
-				? (!armyFirst || build.UnitType == inProgressUnitIdx)
-				: (!underAttack || pBuilding->IsBaseDefense || pHouse->NumConYards == 0);
+				? (!armyFirst || addsWantedWarFactory || build.UnitType == inProgressUnitIdx)
+				: (!underAttack || pBuilding->IsBaseDefense || addsWantedWarFactory || pHouse->NumConYards == 0);
 
 			if (mayGo)
 			{

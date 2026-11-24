@@ -142,10 +142,24 @@ namespace
 		return diffIdx >= 2 ? 4 : (diffIdx == 1 ? 10 : 20);
 	}
 
-	// Cap for new factories of a category: the difficulty cap.
+	// Cap for new factories of a category: the difficulty cap, expanded for ground war factories
+	// when the house is sitting on a large unspent bank so super-economies convert into tanks.
 	int GetFactoryCategoryCap(HouseClass* pHouse, int category)
 	{
-		return GetFactoryCategorySellCap(pHouse);
+		const int baseCap = GetFactoryCategorySellCap(pHouse);
+
+		if (!pHouse || category != 1 || baseCap <= 4)
+			return baseCap;
+
+		const int money = pHouse->Available_Money();
+
+		if (money >= 60000)
+			return baseCap + 6;
+
+		if (money >= 30000)
+			return baseCap + 4;
+
+		return baseCap;
 	}
 
 	// Living factories of a category that are not being sold (under construction included).
@@ -324,7 +338,14 @@ namespace
 	bool SellFactoriesOverDifficultyCap(HouseClass* pHouse, const CellStruct& frontStoneCell,
 		const std::vector<DWORD>& offensiveStones)
 	{
-		return pHouse && SellSurplusFactory(pHouse, frontStoneCell, GetFactoryCategorySellCap(pHouse), false, offensiveStones);
+		if (!pHouse)
+			return false;
+
+		const int sellCap = pHouse->Available_Money() >= 30000
+			? GetFactoryCategoryCap(pHouse, 1)
+			: GetFactoryCategorySellCap(pHouse);
+
+		return SellSurplusFactory(pHouse, frontStoneCell, sellCap, false, offensiveStones);
 	}
 
 	// Emergency cash recovery (AdvAI_Raise_Money): ONLY when the AI has 0
