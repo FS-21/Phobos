@@ -18119,9 +18119,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			else if (pCarriedUnit && pCarriedUnit->Type)
 			{
 				const bool carriedWorthSave = pCarriedUnit->Type->Cost >= 1000
+					|| pCarriedUnit->Type->Naval
 					|| IsMainBattleTankType(pCarriedUnit->Type)
 					|| pCarriedUnit->Veterancy.IsElite() || pCarriedUnit->Veterancy.IsVeteran();
-				BuildingClass* const pCarriedRepair = (!wedgedLongCarry && pRepairDepot
+				BuildingClass* const pCarriedRepair = (!wedgedLongCarry
+					&& (pRepairDepot || pCarriedUnit->Type->Naval)
 					&& (pCarriedUnit->GetHealthPercentage() < 0.45
 						|| (carriedWorthSave && pCarriedUnit->GetHealthPercentage() < 0.75)))
 					? FindBestRepairStation(pHouse, pCarriedUnit, true)
@@ -18130,6 +18132,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				if (pCarriedRepair)
 				{
 					pDropCell = pCarriedRepair->GetCell();
+				}
+				else if (pCarriedUnit->Type->Naval)
+				{
+					pDropCell = findUsefulWaterDropForShip(pCarriedUnit);
 				}
 				else if (pCarriedUnit->Type->Harvester || pCarriedUnit->Type->Weeder)
 				{
@@ -18147,10 +18153,13 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				}
 			}
 
-			if (!pDropCell && wedgedLongCarry && homeCoords != CellStruct::Empty)
+			const bool carriedIsNaval = pCarriedUnit && pCarriedUnit->Type && pCarriedUnit->Type->Naval;
+
+			if (!pDropCell && wedgedLongCarry && !carriedIsNaval && homeCoords != CellStruct::Empty)
 				pDropCell = MapClass::Instance.TryGetCellAt(homeCoords);
 
-			if (!pDropCell && !(pCarriedUnit && pCarriedUnit->Type && (pCarriedUnit->Type->Harvester || pCarriedUnit->Type->Weeder)))
+			if (!pDropCell && !carriedIsNaval
+				&& !(pCarriedUnit && pCarriedUnit->Type && (pCarriedUnit->Type->Harvester || pCarriedUnit->Type->Weeder)))
 			{
 				pDropCell = pIslandGoalCell
 					? pIslandGoalCell
@@ -18160,7 +18169,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 			CellClass* const pGoalDropCell = pDropCell;
 
-			if (pDropCell)
+			if (pDropCell && !carriedIsNaval)
 				pDropCell = ResolveAirDropCell(pHouse, pAir, pDropCell);
 
 			{
@@ -18193,14 +18202,19 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			if (pDropCell)
 			{
 				auto const pCargoType = pCarriedFoot ? pCarriedFoot->GetTechnoType() : nullptr;
-				auto const canAircraftDropAt = [pCargoType](const CellClass* pCell) -> bool
+				auto const canAircraftDropAt = [pCargoType, pCarriedUnit, carriedIsNaval](const CellClass* pCell) -> bool
 				{
-					if (!pCell || pCell->SlopeIndex != 0 || pCell->LandType == LandType::Water
-						|| pCell->LandType == LandType::Rock
-						|| pCell->GetBuilding() != nullptr || pCell->FirstObject != nullptr)
-					{
+					if (!pCell || pCell->GetBuilding() != nullptr || pCell->FirstObject != nullptr)
 						return false;
+
+					if (carriedIsNaval)
+					{
+						return pCell->LandType == LandType::Water && pCarriedUnit
+							&& UnitExt::CanCargoLandOnCell(pCarriedUnit, const_cast<CellClass*>(pCell));
 					}
+
+					if (pCell->SlopeIndex != 0 || pCell->LandType == LandType::Water || pCell->LandType == LandType::Rock)
+						return false;
 
 					if (!pCargoType)
 						return true;
@@ -18292,8 +18306,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 							if (!pCell || dist >= bestDist || !canAircraftDropAt(pCell) || isFailedDrop(cell) || isContestedDrop(cell))
 								continue;
 
-							if (IsGroundZone(goalZone) && MapClass::Instance.GetMovementZoneType(cell, MovementZone::Normal, false) != goalZone)
+							if (!carriedIsNaval && IsGroundZone(goalZone)
+								&& MapClass::Instance.GetMovementZoneType(cell, MovementZone::Normal, false) != goalZone)
+							{
 								continue;
+							}
 
 							bestDist = dist;
 							pChosen = pCell;
@@ -18382,7 +18399,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			&& (IsAITickWindow(90, carryallWindow)))
 		{
 			const bool islandLiftsPaused = Unsorted::CurrentFrame - GetMacroState(pHouse).LastAirDropAbortFrame < 1800;
-			const bool evacuationAllowed = pRepairDepot && SlotGateHeld(scores[54], -200, 54, pAir->UniqueID);
+			const bool evacuationAllowed = (pRepairDepot || hasOwnNavalRepairYard)
+				&& SlotGateHeld(scores[54], -200, 54, pAir->UniqueID);
 			const CellStruct airCell = pAir->GetMapCoords();
 			std::vector<DWORD> takenCargo;
 
@@ -18418,14 +18436,14 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				const int uZone
 					= ObjectZone(pU, MovementZone::Normal);
 				const CellStruct uCoords = pU->GetMapCoords();
-				const bool worthCarryallCandidate = (pU->Type->Cost >= 1000 || IsMainBattleTankType(pU->Type)
+				const bool worthCarryallCandidate = (pU->Type->Cost >= 1000 || pU->Type->Naval || IsMainBattleTankType(pU->Type)
 						|| pU->Veterancy.IsElite() || pU->Veterancy.IsVeteran())
 					&& !pU->Type->Harvester && !pU->Type->ResourceGatherer
 					&& !IsOnRepairTrip(pHouse, pU->UniqueID)
 					&& !IsRepairStationFailed(pHouse, pU->Type, NeuralRepairKind::Depot)
 					&& pU->GetHealthPercentage() < 0.70
 					&& CountKnownEnemyDefensesNear(pHouse, uCoords, 9.0, true) == 0;
-				BuildingClass* const pSaveDepot = (pRepairDepot && worthCarryallCandidate)
+				BuildingClass* const pSaveDepot = ((pRepairDepot || pU->Type->Naval) && worthCarryallCandidate)
 					? FindBestRepairStation(pHouse, pU, true)
 					: nullptr;
 				const bool worthCarryallSave = pSaveDepot != nullptr
@@ -18451,6 +18469,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				// Combat evacuation: an expensive unit losing its fight is pulled out early.
 				const bool isLosingExpensiveUnit = evacuationAllowed && !isCriticallyDamagedTank && worthCarryallSave
 					&& pU->GetHealthPercentage() < 0.70 && IsFootOutmatched(pHouse, pU, 7.0);
+				CellClass* const pUsefulSeaDrop = (pU->Type->Naval && !isCriticallyDamagedTank && !isLosingExpensiveUnit
+					&& (pU->CurrentMission == Mission::Guard || pU->CurrentMission == Mission::Area_Guard)
+					&& !IsFootActivelyAttackingOrMovingToEnemy(pU)
+					&& CountKnownEnemyDefensesNear(pHouse, uCoords, 9.0, true) == 0)
+					? findUsefulWaterDropForShip(pU)
+					: nullptr;
 				const bool isIslandJob = isIslandExpansionMCV || isIslandHarvester;
 				AirliftKind kind = AirliftKind::None;
 				CellStruct drop = CellStruct::Empty;
@@ -18459,6 +18483,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					kind = AirliftKind::Rescue;
 				else if (isLosingExpensiveUnit)
 					kind = AirliftKind::Evacuation;
+				else if (pUsefulSeaDrop)
+				{
+					kind = AirliftKind::Island;
+					drop = pUsefulSeaDrop->MapCoords;
+				}
 				else if (isLoadedStrikeAPC)
 					kind = AirliftKind::StrikeApc;
 				else if (strandedHarvester)

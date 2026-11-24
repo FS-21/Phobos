@@ -72,12 +72,10 @@ namespace
 
 		auto const pCargoExt = TechnoTypeExt::Fetch(pCargo);
 		auto const pCarryExt = TechnoTypeExt::Fetch(pCarryType);
-		const bool isUnitCarryall = pCarryType->WhatAmI() == AbstractType::UnitType && pCarryExt && pCarryExt->Carryall.Get();
 
-		// Vanilla AircraftClass Carryalls cannot land on water or get RADIO_ROGER from ships,
-		// whereas Phobos UnitClass (Jumpjet) Carryalls lift and drop Naval units on water via UnitExt.
-		if (pCargo->Naval && !isUnitCarryall)
-			return false;
+		// Both AircraftClass Carryalls (via Ares 0x416E37 CarryallCanLift + Phobos 0x4DDD66 / 0x419B1D water LZ hooks)
+		// and Phobos UnitClass Jumpjet Carryalls (UnitExt::CarryallCanLift / CanCargoLandOnCell) can lift and drop
+		// Naval=yes ships onto water subject to Carryall.Allowed, IgnoreTypes, SizeLimit and AllowTypes.
 
 		if (pCargoExt && !pCargoExt->Carryall_Allowed.Get())
 			return false;
