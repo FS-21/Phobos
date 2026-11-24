@@ -4245,7 +4245,7 @@ namespace
 	// vehicle or building below RepairerDamagedBelow at our bases and expansions (RepairerBaseSearchCells);
 	// an infantry capturer that also repairs (CABAL's Mechanic) repairs them too when it has nothing to
 	// capture, within RepairerMechanicCells.
-	constexpr int RepairerPerVehicles = 6;
+	constexpr int RepairerPerVehicles = 10;
 	constexpr int RepairerHealCells = 10;
 	constexpr int RepairerEscortMost = 2;
 	constexpr int RepairerEscortKeepCells = 4;
@@ -5007,6 +5007,45 @@ namespace
 
 		return it != parked.end() && Unsorted::CurrentFrame - it->second.Frame <= FerryParkedFrames
 			&& Unsorted::CurrentFrame >= it->second.Frame;
+	}
+
+	// Point-to-point fast land taxi (HTK Flak Track, empty FV IFV, or closed land APC carrying an
+	// engineer, spy, commando or slow infantry >= 26 cells across the same landmass).
+	struct NeuralLandTaxiJob
+	{
+		DWORD TaxiID { 0 };
+		std::vector<DWORD> PassengerIDs {};
+		CellStruct DropCell { CellStruct::Empty };
+		int StartFrame { 0 };
+		int Phase { 0 }; // 0 = pickup/boarding, 1 = driving, 2 = unloading
+		int PhaseFrame { 0 };
+		bool SpecialistDrop { false };
+		bool SpyStealthDrop { false };
+	};
+
+	struct NeuralLandTaxiState
+	{
+		int MatchSerial { -1 };
+		std::vector<NeuralLandTaxiJob> Jobs {};
+		std::unordered_set<DWORD> Members {};
+		int LogCount { 0 };
+	};
+
+	std::array<NeuralLandTaxiState, 32> LandTaxiStates {};
+
+	NeuralLandTaxiState& GetLandTaxiState(const HouseClass* pHouse)
+	{
+		auto& st = LandTaxiStates[std::clamp(pHouse ? pHouse->ArrayIndex : 0, 0, 31)];
+
+		if (st.MatchSerial != NeuralMatchSerial)
+			st = NeuralLandTaxiState { NeuralMatchSerial };
+
+		return st;
+	}
+
+	bool IsInLandTaxi(const HouseClass* pHouse, DWORD uid)
+	{
+		return pHouse && GetLandTaxiState(pHouse).Members.contains(uid);
 	}
 
 	// A unit or transport working for a transport operation (NeuralAI.Operations.inl): it takes its

@@ -1969,7 +1969,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		// is remembered for the pick after the loop.
 		const int airDocksFloor = houseDifficulty >= 2 ? AirDocksFloorEasy : (houseDifficulty == 1 ? AirDocksFloorNormal : AirDocksFloorHard);
 		const bool airDocksBelowFloor = pHouse->AirportDocks < airDocksFloor;
-		const int softAirDockTaperStart = airSpecialist ? 24 : 22;
+		const int softAirDockTaperStart = airSpecialist ? 16 : 12;
 		int bestPriorityAirfieldIdx = -1;
 		int bestPriorityAirfieldScore = -32000;
 
@@ -4127,7 +4127,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				else
 				{
 					// Penalize by total AirportDocks (fair across 1-dock helipads and 4-dock airfields) with a
-					// gradual priority taper past 22-24 docks that lowers priority without ever blocking demand.
+					// gradual priority taper past 12-16 docks that lowers priority without ever blocking demand.
 					const int curDocks = pHouse->AirportDocks;
 					const int dockPenalty = airDocksBelowFloor
 						? 0
@@ -4660,7 +4660,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			}
 
 			// Hard priority override applies below the floor or while docks are full below the 22-24 soft
-			// threshold; beyond 22-24 docks, extra hangars still build by demand via their tapered score.
+			// threshold; beyond 12-16 docks, extra hangars still build by demand via their tapered score.
 			if (pBld->Factory == AbstractType::AircraftType && hasCoreEconomyAndProduction
 				&& (airDocksBelowFloor
 					|| (underAirDockCeiling && airDocksFull && pHouse->NumAirpads >= 1 && pHouse->AirportDocks < softAirDockTaperStart))
@@ -5909,9 +5909,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			|| pHouse->OwnedUnits >= 3);
 	const bool needsCrossIslandMCV = islandOreRunningOut
 		|| (features[21] > 0 && !hasFreeHomeLandField && (features[19] == 0 || pHouse->NumConYards >= 1));
-	// An island expansion MCV that unfolded while no ride came (land before islands, Micro) is the
-	// island's MCV: it packs up when a transport is free, so no other one is built for the crossing.
-	const bool islandMcvWaitsAsYard = needsCrossIslandMCV && PruneIslandWaitYards(pHouse) > 0;
+	// An island expansion MCV that unfolded while no ride came (Micro) is already waiting to pack up
+	// as soon as its summoned ferry arrives (or to take any regrown local field itself), so never
+	// build duplicate expansion MCVs while an IslandWaitYard stands.
+	const bool islandMcvWaitsAsYard = PruneIslandWaitYards(pHouse) > 0;
 
 	// Island expansion is one more airlift job when a carryall may lift the MCV (or a spare
 	// harvester for the new island's resources): mods can forbid it with Carryall.Allowed=no.
@@ -6460,8 +6461,14 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		if (!isUnitInProgress && !IsUnitTierAllowed(pHouse, pUnit))
 			continue;
 
-		// Repairers are support (Repairer*): one for each RepairerPerVehicles armed ground vehicles of ours.
-		if (!isUnitInProgress && IsRepairerUnitType(pUnit)
+		// Repairers are support (Repairer*): 1 per 10 armed ground vehicles of ours, plus up to 1 base
+		// repairer when >= 10 structures stand and a building is damaged if the type also repairs buildings.
+		const bool baseNeedsFirstStructRepairer = ownedRepairerVehicles == 0 && pHouse->Buildings.Count >= 10
+			&& (RepairAbilitiesOf(pUnit) & RepairsBuildings) != 0
+			&& std::any_of(pHouse->Buildings.begin(), pHouse->Buildings.end(), [](BuildingClass* pB)
+				{ return pB && pB->IsAlive && !pB->InLimbo && pB->Type && !pB->Type->Wall && !pB->Type->InvisibleInGame && !pB->Type->Insignificant && pB->GetHealthPercentage() < RepairerDamagedBelow; });
+
+		if (!isUnitInProgress && IsRepairerUnitType(pUnit) && !baseNeedsFirstStructRepairer
 			&& (ownedRepairerVehicles + 1) * RepairerPerVehicles > ownedGroundCombatUnits - ownedRepairerVehicles)
 		{
 			continue;
@@ -6498,10 +6505,12 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			if (pHouse->NumConYards >= 1 && ownedEconomyUnits == 0 && ownedCashProduces == 0)
 				continue;
 
+			if (pHouse->NumConYards >= 1 && islandMcvWaitsAsYard && !bankWantsYard)
+				continue;
+
 			if (pHouse->NumConYards >= 1 && needsCrossIslandMCV
 				&& (!CanHouseFerryTypeAcrossWater(pHouse, pUnit)
-					|| (!isSelfAmphibOrAirMcv && ownedHeavyIslandTransports == 0 && !ownsCarryallLifting(pUnit))
-					|| (islandMcvWaitsAsYard && !bankWantsYard)))
+					|| (!isSelfAmphibOrAirMcv && ownedHeavyIslandTransports == 0 && !ownsCarryallLifting(pUnit))))
 			{
 				continue;
 			}
@@ -7609,7 +7618,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		if (!isInfInProgress && !IsUnitTierAllowed(pHouse, pInf))
 			continue;
 
-		if (!isInfInProgress && IsHealerInfantryType(pInf) && ownedHealerInfantry * 5 >= std::max(1, ownedFighterInfantry))
+		if (!isInfInProgress && IsHealerInfantryType(pInf) && ownedHealerInfantry * 10 >= std::max(1, ownedFighterInfantry))
 			continue;
 
 		const bool isIncomeRecoveryEng = (IsCaptureInfantryType(pInf) && neutralCashDerrickCount > ownedEngineers);
@@ -7636,7 +7645,17 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 		if (IsCaptureInfantryType(pInf))
 		{
-			const int maxActiveEngineers = (neutralCapturableCount >= 2) ? std::min(4, neutralCapturableCount) : 3;
+			// Hybrid capture + repair specialists (e.g. CABAL upgraded Mechanic ROBOTENGINEER2) also
+			// fill the 1-per-10 vehicle/base repairer role when the faction lacks a repair vehicle.
+			const int infRepairMask = RepairAbilitiesOf(pInf);
+			const bool alsoRepairsUnitsOrBlds = (infRepairMask & (RepairsVehicles | RepairsBuildings)) != 0;
+			const int armedVehiclesForMech = std::max(0, ownedGroundCombatUnits - ownedRepairerVehicles);
+			const int mechanicQuota = alsoRepairsUnitsOrBlds
+				? std::min(8, ((bestRepairerIdx < 0 && (infRepairMask & RepairsVehicles) != 0) ? (armedVehiclesForMech / RepairerPerVehicles) : 0)
+					+ ((infRepairMask & RepairsBuildings) != 0 ? std::max(1, pHouse->Buildings.Count / 15) : 0))
+				: 0;
+			const int baseMaxEngineers = (neutralCapturableCount >= 2) ? std::min(4, neutralCapturableCount) : 3;
+			const int maxActiveEngineers = std::max(baseMaxEngineers, mechanicQuota);
 			if (ownedEngineers >= maxActiveEngineers)
 				continue;
 
@@ -7644,11 +7663,12 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			const int cashDerrickBonus
 				= (neutralCashDerrickCount > ownedEngineers) ? 880 : (moreTechThanEngineers ? 680 : 320);
 			const int techBonus = hasCapturableTechOnMap ? cashDerrickBonus : 0;
+			const int mechanicBonus = (alsoRepairsUnitsOrBlds && ownedEngineers < mechanicQuota) ? 450 : 0;
 
-			if (pHouse->OwnedInfantry < 3 && !hasCapturableTechOnMap && scores[36] <= 80)
+			if (pHouse->OwnedInfantry < 3 && !hasCapturableTechOnMap && mechanicBonus == 0 && scores[36] <= 80)
 				score -= 300;
 			else
-				score += scores[18] + techBonus;
+				score += scores[18] + std::max(techBonus, mechanicBonus);
 		}
 		else if (IsSpyInfantryType(pInf) || pInf->VehicleThief)
 		{

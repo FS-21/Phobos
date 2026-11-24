@@ -808,11 +808,12 @@ namespace
 	}
 
 	// A seated fighting vehicle (PassengerFill*): open-topped with seats, whose passengers fire from it,
-	// or a gunner vehicle, whose weapon comes from its passenger; one we may load ourselves.
+	// a gunner vehicle, whose weapon comes from its passenger, or an armed closed land APC (HTK) that
+	// ferries slow infantry with the wave and unloads on contact; one we may load ourselves.
 	bool IsSeatedFightingVehicleType(const TechnoTypeClass* pType)
 	{
 		return pType && pType->WhatAmI() == AbstractType::UnitType && !pType->Naval
-			&& ((pType->OpenTopped && pType->Passengers > 0) || pType->Gunner)
+			&& ((pType->OpenTopped && pType->Passengers > 0) || pType->Gunner || IsGroundCombatAPCType(pType))
 			&& !HasNoManualEnter(pType) && !HasNoManualUnload(pType);
 	}
 
@@ -855,7 +856,7 @@ namespace
 		auto const& macro = GetMacroState(pHouse);
 		const DWORD uid = pFoot->UniqueID;
 
-		if (macro.PassengerFillHolds.contains(uid) || macro.PassengerFillUntilFull.contains(uid))
+		if (IsInLandTaxi(pHouse, uid) || macro.PassengerFillHolds.contains(uid) || macro.PassengerFillUntilFull.contains(uid))
 			return true;
 
 		auto const pUnit = abstract_cast<UnitClass*>(pFoot);
@@ -1070,11 +1071,19 @@ namespace
 			std::vector<std::pair<int, InfantryClass*>> found;
 			const int zone = ObjectZone(pVehicle, MovementZone::Normal);
 
+			const bool closedCombatAPC = IsGroundCombatAPCType(pVehicle->Type);
+
 			for (auto const pInf : InfantryClass::Array)
 			{
-				if (!pInf || pInf->Owner != pHouse || !pInf->IsAlive || pInf->InLimbo || pInf->Transporter || !IsFitPassengerSoldierType(pInf->Type)
+				const bool fitForClosedAPC = closedCombatAPC && pInf && pInf->Type && !pInf->Type->Engineer && !pInf->Type->Doggie
+					&& !pInf->Type->Thief && !pInf->Type->VehicleThief && !IsSpyInfantryType(pInf->Type) && !pInf->Type->Slaved
+					&& !pInf->Type->JumpJet && pInf->Type->Speed + 1 < pVehicle->Type->Speed
+					&& (IsFitPassengerSoldierType(pInf->Type) || pInf->Type->Ivan);
+
+				if (!pInf || pInf->Owner != pHouse || !pInf->IsAlive || pInf->InLimbo || pInf->Transporter
+					|| !(closedCombatAPC ? fitForClosedAPC : IsFitPassengerSoldierType(pInf->Type))
 					|| pInf->Target || pInf->HasAnyLink() || pInf->CurrentMission == Mission::Enter || pInf->QueuedMission == Mission::Enter
-					|| IsInTransportOp(pHouse, pInf->UniqueID))
+					|| IsInTransportOp(pHouse, pInf->UniqueID) || IsInLandTaxi(pHouse, pInf->UniqueID))
 				{
 					continue;
 				}
@@ -1142,8 +1151,11 @@ namespace
 
 		for (auto const pUnit : UnitClass::Array)
 		{
-			if (!pUnit || pUnit->Owner != pHouse || !pUnit->IsAlive || pUnit->InLimbo || !IsSeatedFightingVehicleType(pUnit->Type))
+			if (!pUnit || pUnit->Owner != pHouse || !pUnit->IsAlive || pUnit->InLimbo || !IsSeatedFightingVehicleType(pUnit->Type)
+				|| IsInLandTaxi(pHouse, pUnit->UniqueID))
+			{
 				continue;
+			}
 
 			const DWORD uid = pUnit->UniqueID;
 			const int seatsLeft = SeatedFightingVehicleSeatsLeft(pUnit);
@@ -1212,6 +1224,15 @@ namespace
 			// with fit soldiers within reach, PassengerFillReholdFrames after its last hold.
 			auto const mayHoldAtHome = [&]()
 			{
+				if (IsGroundCombatAPCType(pUnit->Type))
+				{
+					if (!vehicleStanding || pUnit->Target
+						|| soldiersFor(pUnit, PassengerFillReachCells, PassengerGroupHome).empty())
+					{
+						return false;
+					}
+				}
+
 				auto const itDone = macro.PassengerFillDone.find(uid);
 
 				if (itDone == macro.PassengerFillDone.end())
@@ -1260,7 +1281,9 @@ namespace
 			}
 
 			const int seats = seatsLeft - boardingFor(pUnit);
-			seatsWanted += std::max(0, seats);
+
+			if (!IsGroundCombatAPCType(pUnit->Type))
+				seatsWanted += std::max(0, seats);
 
 			if (seats > 0)
 				board(pUnit, seats, PassengerFillReachCells, PassengerGroupHome);

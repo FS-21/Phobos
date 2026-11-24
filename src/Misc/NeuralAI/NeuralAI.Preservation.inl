@@ -3,6 +3,8 @@
 
 namespace
 {
+	int AirStrikeRiskAt(HouseClass* pHouse, const CellStruct& cell);
+
 	// Our ground and naval fighting units (infantry and vehicles with a weapon, no harvesters) by
 	// UniqueID with their cost, refreshed every AI tick, so a unit gone from the game counts as lost.
 	// Sorted by UniqueID; the telemetry publishes the totals.
@@ -280,12 +282,19 @@ namespace
 			if (!pHealer || pHealer == pPatient || pHealer->Owner != pHouse || !pHealer->IsAlive || pHealer->InLimbo
 				|| pHealer->WhatAmI() == AbstractType::Aircraft || pHealer->GetHealthPercentage() < 0.5
 				|| IsOnRepairTrip(pHouse, pHealer->UniqueID) || IsInTransportOp(pHouse, pHealer->UniqueID)
-				|| !HealingWeaponFor(pHealer, pPatient))
+				|| IsInLandTaxi(pHouse, pHealer->UniqueID) || !HealingWeaponFor(pHealer, pPatient))
 			{
 				continue;
 			}
 
+			auto const pHealerType = pHealer->GetTechnoType();
+			const bool healerFlies = pHealerType && (pHealerType->MovementZone == MovementZone::Fly
+				|| pHealerType->JumpJet || pHealerType->BalloonHover);
 			const CellStruct hc = pHealer->GetMapCoords();
+
+			if (healerFlies && AirStrikeRiskAt(pHouse, hc) >= 2)
+				continue;
+
 			double cost = hc.DistanceFrom(pc);
 
 			if (cost > maxCells || !AreZonesConnected(pc, hc, pType->MovementZone))
