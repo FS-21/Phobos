@@ -51,10 +51,25 @@ namespace
 	struct NeuralAirWingFlight
 	{
 		DWORD TargetID { 0 };
-		const BuildingTypeClass* TargetType { nullptr };
+		const TechnoTypeClass* TargetType { nullptr };
+		bool IsBuildingTarget { true };
 		std::vector<DWORD> Members {};
 		int Frame { 0 };
 	};
+
+	TechnoClass* FindAirStrikeTechnoByID(DWORD uid)
+	{
+		if (uid == 0)
+			return nullptr;
+
+		for (auto const pTech : TechnoClass::Array)
+		{
+			if (pTech && pTech->UniqueID == uid && pTech->IsAlive && !pTech->InLimbo && pTech->Health > 0)
+				return pTech;
+		}
+
+		return nullptr;
+	}
 
 	struct NeuralAirForceState
 	{
@@ -244,8 +259,8 @@ namespace
 				auto const pWS = pType->GetWeapon(i);
 				auto const pWeapon = pWS ? pWS->WeaponType : nullptr;
 
-				if (WeaponHitsGround(pWeapon) && pWeapon->Warhead
-					&& GeneralUtils::GetWarheadVersusArmor(pWeapon->Warhead, pBuildingType->Armor) > 0.1)
+				if (WeaponHitsGround(pWeapon) && pWeapon->Warhead && CanWarheadDamageEnemy(pWeapon->Warhead)
+					&& GetEffectiveVersusAgainstTypePermille(pWeapon->Warhead, pBuildingType) > 100)
 				{
 					hurtTypes++;
 					break;
@@ -299,7 +314,113 @@ namespace
 		if (pType->Radar)
 			return 180;
 
-		return pType->Cost >= 1500 ? 160 : 0;
+		if (pType->Cost >= 1500)
+			return 160;
+
+		return pType->IsBaseDefense ? 135 : 95;
+	}
+
+	// Worth of a visible enemy ground or surface unit for a strike wing: prioritizes cutting
+	// down enemy firepower (artillery, main battle tanks, mind controllers, heavy warships),
+	// exposed MCVs/harvesters, and remnant units when an enemy has no buildings left.
+	int AirUnitStrikeWorth(HouseClass* pHouse, TechnoClass* pTech, const CellStruct& front, bool noEnemyBuildingsKnown)
+	{
+		if (!pTech || !pTech->IsAlive || pTech->InLimbo || pTech->Health <= 0 || !pTech->Owner
+			|| pTech->Owner == pHouse || pHouse->IsAlliedWith(pTech->Owner) || pTech->Owner->IsNeutral()
+			|| pTech->Owner->Defeated || pTech->Disguised || pTech->IsInAir())
+		{
+			return 0;
+		}
+
+		const AbstractType kind = pTech->WhatAmI();
+
+		if (kind != AbstractType::Unit && kind != AbstractType::Infantry)
+			return 0;
+
+		auto const pCell = pTech->GetCell();
+
+		if (!pCell || !IsCellVisibleToAI(pHouse, pCell))
+			return 0;
+
+		if (pTech->CloakState != CloakState::Uncloaked
+			&& !pCell->Sensors_InclHouse(static_cast<unsigned int>(pHouse->ArrayIndex)))
+		{
+			return 0;
+		}
+
+		auto const pType = pTech->GetTechnoType();
+
+		if (!pType || pType->Immune || (pType->Naval && pType->Underwater))
+			return 0;
+
+		const int groundRangeCells = GroundRangeOf(pType) / Unsorted::LeptonsPerCell;
+		const bool shootsUp = GetCombatValueOfType(pType, true) > 0;
+
+		// Dedicated anti-air vehicles are avoided like AA towers unless mopping up remnants.
+		if (shootsUp && groundRangeCells <= 0 && !noEnemyBuildingsKnown)
+			return 0;
+
+		bool hasMindOrTemporal = false;
+		bool hasSpawner = pType->Spawns != nullptr;
+
+		for (int i = 0; i < 2; ++i)
+		{
+			auto const pWS = pType->GetWeapon(i);
+			auto const pW = pWS ? pWS->WeaponType : nullptr;
+
+			if (!pW)
+				continue;
+
+			if (pW->Spawner)
+				hasSpawner = true;
+
+			if (pW->Warhead && (pW->Warhead->MindControl || pW->Warhead->Temporal))
+				hasMindOrTemporal = true;
+		}
+
+		const int firepower = VehicleFirepowerScore(pType);
+		int worth = 0;
+
+		if (kind == AbstractType::Unit)
+		{
+			auto const pUnitType = static_cast<const UnitTypeClass*>(pType);
+
+			if (pUnitType->DeploysInto && pUnitType->DeploysInto->ConstructionYard)
+				worth = 280;
+			else if (hasMindOrTemporal || hasSpawner || groundRangeCells >= 8)
+				worth = 225;
+			else if (IsMainBattleTankType(pType) || (pType->Cost >= 900 && firepower > 0))
+				worth = 165;
+			else if (pUnitType->Harvester || pUnitType->ResourceGatherer)
+				worth = 160;
+			else if (firepower > 0)
+				worth = 100;
+		}
+		else
+		{
+			auto const pInfType = static_cast<const InfantryTypeClass*>(pType);
+
+			if (hasMindOrTemporal || IsCommandoInfantryType(pInfType) || pType->Cost >= 800)
+				worth = 175;
+		}
+
+		if (worth > 0)
+		{
+			worth += std::min(150, firepower / 3);
+
+			if (pTech->Veterancy.IsElite())
+				worth += 110;
+			else if (pTech->Veterancy.IsVeteran())
+				worth += 55;
+
+			if (front != CellStruct::Empty && pTech->GetMapCoords().DistanceFrom(front) <= 16.0)
+				worth += 140;
+		}
+
+		if (noEnemyBuildingsKnown || pTech->Owner->OwnedBuildings == 0)
+			worth = std::max(worth, 260);
+
+		return worth;
 	}
 
 	// Known enemy anti-air defenses that cover a cell: within their anti-air range plus 2 cells, 9 at
@@ -350,12 +471,19 @@ namespace
 		return risk + std::min(2, danger);
 	}
 
-	// Damage one sortie of this aircraft does to a building (ground weapon, burst, full load,
-	// against the building's armor).
+	// Damage one sortie of this aircraft does to a ground or surface target (ground weapon,
+	// burst, full load, against the target's armor).
+	int AirSortieDamageVs(AircraftClass* pAir, TechnoClass* pTarget);
 	int AirSortieDamageVs(AircraftClass* pAir, BuildingClass* pTarget)
 	{
-		// No damage at an immune building (the immune techs game option).
-		if (pTarget->Type->Immune)
+		return AirSortieDamageVs(pAir, static_cast<TechnoClass*>(pTarget));
+	}
+
+	int AirSortieDamageVs(AircraftClass* pAir, TechnoClass* pTarget)
+	{
+		auto const pTargetType = pTarget ? pTarget->GetTechnoType() : nullptr;
+
+		if (!pTargetType || pTargetType->Immune)
 			return 0;
 
 		int best = 0;
@@ -365,10 +493,18 @@ namespace
 			auto const pWS = pAir->Type->GetWeapon(i);
 			auto const pWeapon = pWS ? pWS->WeaponType : nullptr;
 
-			if (!WeaponHitsGround(pWeapon) || !pWeapon->Warhead)
+			if (!WeaponHitsGround(pWeapon) || !pWeapon->Warhead || !CanWarheadDamageEnemy(pWeapon->Warhead))
 				continue;
 
-			const double verses = GeneralUtils::GetWarheadVersusArmor(pWeapon->Warhead, pTarget, pTarget->Type);
+			if (auto const pTargetExt = TechnoExt::TryFetch(pTarget))
+			{
+				auto const pShield = pTargetExt->Shield.get();
+
+				if (pShield && pShield->IsActive() && !pShield->CanBeTargeted(const_cast<WeaponTypeClass*>(pWeapon)))
+					continue;
+			}
+
+			const double verses = GeneralUtils::GetWarheadVersusArmor(pWeapon->Warhead, pTarget, pTargetType);
 			best = std::max(best, static_cast<int>(pWeapon->Damage * std::max(1, pWeapon->Burst) * verses));
 		}
 
@@ -457,24 +593,21 @@ namespace
 
 	struct NeuralAirWingPick
 	{
-		BuildingClass* Target { nullptr };
+		TechnoClass* Target { nullptr };
 		int Score { 0 };
 		int Risk { 0 };
 		// Sortie damage of the aircraft expected to reach the target, and the health left to destroy.
 		int Damage { 0 };
 		int Need { 0 };
 		// TEMP diagnostic: the best target the ready aircraft are still too few for.
-		BuildingClass* ShortTarget { nullptr };
+		TechnoClass* ShortTarget { nullptr };
 		int ShortDamage { 0 };
 		int ShortNeed { 0 };
 		int ShortRisk { 0 };
 	};
 
-	// Best known enemy building all the ready aircraft destroy together in one pass. The anti-air
-	// risk is taken as aircraft shot down before they release (one per point, so the risk must stay
-	// below their number): the sorties of the others must still cover the health the wings already
-	// flying leave of it. Ties keep the first in building array order. lessonPercent: how much more than
-	// the health left the sorties must deliver (the wing lesson).
+	// Best known enemy structure or high-firepower ground/surface unit the ready aircraft can
+	// destroy in one pass, cutting down enemy firepower as well as bases.
 	NeuralAirWingPick PickAirWingTarget(HouseClass* pHouse, const std::vector<AircraftClass*>& ready, const CellStruct& front,
 		const std::unordered_map<DWORD, int>& committed, int lessonPercent)
 	{
@@ -486,28 +619,27 @@ namespace
 		const CellStruct from = ready.front()->GetMapCoords();
 		const int tolerance = static_cast<int>(ready.size()) - 1;
 		const std::array<int, 8> airValues = EnemyAirValueByOwner(pHouse);
+		auto const& knownBlds = GetKnownEnemyBuildingCache(pHouse).Entries;
+		const bool noEnemyBuildingsKnown = knownBlds.empty();
 		int shortScore = 0;
 
-		for (auto const& info : GetKnownEnemyBuildingCache(pHouse).Entries)
+		auto evaluateCandidate = [&](TechnoClass* pCand, int score, int risk, int extraMarginPct)
 		{
-			int risk = 0;
-			const int score = AirStrikeTargetScore(pHouse, info, from, front, airValues, tolerance, risk);
-
 			if (score <= 0 || (score <= pick.Score && score <= shortScore))
-				continue;
+				return;
 
-			auto const it = committed.find(info.Building->UniqueID);
-			const int need = info.Building->Health - (it != committed.end() ? it->second : 0);
+			auto const it = committed.find(pCand->UniqueID);
+			const int need = pCand->Health - (it != committed.end() ? it->second : 0);
 
 			if (need <= 0)
-				continue;
+				return;
 
 			int damage = 0;
 			int strikers = 0;
 
 			for (auto const pAir : ready)
 			{
-				const int sortie = AirSortieDamageVs(pAir, info.Building);
+				const int sortie = AirSortieDamageVs(pAir, pCand);
 
 				if (sortie > 0)
 				{
@@ -517,16 +649,15 @@ namespace
 			}
 
 			if (strikers <= risk)
-				continue;
+				return;
 
-			// Average sortie of the aircraft that get through.
 			const int delivered = damage / strikers * (strikers - risk);
 
-			if (delivered * 100 >= need * (100 + lessonPercent))
+			if (delivered * 100 >= need * (100 + extraMarginPct + lessonPercent))
 			{
 				if (score > pick.Score)
 				{
-					pick.Target = info.Building;
+					pick.Target = pCand;
 					pick.Score = score;
 					pick.Risk = risk;
 					pick.Damage = delivered;
@@ -536,12 +667,50 @@ namespace
 			else if (score > shortScore)
 			{
 				shortScore = score;
-				pick.ShortTarget = info.Building;
+				pick.ShortTarget = pCand;
 				pick.ShortDamage = delivered;
 				pick.ShortNeed = need;
 				pick.ShortRisk = risk;
 			}
+		};
+
+		for (auto const& info : knownBlds)
+		{
+			int risk = 0;
+			const int score = AirStrikeTargetScore(pHouse, info, from, front, airValues, tolerance, risk);
+			evaluateCandidate(info.Building, score, risk, 15);
 		}
+
+		auto considerEnemyUnit = [&](TechnoClass* pTech)
+		{
+			const int worth = AirUnitStrikeWorth(pHouse, pTech, front, noEnemyBuildingsKnown);
+
+			if (worth <= 0)
+				return;
+
+			const CellStruct coords = pTech->GetMapCoords();
+			const int risk = AirStrikeRiskAt(pHouse, coords);
+
+			if (risk > tolerance)
+				return;
+
+			int score = worth * 100 / (100 + risk * 65) - static_cast<int>(from.DistanceFrom(coords)) / 2;
+			auto const pType = pTech->GetTechnoType();
+
+			if (pType && pTech->Health * 2 < pType->Strength)
+				score += score / 4;
+
+			if (pTech->Owner->ArrayIndex == pHouse->EnemyHouseIndex)
+				score += 30;
+
+			evaluateCandidate(pTech, std::max(0, score), risk, 25);
+		};
+
+		for (auto const pUnit : UnitClass::Array)
+			considerEnemyUnit(pUnit);
+
+		for (auto const pInf : InfantryClass::Array)
+			considerEnemyUnit(pInf);
 
 		return pick;
 	}
@@ -764,6 +933,35 @@ namespace
 				}
 			}
 
+			const bool noEnemyBlds = GetKnownEnemyBuildingCache(pHouse).Entries.empty();
+			auto addUnitWork = [&](TechnoClass* pTech)
+			{
+				const int worth = AirUnitStrikeWorth(pHouse, pTech, state.FrontCell, noEnemyBlds);
+
+				if (worth <= 0)
+					return;
+
+				const CellStruct coords = pTech->GetMapCoords();
+				const int risk = AirStrikeRiskAt(pHouse, coords);
+
+				if (risk > tolerance)
+					return;
+
+				const int score = std::max(0, worth * 100 / (100 + risk * 65) - static_cast<int>(from.DistanceFrom(coords)) / 2);
+
+				if (score > best[2])
+				{
+					best[2] = score;
+					std::sort(best.begin(), best.end(), [](int a, int b) { return a > b; });
+				}
+			};
+
+			for (auto const pUnit : UnitClass::Array)
+				addUnitWork(pUnit);
+
+			for (auto const pInf : InfantryClass::Array)
+				addUnitWork(pInf);
+
 			state.StrikeWork = best[0] + best[1] + best[2];
 		}
 
@@ -830,14 +1028,24 @@ namespace
 
 		const DWORD targetID = it->second.TargetID;
 		const int age = Unsorted::CurrentFrame - it->second.Frame;
-		auto const pTarget = FindBuildingByID(targetID);
+		auto const pTarget = FindAirStrikeTechnoByID(targetID);
+		const bool isBldTarget = pTarget && pTarget->WhatAmI() == AbstractType::Building;
+		auto const pTargetCell = pTarget ? pTarget->GetCell() : nullptr;
+		const bool targetKnownAndVisible = pTarget && pTargetCell
+			&& (isBldTarget
+				? IsEnemyBuildingKnown(pHouse, static_cast<BuildingClass*>(pTarget))
+				: (!pTarget->IsInAir() && IsCellVisibleToAI(pHouse, pTargetCell)
+					&& (pTarget->CloakState == CloakState::Uncloaked
+						|| pTargetCell->Sensors_InclHouse(static_cast<unsigned int>(pHouse->ArrayIndex)))));
 
 		if (!pTarget || !pTarget->Owner || pTarget->Owner == pHouse || pHouse->IsAlliedWith(pTarget->Owner)
-			|| !IsEnemyBuildingKnown(pHouse, pTarget) || age < 0 || age > AirStrikeOrderFrames)
+			|| pTarget->Owner->IsNeutral() || !targetKnownAndVisible || age < 0 || age > AirStrikeOrderFrames)
 		{
 			state.Orders.erase(it);
 			return false;
 		}
+
+		it->second.TargetCell = pTarget->GetMapCoords();
 
 		int wing = 0;
 
@@ -852,8 +1060,6 @@ namespace
 			state.Orders.erase(it);
 			return false;
 		}
-
-		auto const pTargetCell = pTarget->GetCell();
 		auto const pHop = GetSafeAirHop(pHouse, pAir, pTargetCell);
 
 		if (!pHop || pHop == pTargetCell)
@@ -899,7 +1105,7 @@ namespace
 		// Sortie damage the wings flying out send at each target (key access only), and the targets
 		// already looked up.
 		std::unordered_map<DWORD, int> committedByTarget;
-		std::unordered_map<DWORD, BuildingClass*> targetsByID;
+		std::unordered_map<DWORD, TechnoClass*> targetsByID;
 		// Our strike aircraft alive now, for the wing lesson. Lookup only.
 		std::unordered_set<DWORD> strikeAircraftAlive;
 
@@ -933,7 +1139,7 @@ namespace
 					else
 					{
 						auto const known = targetsByID.find(order.TargetID);
-						auto const pTarget = known != targetsByID.end() ? known->second : FindBuildingByID(order.TargetID);
+						auto const pTarget = known != targetsByID.end() ? known->second : FindAirStrikeTechnoByID(order.TargetID);
 						targetsByID[order.TargetID] = pTarget;
 
 						if (pTarget)
@@ -964,12 +1170,12 @@ namespace
 				if (flying)
 					return false;
 
-				auto const pTarget = FindBuildingByID(flight.TargetID);
+				auto const pTarget = FindAirStrikeTechnoByID(flight.TargetID);
 				const bool stands = pTarget && pTarget->IsAlive && !pTarget->InLimbo;
 				const int size = static_cast<int>(flight.Members.size());
 				const int lost = static_cast<int>(std::count_if(flight.Members.begin(), flight.Members.end(),
 					[&strikeAircraftAlive](DWORD id) { return !strikeAircraftAlive.contains(id); }));
-				const bool failed = stands || lost * 2 >= size;
+				const bool failed = (flight.IsBuildingTarget && stands) || lost * 2 >= size;
 				const int stepsBefore = AirWingLessonStepsNow(state);
 
 				if (failed)
@@ -1029,9 +1235,10 @@ namespace
 				if (!waited && (state.WingWaitLogFrame < 0 || now < state.WingWaitLogFrame || now - state.WingWaitLogFrame >= 1800))
 				{
 					state.WingWaitLogFrame = now;
+					auto const pShortType = pick.ShortTarget ? pick.ShortTarget->GetTechnoType() : nullptr;
 					Debug::Log("[NeuralAI] House %d AirWing waits: %d ready of %d (%d pending), best target %s at risk %d needs %d, they deliver %d,"
 						" frame %d.\n", pHouse->ArrayIndex, static_cast<int>(ready.size()), strikeFleet, pending,
-						pick.ShortTarget ? pick.ShortTarget->Type->ID : "none", pick.ShortRisk, pick.ShortNeed, pick.ShortDamage, now);
+						pShortType ? pShortType->ID : "none", pick.ShortRisk, pick.ShortNeed, pick.ShortDamage, now);
 				}
 
 				if (!waited)
@@ -1040,8 +1247,61 @@ namespace
 				return;
 			}
 
-			// Mass enough: the rest of the fleet still rearming or flying home is waited for a while.
-			if (!waited && pending > 0)
+			auto const pTarget = pick.Target;
+			auto const pTargetType = pTarget->GetTechnoType();
+			const bool isBuildingTarget = pTarget->WhatAmI() == AbstractType::Building;
+			const CellStruct targetCell = pTarget->GetMapCoords();
+
+			// Generous attrition & repair cushion so a wing never flies tight: assumes 1..3 aircraft
+			// may fall en route on top of known target AA risk, and delivers 165% (+ lesson) of remaining HP
+			// before splitting surplus ready aircraft into additional simultaneous wings.
+			const int flightDistCells = static_cast<int>(ready.front()->GetMapCoords().DistanceFrom(targetCell));
+			const int attritionReserve = 1 + (flightDistCells >= 40 ? 1 : 0) + (pick.Risk >= 2 ? 1 : 0);
+			const int cushionedNeed = std::max(1, pick.Need * (165 + lessonPercent) / 100);
+			const int desiredMinPlanes = std::max({ wingMin, isBuildingTarget ? 3 : 2, pick.Risk + attritionReserve + 1 });
+
+			std::vector<AircraftClass*> candidates;
+			candidates.reserve(ready.size());
+
+			for (auto const pCandidate : ready)
+			{
+				if (AirSortieDamageVs(pCandidate, pTarget) > 0)
+					candidates.push_back(pCandidate);
+			}
+
+			std::sort(candidates.begin(), candidates.end(), [&targetCell](AircraftClass* a, AircraftClass* b)
+			{
+				const int da = static_cast<int>(a->GetMapCoords().DistanceFrom(targetCell));
+				const int db = static_cast<int>(b->GetMapCoords().DistanceFrom(targetCell));
+				return da != db ? da < db : a->UniqueID < b->UniqueID;
+			});
+
+			std::vector<AircraftClass*> wing;
+			int wingRawDamage = 0;
+
+			for (auto const pCandidate : candidates)
+			{
+				wing.push_back(pCandidate);
+				wingRawDamage += AirSortieDamageVs(pCandidate, pTarget);
+				const int countNow = static_cast<int>(wing.size());
+
+				if (countNow >= desiredMinPlanes)
+				{
+					const int expectedSurvivors = std::max(1, countNow - pick.Risk - attritionReserve);
+					const int cushionedDelivered = wingRawDamage / countNow * expectedSurvivors;
+
+					if (cushionedDelivered >= cushionedNeed)
+						break;
+				}
+			}
+
+			if (static_cast<int>(wing.size()) < wingMin)
+				return;
+
+			// Only hold for stragglers still rearming when this target consumes nearly our whole small fleet.
+			const bool needsFullSmallFleet = static_cast<int>(ready.size()) < 12
+				&& static_cast<int>(wing.size()) * 4 >= static_cast<int>(ready.size()) * 3;
+			if (!waited && pending > 0 && needsFullSmallFleet)
 			{
 				if (state.WingMassFrame < 0 || now < state.WingMassFrame)
 					state.WingMassFrame = now;
@@ -1053,28 +1313,17 @@ namespace
 			waited = true;
 			state.WingMassFrame = -1;
 
-			std::vector<AircraftClass*> wing;
-			auto const pTarget = pick.Target;
-
-			for (auto const pCandidate : ready)
-			{
-				if (AirSortieDamageVs(pCandidate, pTarget) > 0)
-					wing.push_back(pCandidate);
-			}
-
-			if (static_cast<int>(wing.size()) < wingMin)
-				return;
-
-			const CellStruct targetCell = pTarget->GetMapCoords();
+			const int wingCount = static_cast<int>(wing.size());
+			const int wingDelivered = wingCount > pick.Risk ? (wingRawDamage / wingCount * (wingCount - pick.Risk)) : 0;
 			state.WingsLaunched++;
 			CountDecision(NeuralDecision::AirWing, pHouse->ArrayIndex);
 			Debug::Log("[NeuralAI] House %d AirWing: %d %s -> %s of house %d at (%d,%d), risk %d, score %d, front %s, frame %d (wings %d);"
-				" %d ready of %d (%d pending), they deliver %d of %d.\n", pHouse->ArrayIndex, static_cast<int>(wing.size()), wing.front()->Type->ID,
-				pTarget->Type->ID, pTarget->Owner->ArrayIndex, targetCell.X, targetCell.Y, pick.Risk, pick.Score,
+				" %d ready of %d (%d pending), they deliver %d of %d.\n", pHouse->ArrayIndex, wingCount, wing.front()->Type->ID,
+				pTargetType ? pTargetType->ID : "?", pTarget->Owner->ArrayIndex, targetCell.X, targetCell.Y, pick.Risk, pick.Score,
 				state.FrontCell != CellStruct::Empty ? "yes" : "no", now, state.WingsLaunched, static_cast<int>(ready.size()), strikeFleet, pending,
-				pick.Damage, pick.Need);
+				wingDelivered, pick.Need);
 
-			NeuralAirWingFlight flight { pTarget->UniqueID, pTarget->Type, {}, now };
+			NeuralAirWingFlight flight { pTarget->UniqueID, pTargetType, isBuildingTarget, {}, now };
 
 			// Every order of the wing first, then the flights: ContinueAirStrike weighs the risk at the target
 			// against the aircraft bound for it, and given one by one each member saw a wing of itself

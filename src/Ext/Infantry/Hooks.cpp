@@ -8,6 +8,7 @@
 
 #include <WWKeyboardClass.h>
 #include <GameOptionsClass.h>
+#include <Misc/NeuralAI/NeuralAI.h>
 #include <Utilities/SequenceRates.h>
 
 DEFINE_HOOK(0x51DF42, InfantryClass_Limbo_Cyborg, 0x7)
@@ -340,6 +341,8 @@ DEFINE_HOOK(0x51A002, InfantryClass_UpdatePosition_InfiltrateBuilding, 0x6)
 
 	if (const auto pTag = pBuilding->AttachedTag)
 		pTag->RaiseEvent(TriggerEvent::SpyAsInfantry, pThis, CellStruct::Empty);
+
+	NeuralAI::OnBuildingInfiltrated(pThis, pBuilding);
 
 	return 0;
 }

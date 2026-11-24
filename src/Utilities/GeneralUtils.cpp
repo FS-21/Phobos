@@ -87,19 +87,43 @@ struct DummyTypeExtHere
 
 const double GeneralUtils::GetWarheadVersusArmor(WarheadTypeClass* pWH, Armor armorType)
 {
+	if (!pWH)
+		return 0.0;
+
+	const int armorIdx = static_cast<int>(armorType);
+
+	if (armorIdx < 0)
+		return 0.0;
+
 	if (AresHelper::CanUseAres)
-		return reinterpret_cast<DummyTypeExtHere*>(*(uintptr_t*)((char*)pWH + 0x1CC))->Verses[static_cast<int>(armorType)].Verses;
+	{
+		if (auto const pExt = reinterpret_cast<DummyTypeExtHere*>(*(uintptr_t*)((char*)pWH + 0x1CC)))
+		{
+			if (static_cast<size_t>(armorIdx) < pExt->Verses.size())
+				return pExt->Verses[armorIdx].Verses;
+		}
+	}
 
 	return static_cast<double>(MapClass::GetTotalDamage(100, pWH, armorType, 0)) / 100.0;
 }
 
 const double GeneralUtils::GetWarheadVersusArmor(WarheadTypeClass* pWH, TechnoClass* pThis, TechnoTypeClass* pType)
 {
-	auto armorType = pType->Armor;
-	auto const pShield = TechnoExt::Fetch(pThis)->Shield.get();
+	if (!pWH || !pType)
+		return 0.0;
 
-	if (pShield && pShield->IsActive() && !pShield->CanBePenetrated(pWH))
-		armorType = pShield->GetArmorType(pType);
+	auto armorType = pType->Armor;
+
+	if (pThis)
+	{
+		if (auto const pExt = TechnoExt::TryFetch(pThis))
+		{
+			auto const pShield = pExt->Shield.get();
+
+			if (pShield && pShield->IsActive() && !pShield->CanBePenetrated(pWH))
+				armorType = pShield->GetArmorType(pType);
+		}
+	}
 
 	return GeneralUtils::GetWarheadVersusArmor(pWH, armorType);
 }

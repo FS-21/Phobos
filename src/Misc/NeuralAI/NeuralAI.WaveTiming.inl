@@ -296,25 +296,52 @@ namespace
 		}
 
 		const bool weakDefenses = buildingsNear >= 2 && defenseNear <= 60;
-		check.Window = armyAway || heavyLosses || weakDefenses || tacticalWindow;
+		const bool finisherDrive = state.AdvantageRatio >= 170
+			|| (owner >= 0 && state.Enemies[owner].KnownBuildings > 0 && state.Enemies[owner].KnownBuildings <= 4
+				&& defenseNear <= 100 && state.OwnArmyValue >= 200);
+		const int aggressionShift = std::clamp(state.FinisherAggression / 25, -15, 20);
+		check.Window = armyAway || heavyLosses || weakDefenses || tacticalWindow || finisherDrive;
 		check.OurValue = readyValue + engaged;
 		check.EnemyValue = std::max(1, enemyValue);
 		check.Ratio = std::clamp(check.OurValue * 100 / check.EnemyValue, 0, 1000);
 
-		const int minimum = WaveMinimumValue(now) * waveMass / 1000;
+		const int baseMinimum = WaveMinimumValue(now) * waveMass / 1000;
+		const int minimum = finisherDrive ? std::max(90, baseMinimum * 55 / 100) : baseMinimum;
 		const int floor = WaveCostFloor(now) * waveMass / 1000;
 		check.HeldFrames = state.Holding ? now - state.HoldSinceFrame : 0;
 		const bool offensiveBank = HasOffensiveBank(pHouse);
-		const int required = offensiveBank
+		const int baseRequired = offensiveBank
 			? (check.Window ? 70 : std::max(75, 100 - check.HeldFrames / 90))
 			: (check.Window ? 90 : std::max(90, 130 - check.HeldFrames / 90));
+		const int required = finisherDrive
+			? std::clamp(65 - aggressionShift, 45, 80)
+			: std::clamp(baseRequired - aggressionShift / 2, 55, 145);
 		const bool byRatio = check.OurValue >= minimum && check.Ratio >= required;
 		check.Floor = !byRatio && ((check.OurValue >= floor && check.Ratio >= (offensiveBank ? 45 : 60)) || check.OurValue >= floor * 3 / 2);
 		check.Launch = byRatio || check.Floor;
+
+		if (!check.Launch && !finisherDrive && defenseNear >= 180 && macro.WaveFailuresInARow >= 2)
+		{
+			auto& mutMacro = GetMacroState(pHouse);
+			const int boostUntil = now + 1800;
+
+			for (const NeuralPlanId planId : { NeuralPlanId::RollingSiege, NeuralPlanId::Blackout, NeuralPlanId::HeavyAirPush })
+			{
+				const size_t idx = static_cast<size_t>(planId);
+				mutMacro.PlanBoost[idx] = std::max(mutMacro.PlanBoost[idx], 220);
+				mutMacro.PlanBoostUntilFrame[idx] = std::max(mutMacro.PlanBoostUntilFrame[idx], boostUntil);
+			}
+		}
+		else if (check.Launch && finisherDrive)
+		{
+			GetMacroState(pHouse).TrajFinisherLaunches++;
+		}
+
 		check.Reason = check.Floor ? "floor"
 			: (!check.Launch ? "held"
-				: (armyAway ? "armyAway" : (heavyLosses ? "losses" : (weakDefenses ? "weakDefenses"
-					: (tacticalWindow ? "tactical" : (offensiveBank ? "bank" : "ratio"))))));
+				: (finisherDrive ? "finisher"
+					: (armyAway ? "armyAway" : (heavyLosses ? "losses" : (weakDefenses ? "weakDefenses"
+						: (tacticalWindow ? "tactical" : (offensiveBank ? "bank" : "ratio")))))));
 
 		return check;
 	}

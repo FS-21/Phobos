@@ -5,6 +5,8 @@ namespace
 {
 	int AirSortieDamageVs(AircraftClass* pAir, BuildingClass* pTarget);
 	bool IsWingStrikeType(AircraftTypeClass* pType);
+	int CountKnownSpyCounterBuildings(HouseClass* pHouse, const InfantryTypeClass* pSpyType, const CellStruct& cell, int marginCells);
+	bool AdvancePlanSpyInfiltration(HouseClass* pHouse, InfantryClass* pSpy, BuildingClass* pTarget);
 	bool PlanSafeGroundRoute(HouseClass* pHouse, FootClass* pLead, const CellStruct& goal, std::vector<CellStruct>& waypoints,
 		int& danger, int& straightDanger);
 
@@ -111,7 +113,8 @@ namespace
 			auto const pWS = pType->GetWeapon(i);
 			auto const pWeapon = pWS ? pWS->WeaponType : nullptr;
 
-			if (pWeapon && pWeapon->Warhead && LandTargetingAllows(pType, i) && WeaponHitsGround(pWeapon)
+			if (pWeapon && pWeapon->Warhead && CanWarheadDamageEnemy(pWeapon->Warhead) && LandTargetingAllows(pType, i)
+				&& WeaponHitsGround(pWeapon)
 				&& GeneralUtils::GetWarheadVersusArmor(pWeapon->Warhead, pBld, pBld->Type) > 0.0)
 			{
 				return true;
@@ -804,8 +807,11 @@ namespace
 		auto const pWS = pFoot->GetWeapon(pFoot->SelectWeapon(pTarget));
 		auto const pWeapon = pWS ? pWS->WeaponType : nullptr;
 
-		if (!WeaponHitsGround(pWeapon) || !pWeapon->Warhead || pWeapon->Warhead->MindControl)
+		if (!WeaponHitsGround(pWeapon) || !pWeapon->Warhead || !CanWarheadDamageEnemy(pWeapon->Warhead)
+			|| pWeapon->Warhead->MindControl)
+		{
 			return false;
+		}
 
 		return GeneralUtils::GetWarheadVersusArmor(pWeapon->Warhead, pTarget, pTarget->GetTechnoType()) > GroundChainMinVersus;
 	}
@@ -6262,7 +6268,7 @@ namespace
 							auto const pSlot = pFoot->GetTechnoType()->GetWeapon(i);
 							auto const pWeapon = pSlot ? pSlot->WeaponType : nullptr;
 
-							if (!WeaponHitsGround(pWeapon) || !pWeapon->Warhead)
+							if (!WeaponHitsGround(pWeapon) || !pWeapon->Warhead || !CanWarheadDamageEnemy(pWeapon->Warhead))
 								continue;
 
 							const double verses = GeneralUtils::GetWarheadVersusArmor(pWeapon->Warhead, pBld, pBld->Type);
@@ -10277,8 +10283,8 @@ namespace
 				{
 					for (const DWORD uid : plan.Members)
 					{
-						if (auto const pSpy = findOwnFoot(uid))
-							OrderFootToEnter(pSpy, pTarget);
+						if (auto const pSpy = abstract_cast<InfantryClass*>(findOwnFoot(uid)))
+							AdvancePlanSpyInfiltration(pHouse, pSpy, pTarget);
 					}
 				}
 				else
@@ -10322,6 +10328,7 @@ namespace
 						auto const pInf = abstract_cast<InfantryClass*>(pFoot);
 
 						if (pInf && IsSpyInfantryType(pInf->Type) && isFreeForPlan(pInf) && ObjectZone(pInf, MovementZone::Normal) == ObjectZone(pTarget, MovementZone::Normal)
+							&& CountKnownSpyCounterBuildings(pHouse, pInf->Type, pTarget->GetMapCoords(), 1) == 0
 							&& (group.empty() || uid < group.front()->UniqueID))
 						{
 							group.assign(1, pInf);
@@ -10341,7 +10348,10 @@ namespace
 					planOf(NeuralPlanId::Sabotage).AuxBaseline = bySpy ? 1 : 0;
 
 					if (bySpy)
-						OrderFootToEnter(group.front(), pTarget);
+					{
+						if (auto const pSpyInf = abstract_cast<InfantryClass*>(group.front()))
+							AdvancePlanSpyInfiltration(pHouse, pSpyInf, pTarget);
+					}
 					else
 						strikeWithMembers(planOf(NeuralPlanId::Sabotage).Members, pTarget);
 				}

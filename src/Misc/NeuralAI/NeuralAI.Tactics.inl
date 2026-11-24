@@ -498,8 +498,8 @@ namespace
 			auto const pSlot = pFoot->GetWeapon(pFoot->SelectWeapon(pBest));
 			auto const pWeapon = pSlot ? pSlot->WeaponType : nullptr;
 
-			if (!pWeapon || !pWeapon->Warhead || pWeapon->Damage <= 0
-				|| MapClass::GetTotalDamage(pWeapon->Damage, pWeapon->Warhead, pBest->Type->Armor, 0) <= 0)
+			if (!pWeapon || !pWeapon->Warhead || pWeapon->Damage <= 0 || !CanWarheadDamageEnemy(pWeapon->Warhead)
+				|| GeneralUtils::GetWarheadVersusArmor(pWeapon->Warhead, pBest, pBest->Type) <= 0.0)
 			{
 				continue;
 			}

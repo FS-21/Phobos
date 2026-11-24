@@ -3,14 +3,18 @@
 
 namespace
 {
-	// One slice of the seen enemy army: an armor type in one force category, by remembered value.
+	// One slice of the seen enemy army: an armor type (and optional Phobos shield type) in one force category, by remembered value.
 	struct NeuralCounterTarget
 	{
 		int ArmorIndex { 0 };
 		EnemyForceCategory Category { EnemyForceCategory::Vehicle };
 		int Value { 0 };
-		// It attacked our buildings lately (its value already weighs more).
 		bool AttackingNow { false };
+		bool Submerged { false };
+		bool Organic { false };
+		bool FastClose { false };
+		int ShieldArmorIndex { -1 };
+		const TechnoTypeClass* SampleType { nullptr };
 	};
 
 	// The seen enemy army as counter targets (fog-fair: built from the sightings memory only).
@@ -18,13 +22,14 @@ namespace
 	{
 		std::vector<NeuralCounterTarget> Targets {};
 		int TotalValue { 0 };
-		// Value-weighted mean main weapon range (leptons) of the seen ground and naval units, and
-		// mean speed of the seen artillery.
 		int GroundRange { 0 };
 		int ArtillerySpeed { 0 };
 		int VehicleShare { 0 };
 		int ArtilleryShare { 0 };
-		// Something attacked our buildings within CounterThreatNowFrames, and something not in the air.
+		int PsionicShare { 0 };
+		std::vector<int> EnemyThreatVsArmor {};
+		int MeanEnemyThreat { 0 };
+		std::array<int16_t, 4> RoleScores {};
 		bool UnderAttack { false };
 		bool UnderGroundAttack { false };
 	};
@@ -61,13 +66,58 @@ namespace
 	NeuralCounterView BuildCounterView(HouseClass* pHouse)
 	{
 		NeuralCounterView view {};
+		auto const& macro = GetMacroState(pHouse);
+		view.RoleScores = macro.CounterRoleScores;
+		const int armorCount = GetRegisteredArmorCount();
+		view.EnemyThreatVsArmor.assign(armorCount, 0);
 		long long rangeSum = 0;
 		long long rangeWeight = 0;
 		long long speedSum = 0;
 		int artilleryValue = 0;
 		int vehicleValue = 0;
+		int psionicValue = 0;
+		std::vector<long long> armorThreatSum(armorCount, 0);
+		long long armorThreatWeight = 0;
 
-		for (auto const& [uid, sighting] : GetMacroState(pHouse).EnemySightings)
+		auto shieldIndexOf = [](const TechnoTypeClass* pTargetType) -> int
+		{
+			Armor shieldArmor = Armor::None;
+			int shieldStrength = 0;
+
+			if (GetActiveTypeShield(pTargetType, shieldArmor, shieldStrength) && shieldStrength > 0)
+				return static_cast<int>(shieldArmor);
+
+			return -1;
+		};
+
+		auto recordEnemyWeaponThreat = [&](const TechnoTypeClass* pEnemyType, int weight)
+		{
+			if (!pEnemyType || weight <= 0)
+				return;
+
+			auto const pWS = const_cast<TechnoTypeClass*>(pEnemyType)->GetWeapon(0);
+			auto const pWpn = pWS ? pWS->WeaponType : nullptr;
+
+			if (!pWpn || !pWpn->Warhead || pWpn->Damage <= 0 || !CanWarheadDamageEnemy(pWpn->Warhead))
+				return;
+
+			if (pWpn->Warhead->MindControl || pWpn->Warhead->PsychicDamage)
+				psionicValue += weight;
+
+			for (int a = 0; a < armorCount; ++a)
+			{
+				const double rawVerses = GeneralUtils::GetWarheadVersusArmor(pWpn->Warhead, static_cast<Armor>(a));
+				const WarheadFlags flags = GetWarheadVersusFlags(pWpn->Warhead, static_cast<Armor>(a));
+				const int pct = (rawVerses > 0.0 && (flags.ForceFire || rawVerses > 0.0001))
+					? std::clamp(static_cast<int>(rawVerses * 100.0 + 0.5), 0, 220)
+					: 0;
+				armorThreatSum[a] += static_cast<long long>(pct) * weight;
+			}
+
+			armorThreatWeight += weight;
+		};
+
+		for (auto const& [uid, sighting] : macro.EnemySightings)
 		{
 			if (!sighting.Type)
 				continue;
@@ -80,15 +130,34 @@ namespace
 				continue;
 
 			const int armorIndex = static_cast<int>(sighting.Type->Armor);
+			const int shieldIndex = shieldIndexOf(sighting.Type);
+			const bool submerged = sighting.Category == EnemyForceCategory::Naval && sighting.Type->Underwater;
+			const bool organic = sighting.Type->Organic || sighting.Category == EnemyForceCategory::Infantry;
+			auto const pSightWS = const_cast<TechnoTypeClass*>(sighting.Type)->GetWeapon(0);
+			auto const pSightWpn = pSightWS ? pSightWS->WeaponType : nullptr;
+			const bool fastClose = sighting.Category != EnemyForceCategory::Air
+				&& sighting.Type->Speed >= 7 && (!pSightWpn || pSightWpn->Range <= 5 * Unsorted::LeptonsPerCell);
+
 			auto const it = std::find_if(view.Targets.begin(), view.Targets.end(),
-				[&](const NeuralCounterTarget& target) { return target.ArmorIndex == armorIndex && target.Category == sighting.Category; });
+				[&](const NeuralCounterTarget& target)
+				{
+					return target.ArmorIndex == armorIndex && target.ShieldArmorIndex == shieldIndex
+						&& target.Category == sighting.Category && target.Submerged == submerged && target.Organic == organic;
+				});
 
 			if (it != view.Targets.end())
+			{
 				it->Value += weighted;
+				it->FastClose = it->FastClose || fastClose;
+			}
 			else
-				view.Targets.push_back({ armorIndex, sighting.Category, weighted });
+			{
+				view.Targets.push_back({ armorIndex, sighting.Category, weighted, false, submerged, organic, fastClose,
+					shieldIndex, sighting.Type });
+			}
 
 			view.TotalValue += weighted;
+			recordEnemyWeaponThreat(sighting.Type, weighted);
 
 			// A launcher of aircraft also asks for what shoots its spawns down (AircraftSpawnOf); the
 			// launcher itself stays in the view as what it is, to be beaten on its own ground or sea.
@@ -96,16 +165,26 @@ namespace
 			{
 				const int spawnWeighted = AircraftSpawnThreatOf(sighting.Type) * (EnemySightingMemoryFrames - age) / EnemySightingMemoryFrames;
 				const int spawnArmor = static_cast<int>(pSpawns->Armor);
+				const int spawnShield = shieldIndexOf(pSpawns);
 
 				if (spawnWeighted > 0)
 				{
 					auto const itAir = std::find_if(view.Targets.begin(), view.Targets.end(),
-						[&](const NeuralCounterTarget& target) { return target.ArmorIndex == spawnArmor && target.Category == EnemyForceCategory::Air; });
+						[&](const NeuralCounterTarget& target)
+						{
+							return target.ArmorIndex == spawnArmor && target.ShieldArmorIndex == spawnShield
+								&& target.Category == EnemyForceCategory::Air;
+						});
 
 					if (itAir != view.Targets.end())
+					{
 						itAir->Value += spawnWeighted;
+					}
 					else
-						view.Targets.push_back({ spawnArmor, EnemyForceCategory::Air, spawnWeighted });
+					{
+						view.Targets.push_back({ spawnArmor, EnemyForceCategory::Air, spawnWeighted, false, false, false, false,
+							spawnShield, pSpawns });
+					}
 
 					view.TotalValue += spawnWeighted;
 				}
@@ -146,6 +225,7 @@ namespace
 
 			view.UnderAttack = true;
 			const int armorIndex = static_cast<int>(rec.AttackerType->Armor);
+			const int shieldIndex = shieldIndexOf(rec.AttackerType);
 			const bool byAir = rec.Threat == NeuralThreatCategory::Air;
 			view.UnderGroundAttack = view.UnderGroundAttack || !byAir;
 			const bool byInfantry = rec.Threat == NeuralThreatCategory::Infantry;
@@ -157,7 +237,7 @@ namespace
 					: byInfantry ? target.Category == EnemyForceCategory::Infantry
 					: (target.Category != EnemyForceCategory::Air && target.Category != EnemyForceCategory::Infantry);
 
-				if (target.ArmorIndex != armorIndex || !sameKind)
+				if (target.ArmorIndex != armorIndex || target.ShieldArmorIndex != shieldIndex || !sameKind)
 					continue;
 
 				found = true;
@@ -175,8 +255,12 @@ namespace
 				const int value = std::max(rec.AttackerType->Cost, view.TotalValue / 4);
 				const EnemyForceCategory category = byAir ? EnemyForceCategory::Air
 					: byInfantry ? EnemyForceCategory::Infantry : EnemyForceCategory::Vehicle;
-				view.Targets.push_back({ armorIndex, category, value, true });
+				const bool submerged = rec.AttackerType->Naval && rec.AttackerType->Underwater;
+				const bool organic = rec.AttackerType->Organic || byInfantry;
+				view.Targets.push_back({ armorIndex, category, value, true, submerged, organic, rec.AttackerType->Speed >= 7,
+					shieldIndex, rec.AttackerType });
 				view.TotalValue += value;
+				recordEnemyWeaponThreat(rec.AttackerType, value);
 
 				if (category == EnemyForceCategory::Vehicle)
 					vehicleValue += value;
@@ -189,22 +273,52 @@ namespace
 			view.ArtillerySpeed = artilleryValue > 0 ? static_cast<int>(speedSum / artilleryValue) : 0;
 			view.VehicleShare = vehicleValue * 100 / view.TotalValue;
 			view.ArtilleryShare = artilleryValue * 100 / view.TotalValue;
+			view.PsionicShare = std::clamp(psionicValue * 100 / view.TotalValue, 0, 100);
+
+			if (armorThreatWeight > 0)
+			{
+				long long sumThreat = 0;
+				int activeArmors = 0;
+
+				for (int a = 0; a < armorCount; ++a)
+				{
+					view.EnemyThreatVsArmor[a] = static_cast<int>(armorThreatSum[a] / armorThreatWeight);
+
+					if (a < 9 || (GetArmorDomainMask(a) & (ArmorDomainInfantry | ArmorDomainVehicle | ArmorDomainShield)) != 0)
+					{
+						sumThreat += view.EnemyThreatVsArmor[a];
+						activeArmors++;
+					}
+				}
+
+				view.MeanEnemyThreat = activeArmors > 0 ? static_cast<int>(sumThreat / activeArmors) : 0;
+			}
 		}
 
 		return view;
 	}
 
+	struct CounterWeaponSlot
+	{
+		WeaponTypeClass* Weapon { nullptr };
+		const TechnoTypeClass* Platform { nullptr };
+		int Slot { 0 };
+	};
+
 	// The weapons a type fights with: primary and secondary, or for a carrier the weapons of the
-	// aircraft it launches (the launcher weapon itself deals no real damage). Healing and
-	// damage-less weapons do not count.
-	int CollectCounterWeapons(TechnoTypeClass* pType, std::array<WeaponTypeClass*, 4>& out)
+	// aircraft it launches (the launcher weapon itself deals no real damage). Healing, ally-only,
+	// fake-engineer capture and damage-less weapons do not count.
+	int CollectCounterWeapons(TechnoTypeClass* pType, std::array<CounterWeaponSlot, 4>& out)
 	{
 		int count = 0;
 
-		auto add = [&](WeaponTypeClass* pWeapon)
+		auto add = [&](WeaponTypeClass* pWeapon, const TechnoTypeClass* pPlatform, int slot)
 		{
-			if (pWeapon && pWeapon->Warhead && pWeapon->Damage > 0 && count < 4)
-				out[count++] = pWeapon;
+			if (pWeapon && !pWeapon->NeverUse && pWeapon->Warhead && pWeapon->Damage > 0
+				&& CanWarheadDamageEnemy(pWeapon->Warhead) && count < 4)
+			{
+				out[count++] = { pWeapon, pPlatform, slot };
+			}
 		};
 
 		for (int i = 0; i < 2; ++i)
@@ -220,26 +334,61 @@ namespace
 				for (int j = 0; j < 2; ++j)
 				{
 					auto const pSpawnWS = pType->Spawns->GetWeapon(j);
-					add(pSpawnWS ? pSpawnWS->WeaponType : nullptr);
+					add(pSpawnWS ? pSpawnWS->WeaponType : nullptr, pType->Spawns, j);
 				}
 
 				continue;
 			}
 
-			add(pWeapon);
+			add(pWeapon, pType, i);
 		}
 
 		return count;
 	}
 
-	bool CounterWeaponHits(const WeaponTypeClass* pWeapon, EnemyForceCategory category)
+	bool CounterWeaponHits(const CounterWeaponSlot& cw, const NeuralCounterTarget& target)
 	{
+		auto const pWeapon = cw.Weapon;
+		auto const pPlatform = cw.Platform;
 		auto const pProjectile = pWeapon->Projectile;
 
-		if (category == EnemyForceCategory::Air)
+		if (target.Category == EnemyForceCategory::Air)
 			return pProjectile && pProjectile->AA;
 
-		return !pProjectile || pProjectile->AG;
+		if (pProjectile && !pProjectile->AG)
+			return false;
+
+		if (!pPlatform)
+			return true;
+
+		if (target.Category == EnemyForceCategory::Naval)
+		{
+			const NavalTargetingType nt = pPlatform->NavalTargeting;
+
+			if (nt == NavalTargetingType::Naval_None)
+				return false;
+
+			if (target.Submerged)
+			{
+				if (nt == NavalTargetingType::Underwater_Never)
+					return false;
+
+				if (nt == NavalTargetingType::Organic_Secondary && !target.Organic)
+					return false;
+
+				if (nt == NavalTargetingType::Underwater_Secondary && cw.Slot == 0)
+					return false;
+
+				if (nt == NavalTargetingType::Naval_Primary && cw.Slot != 0)
+					return false;
+
+				return true;
+			}
+
+			return nt != NavalTargetingType::Underwater_Only;
+		}
+
+		return LandTargetingAllows(pPlatform, cw.Slot);
 	}
 
 	// Which production queue a type competes in as a combat unit, or -1 when it is no combat
@@ -249,7 +398,7 @@ namespace
 		if (!pType)
 			return -1;
 
-		std::array<WeaponTypeClass*, 4> weapons {};
+		std::array<CounterWeaponSlot, 4> weapons {};
 
 		if (CollectCounterWeapons(pType, weapons) == 0)
 			return -1;
@@ -291,31 +440,33 @@ namespace
 	}
 
 	// How well a type answers the seen enemy army, in percent: the value-weighted best Verses of
-	// its weapons against each seen armor (0 where none of its weapons can hit that target), with
-	// area damage worth more against infantry, one-shot weapons worth half, and land units worth
-	// half against ships they can only reach from the shore. Outranging the enemy guns while it fields armor, and speed with a
-	// ground weapon against artillery (flankers and air strikes hunt it), add to it.
+	// its weapons against each seen custom armor and Phobos shield (0 where none of its weapons can
+	// hit that target), with area damage worth more against infantry, one-shot weapons worth half,
+	// and land units worth half against ships they can only reach from the shore.
 	int CounterFitOf(TechnoTypeClass* pType, const NeuralCounterView& view)
 	{
-		std::array<WeaponTypeClass*, 4> weapons {};
+		std::array<CounterWeaponSlot, 4> weapons {};
 		const int count = CollectCounterWeapons(pType, weapons);
 
 		if (count == 0 || view.TotalValue <= 0)
 			return 0;
 
 		const bool isAircraft = pType->WhatAmI() == AbstractType::AircraftType;
-		const bool isLandBound = !isAircraft && !pType->Naval && pType->WhatAmI() != AbstractType::BuildingType
+		const bool isBuilding = pType->WhatAmI() == AbstractType::BuildingType;
+		const bool isLandBound = !isAircraft && !pType->Naval && !isBuilding
 			&& pType->MovementZone != MovementZone::Amphibious && pType->MovementZone != MovementZone::AmphibiousDestroyer
 			&& pType->MovementZone != MovementZone::AmphibiousCrusher && pType->MovementZone != MovementZone::Fly
 			&& !pType->JumpJet;
 		int groundRange = 0;
+		const NeuralCounterTarget groundProbe { 0, EnemyForceCategory::Vehicle, 1, false, false, false, false, -1, nullptr };
 
 		for (int w = 0; w < count; ++w)
 		{
-			if (CounterWeaponHits(weapons[w], EnemyForceCategory::Vehicle))
-				groundRange = std::max(groundRange, weapons[w]->Range);
+			if (CounterWeaponHits(weapons[w], groundProbe))
+				groundRange = std::max(groundRange, weapons[w].Weapon->Range);
 		}
 
+		const int costNorm = std::clamp(pType->Cost, 150, 3200);
 		long long sum = 0;
 
 		for (auto const& target : view.Targets)
@@ -324,42 +475,118 @@ namespace
 
 			for (int w = 0; w < count; ++w)
 			{
-				auto const pWeapon = weapons[w];
-
-				if (!CounterWeaponHits(pWeapon, target.Category))
+				if (!CounterWeaponHits(weapons[w], target))
 					continue;
 
-				const double verses = GeneralUtils::GetWarheadVersusArmor(pWeapon->Warhead, static_cast<Armor>(target.ArmorIndex));
-				int pct = std::clamp(static_cast<int>(verses * 100.0 + 0.5), 0, 200);
+				auto const pWeapon = weapons[w].Weapon;
+				auto const pWH = pWeapon->Warhead;
+				int pct = 0;
+
+				if (target.SampleType)
+				{
+					pct = std::clamp((GetEffectiveVersusAgainstTypePermille(pWH, target.SampleType) + 5) / 10, 0, 250);
+				}
+				else
+				{
+					const Armor tgtArmor = static_cast<Armor>(target.ArmorIndex);
+					const double verses = GeneralUtils::GetWarheadVersusArmor(pWH, tgtArmor);
+					const WarheadFlags flags = GetWarheadVersusFlags(pWH, tgtArmor);
+
+					if (verses > 0.0 && (flags.ForceFire || verses > 0.0001))
+					{
+						pct = std::clamp(static_cast<int>(verses * 100.0 + 0.5), 0, 220);
+
+						if (!flags.PassiveAcquire)
+							pct = pct * 55 / 100;
+					}
+				}
+
+				if (pct <= 0)
+					continue;
+
+				// Weight Verses by real DPS efficiency (Damage * Burst / ROF normalized against Cost) so a
+				// weak low-DPS gun with 100% Verses never beats a true high-DPS counter.
+				const int burst = std::clamp(pWeapon->Burst, 1, 12);
+				const int rof = std::max(10, pWeapon->ROF);
+				const int rawDps = pWeapon->Damage * burst * 60 / rof;
+				const int dpsPerCost = rawDps * 100 / std::max(20, costNorm / 10);
+				const int dpsScale = std::clamp(65 + dpsPerCost * 2 / 5, 65, 175);
+				pct = pct * dpsScale / 110;
 
 				if (target.Category == EnemyForceCategory::Infantry)
-					pct = pct * (100 + std::clamp(static_cast<int>(pWeapon->Warhead->CellSpread * 35.0f), 0, 70)) / 100;
+					pct = pct * (100 + std::clamp(static_cast<int>(pWH->CellSpread * 40.0f), 0, 80)) / 100;
 
-				// A one-shot weapon (suicide charge, planted bomb) is spent on one target, not an army.
-				if (pWeapon->Suicide || pWeapon->Warhead->IvanBomb)
+				if (pWH->EMEffect && (target.Category == EnemyForceCategory::Vehicle || target.Category == EnemyForceCategory::Artillery
+					|| target.Category == EnemyForceCategory::Naval))
+				{
+					pct = pct * 135 / 100;
+				}
+
+				if (pWH->MindControl || pWH->Temporal)
+				{
+					pct = (target.Category == EnemyForceCategory::Infantry) ? (pct * 70 / 100) : (pct * 130 / 100);
+				}
+
+				if (pWeapon->MinimumRange >= 2 * Unsorted::LeptonsPerCell && target.FastClose)
+					pct = pct * 70 / 100;
+
+				if (pWeapon->Suicide || pWH->IvanBomb)
 					pct /= 2;
 
 				best = std::max(best, pct);
 			}
 
 			if (target.Category == EnemyForceCategory::Naval && isLandBound)
-				best /= 2;
+				best = target.Submerged ? 0 : (best / 2);
 
 			sum += static_cast<long long>(best) * target.Value;
 		}
 
 		int fit = static_cast<int>(sum / view.TotalValue);
 
-		if (view.GroundRange > 0 && groundRange >= view.GroundRange + 2 * Unsorted::LeptonsPerCell)
-			fit += view.VehicleShare * 30 / 100;
+		// Survivability across all custom [ArmorTypes] and [ShieldTypes]: prefer units whose hull and
+		// shield armors resist what the enemy shoots, and penalize fragile units unless they outrange it.
+		const int ownArmor = static_cast<int>(pType->Armor);
+		Armor ownShieldArmor = pType->Armor;
+		int ownShieldStrength = 0;
+		GetActiveTypeShield(pType, ownShieldArmor, ownShieldStrength);
+		const bool outrangesEnemy = view.GroundRange > 0 && groundRange >= view.GroundRange + 2 * Unsorted::LeptonsPerCell;
 
-		if (view.ArtilleryShare >= 10 && groundRange > 0
-			&& (isAircraft || (pType->WhatAmI() != AbstractType::BuildingType && pType->Speed >= std::max(6, view.ArtillerySpeed + 2))))
+		if (view.MeanEnemyThreat > 0 && ownArmor >= 0 && ownArmor < static_cast<int>(view.EnemyThreatVsArmor.size()))
 		{
-			fit += view.ArtilleryShare / 2;
+			int incoming = view.EnemyThreatVsArmor[ownArmor];
+			const int ownShieldIdx = static_cast<int>(ownShieldArmor);
+
+			if (ownShieldStrength > 0 && ownShieldIdx >= 0 && ownShieldIdx < static_cast<int>(view.EnemyThreatVsArmor.size()))
+			{
+				const int hullHP = std::max(1, pType->Strength);
+				incoming = static_cast<int>((static_cast<long long>(incoming) * hullHP
+					+ static_cast<long long>(view.EnemyThreatVsArmor[ownShieldIdx]) * ownShieldStrength)
+					/ (hullHP + ownShieldStrength));
+			}
+
+			if (incoming < view.MeanEnemyThreat)
+				fit += std::min(22, (view.MeanEnemyThreat - incoming) / 3);
+			else if (!outrangesEnemy && !isAircraft)
+				fit -= std::min(24, (incoming - view.MeanEnemyThreat) / 3);
 		}
 
-		return fit;
+		if (view.PsionicShare > 0 && (pType->ImmuneToPsionics || pType->ImmuneToPsionicWeapons))
+			fit += view.PsionicShare * 45 / 100;
+
+		if (outrangesEnemy)
+			fit += view.VehicleShare * 35 / 100 + std::clamp(static_cast<int>(view.RoleScores[2]) / 30, -8, 14);
+
+		if (view.ArtilleryShare >= 10 && groundRange > 0
+			&& (isAircraft || (!isBuilding && pType->Speed >= std::max(6, view.ArtillerySpeed + 2))))
+		{
+			fit += view.ArtilleryShare / 2 + std::clamp(static_cast<int>(view.RoleScores[0]) / 25, -8, 16);
+		}
+
+		if (groundRange >= 7 * Unsorted::LeptonsPerCell)
+			fit += std::clamp(static_cast<int>(view.RoleScores[1]) / 30, -8, 14);
+
+		return std::max(0, fit);
 	}
 
 	// One enemy force as counter targets (Counter Squad): the units of one house and one force
@@ -381,13 +608,29 @@ namespace
 			}
 
 			const int armorIndex = static_cast<int>(sighting.Type->Armor);
+			Armor sArmor = Armor::None;
+			int sStrength = 0;
+			const int shieldIndex = (GetActiveTypeShield(sighting.Type, sArmor, sStrength) && sStrength > 0)
+				? static_cast<int>(sArmor)
+				: -1;
+			const bool submerged = category == EnemyForceCategory::Naval && sighting.Type->Underwater;
+			const bool organic = sighting.Type->Organic || category == EnemyForceCategory::Infantry;
 			auto const it = std::find_if(view.Targets.begin(), view.Targets.end(),
-				[armorIndex](const NeuralCounterTarget& target) { return target.ArmorIndex == armorIndex; });
+				[armorIndex, shieldIndex, submerged, organic](const NeuralCounterTarget& target)
+				{
+					return target.ArmorIndex == armorIndex && target.ShieldArmorIndex == shieldIndex
+						&& target.Submerged == submerged && target.Organic == organic;
+				});
 
 			if (it != view.Targets.end())
+			{
 				it->Value += sighting.Value;
+			}
 			else
-				view.Targets.push_back({ armorIndex, category, sighting.Value });
+			{
+				view.Targets.push_back({ armorIndex, category, sighting.Value, false, submerged, organic,
+					sighting.Type->Speed >= 7, shieldIndex, sighting.Type });
+			}
 
 			view.TotalValue += sighting.Value;
 			speedSum += static_cast<long long>(sighting.Type->Speed) * sighting.Value;

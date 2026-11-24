@@ -365,10 +365,12 @@ namespace
 	// than tried, OpLandingSpreadCells or more from where the other crossing transports of the
 	// operation set theirs down.
 	CellClass* PickOpLandingCell(const NeuralTransportOperation& op, FootClass* pTransport, OpCarrier carrier, const CellStruct& around,
-		const CellStruct& tried)
+		const CellStruct& tried, const NeuralOpTransport* pRecord = nullptr)
 	{
 		auto const pType = pTransport->GetTechnoType();
 		const bool flies = carrier == OpCarrier::Flyer || carrier == OpCarrier::Carryall;
+		auto const pCargoFoot = carrier == OpCarrier::Carryall ? pTransport->Passengers.GetFirstPassenger() : nullptr;
+		auto const pCargoType = pCargoFoot ? pCargoFoot->GetTechnoType() : nullptr;
 		std::vector<CellStruct> taken;
 
 		for (auto const& other : op.Transports)
@@ -378,19 +380,34 @@ namespace
 		}
 
 		NeuralWaitAsker asker {};
-		asker.Speed = pType->SpeedType;
-		asker.Movement = pType->MovementZone;
+		asker.Speed = pCargoType ? pCargoType->SpeedType : pType->SpeedType;
+		asker.Movement = pCargoType ? pCargoType->MovementZone : pType->MovementZone;
 		asker.ZoneMovement = static_cast<int>(MovementZone::Normal);
 		asker.Zone = op.TargetZone;
 		NeuralWaitSearch search {};
-		search.MaxRing = 6;
+		search.MaxRing = pRecord ? std::min(12, 6 + pRecord->Tries) : 6;
+		const int flags = WaitLegal | WaitLand | WaitNoBuilding | WaitZone
+			| (flies ? (WaitNotBeach | WaitNoObject | (pCargoType ? WaitClearOfUnits : 0)) : WaitClearOfUnits);
 
-		return FindWaitCellNear(around, search, asker,
-			WaitLegal | WaitLand | WaitNoBuilding | WaitZone | (flies ? (WaitNotBeach | WaitNoObject) : WaitClearOfUnits),
-			[&](const CellStruct& c, const CellClass*)
+		return FindWaitCellNear(around, search, asker, flags,
+			[&](const CellStruct& c, const CellClass* pCell)
 			{
-				return c == tried
-					|| std::any_of(taken.begin(), taken.end(), [&c](const CellStruct& at) { return at.DistanceFrom(c) < OpLandingSpreadCells; });
+				if (c == tried)
+					return true;
+
+				if (pRecord && std::any_of(pRecord->FailedLandings.begin(), pRecord->FailedLandings.end(),
+					[&c](const CellStruct& bad) { return bad != CellStruct::Empty && bad == c; }))
+				{
+					return true;
+				}
+
+				if (pCargoType && pCell
+					&& !const_cast<CellClass*>(pCell)->IsClearToMove(pCargoType->SpeedType, false, false, -1, pCargoType->MovementZone, -1, false))
+				{
+					return true;
+				}
+
+				return std::any_of(taken.begin(), taken.end(), [&c](const CellStruct& at) { return at.DistanceFrom(c) < OpLandingSpreadCells; });
 			});
 	}
 
@@ -3588,6 +3605,7 @@ namespace
 
 				if (out > 0)
 				{
+					macro.TrajDropsGood++;
 					Debug::Log("[NeuralAI] House %d transport op %d: %s %u sets %d of %d down at (%d,%d), %d frames after sailing, frame %d.\n",
 						houseIndex, op.Id, pTransport->GetTechnoType()->ID, pTransport->UniqueID, out, aboardBefore,
 						pTransport->GetMapCoords().X, pTransport->GetMapCoords().Y, now - transport.LegFrame, now);
@@ -3605,9 +3623,28 @@ namespace
 			{
 				transport.ParkFrame = now;
 				transport.Tries++;
-				auto const pNext = carrier == OpCarrier::Surface
-					? PickOpLandingCell(op, pTransport, carrier, transport.Landing, transport.Landing)
-					: PickOpFlyerCell(transport.Landing, op.TargetZone, 1, transport.Landing, {});
+				macro.TrajDropsBad++;
+
+				if (transport.Landing != CellStruct::Empty)
+				{
+					transport.FailedLandings[transport.FailedLandingCursor % transport.FailedLandings.size()] = transport.Landing;
+					transport.FailedLandingCursor++;
+				}
+
+				std::vector<CellStruct> blocked;
+
+				for (auto const& bad : transport.FailedLandings)
+				{
+					if (bad != CellStruct::Empty)
+						blocked.push_back(bad);
+				}
+
+				auto pNext = (carrier == OpCarrier::Surface || carrier == OpCarrier::Carryall)
+					? PickOpLandingCell(op, pTransport, carrier, transport.Landing, transport.Landing, &transport)
+					: PickOpFlyerCell(transport.Landing, op.TargetZone, 1, transport.Landing, blocked);
+
+				if (!pNext && carrier == OpCarrier::Carryall)
+					pNext = PickOpFlyerCell(transport.Landing, op.TargetZone, 1, transport.Landing, blocked);
 
 				if (pNext)
 				{

@@ -812,9 +812,39 @@ void NeuralAI::OnTechnoDestroyed(TechnoClass* pVictim, TechnoClass* pKiller)
 	if (pVictimOwner && pVictimOwner->ArrayIndex >= 0 && pVictimOwner->ArrayIndex < 32)
 		LastOrderCaller[pVictimOwner->ArrayIndex].erase(pVictim->UniqueID);
 
-	// Engineer claims (EngineerClaim*): a dead engineer claims nothing.
+	// Engineer claims (EngineerClaim*): a dead engineer claims nothing; enemy kills of active engineers
+	// and spies on mission feed the mechanism and trajectory credit.
 	if (pVictimOwner && pVictim->WhatAmI() == AbstractType::Infantry && NeuralAI::IsEnabledForHouse(pVictimOwner))
-		GetMacroState(pVictimOwner).EngineerCaptureTargets.erase(pVictim->UniqueID);
+	{
+		auto& victimMacro = GetMacroState(pVictimOwner);
+		auto const pVictimInf = static_cast<InfantryClass*>(pVictim);
+
+		if (pKiller && pKiller->Owner && pKiller->Owner != pVictimOwner && !pVictimOwner->IsAlliedWith(pKiller->Owner)
+			&& pVictimInf->Type && pVictimOwner->ArrayIndex >= 0 && pVictimOwner->ArrayIndex < 32)
+		{
+			if (IsCaptureInfantryType(pVictimInf->Type))
+			{
+				const CellStruct home = GetHouseHomeCell(pVictimOwner);
+				const bool onCaptureMission = victimMacro.EngineerCaptureTargets.contains(pVictim->UniqueID)
+					|| IsSpecOpsEngineerBusy(pVictimOwner, pVictim->UniqueID)
+					|| pVictimInf->CurrentMission == Mission::Capture || pVictimInf->CurrentMission == Mission::Enter
+					|| (home != CellStruct::Empty && pVictimInf->GetMapCoords().DistanceFrom(home) > 14.0);
+
+				if (onCaptureMission)
+				{
+					CountDecision(NeuralDecision::EngineerLostOnWay, pVictimOwner->ArrayIndex);
+					victimMacro.TrajSpecOpsLosses++;
+				}
+			}
+			else if (IsSpyInfantryType(pVictimInf->Type))
+			{
+				CountDecision(NeuralDecision::SpyLostOnWay, pVictimOwner->ArrayIndex);
+				victimMacro.TrajSpecOpsLosses++;
+			}
+		}
+
+		victimMacro.EngineerCaptureTargets.erase(pVictim->UniqueID);
+	}
 
 	// Detection need (DetectionNeedOf): a loss of ours to a killer we could not see, cloaked or
 	// disguised, under water, or standing in the dark. Fog-fair: only where we lost it and whether the
