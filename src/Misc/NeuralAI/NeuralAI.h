@@ -35,7 +35,9 @@ struct AIBaseHeader
 	uint32_t ExtraExpertWeightsOffset[2];
 	uint32_t GateWeightsOffset;
 	uint32_t MlpHiddenDim;
-	uint8_t ReservedHeader[368];
+	uint32_t GateHiddenDim;
+	uint32_t TanhLut16Offset;
+	uint8_t ReservedHeader[360];
 };
 
 struct AIBackpackEntry
@@ -49,6 +51,10 @@ struct AIBackpackEntry
 
 struct AIBackpackFile
 {
+	static constexpr uint32_t MaxSupportedSides = 32;
+	static constexpr uint32_t EntryCapacity = MaxSupportedSides * 8 * 10; // 2560
+	static constexpr uint32_t LegacyEntryCapacity = 512;
+
 	char Magic[8]; // "PHOBOSBP"
 	uint32_t SchemaVersion;
 	uint64_t BaseSignature;
@@ -60,7 +66,7 @@ struct AIBackpackFile
 	int8_t LoRA_B[16 * 128];
 	int16_t OutputBias[128];
 	uint32_t NumEntries;
-	AIBackpackEntry Entries[512];
+	AIBackpackEntry Entries[EntryCapacity];
 };
 
 struct AITrainerSharedTelemetry
@@ -135,6 +141,21 @@ struct AITrajectorySharedBuffer
 };
 
 #pragma pack(pop)
+
+static_assert(sizeof(AIBaseHeader) == 984, "AIBaseHeader must remain exactly 984 bytes");
+static_assert(sizeof(AIBackpackEntry) == 72, "AIBackpackEntry must remain 72 bytes");
+static_assert(sizeof(AIBackpackFile) == 6444 + AIBackpackFile::EntryCapacity * sizeof(AIBackpackEntry),
+	"AIBackpackFile size mismatch");
+
+inline uint32_t NeuralBackpackEntryIndex(int sideIndex, int archetype, int expert) noexcept
+{
+	const uint32_t s = static_cast<uint32_t>(sideIndex < 0 ? 0 : (sideIndex >= static_cast<int>(AIBackpackFile::MaxSupportedSides)
+		? static_cast<int>(AIBackpackFile::MaxSupportedSides) - 1
+		: sideIndex));
+	const uint32_t a = static_cast<uint32_t>(archetype < 0 ? 0 : (archetype >= 8 ? 7 : archetype));
+	const uint32_t e = static_cast<uint32_t>(expert < 0 ? 0 : (expert >= 10 ? 9 : expert));
+	return s * 80u + a * 10u + e;
+}
 
 // The factory a Neural AI house builds a queue at (src/Ext/Building/Hooks.Production.cpp).
 namespace NeuralFactoryQueue

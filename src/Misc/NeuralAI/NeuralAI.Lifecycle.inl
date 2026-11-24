@@ -382,13 +382,39 @@ bool NeuralAI::LoadBackpackFile(const char* pPath, AIBackpackFile& outBackpack, 
 	if (hFile == INVALID_HANDLE_VALUE)
 		return false;
 
+	LARGE_INTEGER fileSize {};
+	if (!GetFileSizeEx(hFile, &fileSize))
+	{
+		CloseHandle(hFile);
+		return false;
+	}
+
+	constexpr size_t HeaderBytes = offsetof(AIBackpackFile, Entries);
+	constexpr size_t LegacyTotalBytes = HeaderBytes + AIBackpackFile::LegacyEntryCapacity * sizeof(AIBackpackEntry);
+	constexpr size_t FullTotalBytes = sizeof(AIBackpackFile);
+
 	AIBackpackFile loaded = {};
-
 	DWORD bytesRead = 0;
+	bool valid = false;
 
-	const bool valid = ReadFile(hFile, &loaded, sizeof(AIBackpackFile), &bytesRead, NULL)
-		&& bytesRead == sizeof(AIBackpackFile) && std::memcmp(loaded.Magic, "PHOBOSBP", 8) == 0
-		&& loaded.SchemaVersion == 3;
+	if (static_cast<size_t>(fileSize.QuadPart) == FullTotalBytes)
+	{
+		valid = ReadFile(hFile, &loaded, static_cast<DWORD>(FullTotalBytes), &bytesRead, NULL)
+			&& bytesRead == FullTotalBytes
+			&& std::memcmp(loaded.Magic, "PHOBOSBP", 8) == 0
+			&& (loaded.SchemaVersion == 4 || loaded.SchemaVersion == 3);
+		if (valid)
+			loaded.SchemaVersion = 4;
+	}
+	else if (static_cast<size_t>(fileSize.QuadPart) == LegacyTotalBytes)
+	{
+		valid = ReadFile(hFile, &loaded, static_cast<DWORD>(LegacyTotalBytes), &bytesRead, NULL)
+			&& bytesRead == LegacyTotalBytes
+			&& std::memcmp(loaded.Magic, "PHOBOSBP", 8) == 0
+			&& loaded.SchemaVersion == 3;
+		if (valid)
+			loaded.SchemaVersion = 4;
+	}
 
 	CloseHandle(hFile);
 
@@ -412,18 +438,37 @@ static bool LoadBackpackFromSharedMemory(const char* pName, AIBackpackFile& outB
 	if (!hMapping)
 		return false;
 
+	constexpr size_t HeaderBytes = offsetof(AIBackpackFile, Entries);
+	constexpr size_t LegacyTotalBytes = HeaderBytes + AIBackpackFile::LegacyEntryCapacity * sizeof(AIBackpackEntry);
 	bool valid = false;
 
-	if (auto const pView = static_cast<const uint8_t*>(MapViewOfFile(hMapping, FILE_MAP_READ, 0, 0, sizeof(AIBackpackFile))))
+	if (auto const pHdrView = static_cast<const uint8_t*>(MapViewOfFile(hMapping, FILE_MAP_READ, 0, 0, HeaderBytes)))
 	{
-		AIBackpackFile loaded = {};
-		std::memcpy(&loaded, pView, sizeof(AIBackpackFile));
-		UnmapViewOfFile(pView);
+		uint32_t schema = 0;
+		bool magicOk = (std::memcmp(pHdrView, "PHOBOSBP", 8) == 0);
+		std::memcpy(&schema, pHdrView + 8, sizeof(uint32_t));
+		UnmapViewOfFile(pHdrView);
 
-		valid = std::memcmp(loaded.Magic, "PHOBOSBP", 8) == 0 && loaded.SchemaVersion == 3;
-
-		if (valid)
-			outBackpack = loaded;
+		if (magicOk && schema == 4)
+		{
+			if (auto const pView = static_cast<const uint8_t*>(MapViewOfFile(hMapping, FILE_MAP_READ, 0, 0, sizeof(AIBackpackFile))))
+			{
+				std::memcpy(&outBackpack, pView, sizeof(AIBackpackFile));
+				UnmapViewOfFile(pView);
+				valid = true;
+			}
+		}
+		else if (magicOk && schema == 3)
+		{
+			if (auto const pView = static_cast<const uint8_t*>(MapViewOfFile(hMapping, FILE_MAP_READ, 0, 0, LegacyTotalBytes)))
+			{
+				std::memset(&outBackpack, 0, sizeof(AIBackpackFile));
+				std::memcpy(&outBackpack, pView, LegacyTotalBytes);
+				outBackpack.SchemaVersion = 4;
+				UnmapViewOfFile(pView);
+				valid = true;
+			}
+		}
 	}
 
 	CloseHandle(hMapping);
@@ -539,7 +584,7 @@ void NeuralAI::LoadOrResetBackpack()
 
 		std::memcpy(NeuralAI::Backpack.Magic, "PHOBOSBP", 8);
 
-		NeuralAI::Backpack.SchemaVersion = 3;
+		NeuralAI::Backpack.SchemaVersion = 4;
 
 		NeuralAI::Backpack.BaseSignature = NeuralAI::CurrentBaseSignature;
 
@@ -633,7 +678,7 @@ void NeuralAI::LoadOrResetBackpack()
 
 		std::memcpy(NeuralAI::Backpack.Magic, "PHOBOSBP", 8);
 
-		NeuralAI::Backpack.SchemaVersion = 3;
+		NeuralAI::Backpack.SchemaVersion = 4;
 
 		NeuralAI::Backpack.BaseSignature = NeuralAI::CurrentBaseSignature;
 
@@ -990,7 +1035,7 @@ void NeuralAI::OnScenarioStart()
 				// about the number of matches this archetype played for this side.
 				for (int e = 0; e < NeuralAI::NumSpecialists; ++e)
 				{
-					auto const& entry = policy.Entries[(pHouse->SideIndex * 80 + a * 10 + e) % 512];
+					auto const& entry = policy.Entries[NeuralBackpackEntryIndex(pHouse->SideIndex, a, e)];
 
 					if (entry.VisitCount > 0)
 					{
@@ -1268,9 +1313,9 @@ void NeuralAI::OnScenarioEnd(bool playerWon)
 
 				const int expertDelta = std::clamp((delta * 2 * ticks[e] + (delta >= 0 ? totalTicks / 2 : -totalTicks / 2)) / totalTicks,
 					-std::abs(delta), std::abs(delta));
-				const uint32_t entryIdx = static_cast<uint32_t>((pHouse->SideIndex * 80 + arch * 10 + e) % 512);
+				const uint32_t entryIdx = NeuralBackpackEntryIndex(pHouse->SideIndex, arch, e);
 
-				if (NeuralAI::Backpack.NumEntries < 512)
+				if (NeuralAI::Backpack.NumEntries < AIBackpackFile::EntryCapacity)
 					NeuralAI::Backpack.NumEntries = std::max(NeuralAI::Backpack.NumEntries, entryIdx + 1);
 
 				auto& entry = NeuralAI::Backpack.Entries[entryIdx];
