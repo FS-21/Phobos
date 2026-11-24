@@ -252,6 +252,9 @@ DEFINE_HOOK(0x4492D7, BuildingClass_Captured_SkipAISell_NeuralAI, 0x5)
 
 	GET(BuildingClass*, pThis, ESI);
 	GET(HouseClass*, pNewOwner, EBP);
+	GET(HouseClass*, pOldOwner, EBX);
+
+	NeuralAI::OnBuildingCaptured(pThis, pOldOwner, pNewOwner);
 
 	if (!SessionClass::IsCampaign() && NeuralAI::IsEnabledForHouse(pNewOwner))
 	{

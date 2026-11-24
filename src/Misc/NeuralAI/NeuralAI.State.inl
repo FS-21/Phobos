@@ -698,6 +698,8 @@ namespace
 		int HoldCheckFrame { -1 };
 		int HoldDanger { 0 };
 		bool HoldRolled { false };
+		std::array<CellStruct, 4> FailedLandings { CellStruct::Empty, CellStruct::Empty, CellStruct::Empty, CellStruct::Empty };
+		uint8_t FailedLandingCursor { 0 };
 	};
 
 	// Where a transport of an operation was lost (NeuralHouseMacroState::OpLossSpots).
@@ -1903,6 +1905,52 @@ namespace
 		int MobileFactoryVehicleSeenFrame { -100000 };
 		int MobileFactoryDeployFrame { -100000 };
 		std::unordered_map<int, std::pair<int, bool>> MobileFactoryWanted {};
+		std::array<std::pair<CellStruct, int>, 16> StalledDeployCells {};
+		size_t StalledDeployCursor { 0 };
+		std::array<int16_t, 4> CounterRoleScores {};
+		int TrajDeploysGood { 0 };
+		int TrajDeploysBad { 0 };
+		int TrajDropsGood { 0 };
+		int TrajDropsBad { 0 };
+		int TrajFinisherLaunches { 0 };
+		int TrajSpecOpsWorth { 0 };
+		int TrajCaptures { 0 };
+		int TrajInfiltrations { 0 };
+		int TrajSpecOpsLosses { 0 };
+		int ExpertKeptTicks { 0 };
+		int ExpertSwitchedTicks { 0 };
+
+		void NoteStalledDeployCell(const CellStruct& cell, int untilFrame)
+		{
+			if (cell == CellStruct::Empty)
+				return;
+
+			for (auto& entry : this->StalledDeployCells)
+			{
+				if (entry.first == cell)
+				{
+					entry.second = std::max(entry.second, untilFrame);
+					return;
+				}
+			}
+
+			this->StalledDeployCells[this->StalledDeployCursor % this->StalledDeployCells.size()] = { cell, untilFrame };
+			this->StalledDeployCursor++;
+		}
+
+		bool IsStalledDeployCell(const CellStruct& cell, int now, double radius = 2.5) const
+		{
+			if (cell == CellStruct::Empty)
+				return false;
+
+			for (auto const& entry : this->StalledDeployCells)
+			{
+				if (entry.first != CellStruct::Empty && now < entry.second && entry.first.DistanceFrom(cell) <= radius)
+					return true;
+			}
+
+			return false;
+		}
 
 		void ClearClearanceReservation()
 		{
@@ -2402,6 +2450,20 @@ namespace
 			this->MobileFactoryVehicleSeenFrame = -100000;
 			this->MobileFactoryDeployFrame = -100000;
 			this->MobileFactoryWanted.clear();
+			this->StalledDeployCells.fill({ CellStruct::Empty, 0 });
+			this->StalledDeployCursor = 0;
+			this->CounterRoleScores.fill(0);
+			this->TrajDeploysGood = 0;
+			this->TrajDeploysBad = 0;
+			this->TrajDropsGood = 0;
+			this->TrajDropsBad = 0;
+			this->TrajFinisherLaunches = 0;
+			this->TrajSpecOpsWorth = 0;
+			this->TrajCaptures = 0;
+			this->TrajInfiltrations = 0;
+			this->TrajSpecOpsLosses = 0;
+			this->ExpertKeptTicks = 0;
+			this->ExpertSwitchedTicks = 0;
 		}
 	};
 
@@ -5814,6 +5876,7 @@ namespace
 		int LastUpdateFrame { -100000 };
 		int OwnArmyValue { 0 };
 		int AdvantageRatio { 100 };
+		int FinisherAggression { 0 };
 		bool Holding { false };
 		int HoldSinceFrame { -1 };
 	};

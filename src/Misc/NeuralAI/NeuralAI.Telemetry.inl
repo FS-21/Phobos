@@ -224,7 +224,7 @@ namespace
 				if (it->second.Stamp != serial)
 				{
 					if (it->second.Credited)
-						gone.push_back({ it->first, it->second, false });
+						gone.push_back({ it->first, it->second, it->second.ConsumedOnMission });
 
 					it = tags.erase(it);
 				}
@@ -408,6 +408,9 @@ namespace
 			{
 				for (auto const& g : gone)
 				{
+					if (g.Tag.ConsumedOnMission)
+						continue;
+
 					const int64_t loss = -static_cast<int64_t>(g.Tag.Cost);
 
 					if (!g.Transformed && g.Tag.Command >= 0)
@@ -577,6 +580,159 @@ namespace
 			length += static_cast<size_t>(written);
 			entries++;
 		}
+	}
+}
+
+void NeuralAI::OnBuildingCaptured(BuildingClass* pBuilding, HouseClass* pOldOwner, HouseClass* pNewOwner)
+{
+	if (!pBuilding || !pBuilding->Type || !pNewOwner || pNewOwner == pOldOwner
+		|| pNewOwner->ArrayIndex < 0 || pNewOwner->ArrayIndex >= 32)
+	{
+		return;
+	}
+
+	const bool fromEnemy = pOldOwner && !pOldOwner->IsNeutral() && !pNewOwner->IsAlliedWith(pOldOwner);
+
+	if (NeuralAI::HeadlessMode && fromEnemy && pOldOwner->ArrayIndex >= 0 && pOldOwner->ArrayIndex < 32)
+	{
+		auto& victimTags = CreditTags[pOldOwner->ArrayIndex];
+		auto const victimIt = victimTags.find(pBuilding->UniqueID);
+
+		if (victimIt != victimTags.end())
+			victimIt->second.KilledByEnemy = true;
+	}
+
+	if (!NeuralAI::IsEnabledForHouse(pNewOwner))
+		return;
+
+	const int idx = pNewOwner->ArrayIndex;
+	auto const pType = pBuilding->Type;
+	CountDecision(NeuralDecision::EngineerCaptured, idx);
+
+	if (fromEnemy)
+	{
+		CountDecision(NeuralDecision::EnemyBldCaptured, idx);
+
+		if (pType->ConstructionYard)
+			CountDecision(NeuralDecision::ConYardCaptured, idx);
+	}
+
+	auto& macro = GetMacroState(pNewOwner);
+	macro.TrajCaptures++;
+
+	const bool isCashBld = pType->ProduceCashAmount > 0 || pType->ProduceCashStartup > 0;
+	const int capWorth = std::clamp(pType->Cost / 2, 250, 1200)
+		+ (isCashBld ? 450 : 0)
+		+ (pType->ConstructionYard ? 650 : 0)
+		+ (fromEnemy ? 250 : 0);
+	macro.TrajSpecOpsWorth += capWorth;
+
+	if (NeuralAI::HeadlessMode && fromEnemy && !pOldOwner->Defeated)
+	{
+		const int phase = RoutingPhase(Unsorted::CurrentFrame);
+		const int expert = CreditActiveExpert(pNewOwner);
+		PendingKillCredit[idx][std::clamp(phase, 0, NumRoutingPhases - 1)][std::clamp(expert, 0, NeuralAI::NumSpecialists - 1)]
+			+= std::max(300, static_cast<int>(pType->Cost));
+	}
+}
+
+void NeuralAI::OnBuildingInfiltrated(TechnoClass* pInfiltrator, BuildingClass* pBuilding)
+{
+	auto const pInf = abstract_cast<InfantryClass*>(pInfiltrator);
+
+	if (!pInf || !pInf->Type || !pBuilding || !pBuilding->Type)
+		return;
+
+	auto const pSpyHouse = pInf->Owner;
+	auto const pVictimHouse = pBuilding->Owner;
+
+	if (!pSpyHouse || !pVictimHouse || pSpyHouse == pVictimHouse || pSpyHouse->IsAlliedWith(pVictimHouse)
+		|| pVictimHouse->IsNeutral() || pSpyHouse->ArrayIndex < 0 || pSpyHouse->ArrayIndex >= 32)
+	{
+		return;
+	}
+
+	if (!NeuralAI::IsEnabledForHouse(pSpyHouse))
+		return;
+
+	const bool isSpy = IsSpyInfantryType(pInf->Type);
+
+	if (!isSpy && !pInf->Type->Infiltrate && !pInf->Type->Agent && !pInf->Type->Thief)
+		return;
+
+	const int idx = pSpyHouse->ArrayIndex;
+	auto const pBldType = pBuilding->Type;
+
+	if (isSpy)
+	{
+		CountDecision(NeuralDecision::SpyInfiltrated, idx);
+
+		auto const pDisguiseHouse = pInf->Disguised ? pInf->DisguisedAsHouse : nullptr;
+
+		if (pDisguiseHouse && pDisguiseHouse != pSpyHouse && !pSpyHouse->IsAlliedWith(pDisguiseHouse)
+			&& (pDisguiseHouse == pVictimHouse || pVictimHouse->IsAlliedWith(pDisguiseHouse)))
+		{
+			CountDecision(NeuralDecision::SpyDisguisedEntry, idx);
+		}
+	}
+
+	int infiltrationWorth = 550;
+
+	if (auto const pSpyBldExt = BuildingTypeExt::Fetch(pBldType); pSpyBldExt && pSpyBldExt->SpyEffect_AIWorth >= 0)
+	{
+		infiltrationWorth = std::clamp(pSpyBldExt->SpyEffect_AIWorth * 7, 350, 1300);
+	}
+	else if (pBldType->Factory == AbstractType::UnitType && !pBldType->Naval && !pSpyHouse->WarFactoryInfiltrated)
+	{
+		infiltrationWorth = 1100;
+	}
+	else if (pBldType->SuperWeapon != -1)
+	{
+		infiltrationWorth = 1050;
+	}
+	else if (pBldType->TechLevel >= 6)
+	{
+		infiltrationWorth = 1000;
+	}
+	else if (pBldType->Factory == AbstractType::InfantryType && !pSpyHouse->BarracksInfiltrated)
+	{
+		infiltrationWorth = 950;
+	}
+	else if (pBldType->PowerBonus > pBldType->PowerDrain)
+	{
+		infiltrationWorth = 850;
+	}
+	else if (pBldType->Radar || pBldType->SpySat)
+	{
+		infiltrationWorth = 800;
+	}
+	else if (pBldType->Refinery || pBldType->Storage > 0)
+	{
+		infiltrationWorth = 750;
+	}
+
+	auto& macro = GetMacroState(pSpyHouse);
+	macro.TrajInfiltrations++;
+	macro.TrajSpecOpsWorth += infiltrationWorth;
+
+	if (!NeuralAI::HeadlessMode)
+		return;
+
+	int expert = CreditActiveExpert(pSpyHouse);
+	int phase = RoutingPhase(Unsorted::CurrentFrame);
+
+	if (auto const pTag = CreditTagFor(idx, pInf, expert, phase))
+	{
+		pTag->ConsumedOnMission = true;
+		const bool byCommand = pTag->Command >= 0;
+		expert = byCommand ? pTag->Command : pTag->Origin;
+		phase = byCommand ? pTag->CommandPhase : pTag->OriginPhase;
+	}
+
+	if (!pVictimHouse->Defeated)
+	{
+		PendingKillCredit[idx][std::clamp(phase, 0, NumRoutingPhases - 1)][std::clamp(expert, 0, NeuralAI::NumSpecialists - 1)]
+			+= infiltrationWorth;
 	}
 }
 
@@ -1099,8 +1255,35 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 			slotMeanings += "\"" + std::to_string(slot) + "\": " + std::to_string(version);
 		}
 
+		int aliveCombatHouses = 0;
+
+		for (auto const pLiveH : HouseClass::Array)
+		{
+			if (!pLiveH || pLiveH->IsNeutral() || pLiveH->IsObserver() || pLiveH->Defeated)
+				continue;
+
+			if (pLiveH->OwnedBuildings > 0 || pLiveH->OwnedUnits > 0 || pLiveH->OwnedInfantry > 0)
+				aliveCombatHouses++;
+		}
+
+		const int curFrameSigned = static_cast<int>(dst->CurrentFrame);
+		const bool isRegularTrainSlot = NeuralAI::TrainSlotIndex >= 1 && NeuralAI::TrainSlotIndex < 60;
+		const bool activeRecentCombat = (curFrameSigned - NeuralAI::LastCombatFrame) < 2700;
+		const int baseMaxFrames = isRegularTrainSlot
+			? ((aliveCombatHouses >= 3) ? 90000 : 72000)
+			: ((aliveCombatHouses >= 3) ? 162000 : 135000);
+		const int maxMatchFrames = activeRecentCombat
+			? (baseMaxFrames + (isRegularTrainSlot ? 9000 : 27000))
+			: baseMaxFrames;
+		const int noCombatLimit = (aliveCombatHouses >= 3) ? 12600 : 9000;
+		const bool quietStallActive = curFrameSigned > 16200
+			&& (curFrameSigned - NeuralAI::LastCombatFrame) >= (noCombatLimit / 2);
+		const int forceEndFrame = quietStallActive
+			? std::min(maxMatchFrames, std::max(16201, NeuralAI::LastCombatFrame + noCombatLimit))
+			: maxMatchFrames;
+
 		int lineLen = std::snprintf(lineBuf, sizeof(lineBuf),
-			"{\n  \"slot\": %u,\n  \"pid\": %u,\n  \"frame\": %u,\n  \"fps\": "
+			"{\n  \"slot\": %u,\n  \"pid\": %u,\n  \"frame\": %u,\n  \"maxFrames\": %d,\n  \"forceEndFrame\": %d,\n  \"fps\": "
 			"%u,\n  \"finished\": %s,\n  \"winnerHouse\": %d,\n  \"stalemate\": "
 			"%s,\n  \"elo\": %d,\n  \"gamesPlayed\": %u,\n  "
 			"\"rulesSignature\": \"%016llX\",\n  \"baseSignature\": \"%016llX\",\n  "
@@ -1109,7 +1292,8 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 			" \"contextRouting\": {\"challenger\": %s, \"opponent\": %s, \"phaseFrames\": [%d, %d]},\n "
 			" \"mapGeom\": {\"mapRect\": [%d, %d], \"visibleRect\": [%d, %d, %d, %d], \"iso\": %s, \"bounds\": [%d, %d, %d, %d]},\n "
 			" \"houses\": [\n",
-			dst->SlotIndex, dst->ProcessId, dst->CurrentFrame, dst->FramesPerSecond, matchEnded ? "true" : "false",
+			dst->SlotIndex, dst->ProcessId, dst->CurrentFrame, maxMatchFrames, forceEndFrame, dst->FramesPerSecond,
+			matchEnded ? "true" : "false",
 			dst->WinnerHouseIndex, stalemate ? "true" : "false", NeuralAI::Backpack.EstimatedELO,
 			NeuralAI::Backpack.GamesPlayed, static_cast<unsigned long long>(NeuralAI::CurrentRulesSignature),
 			static_cast<unsigned long long>(NeuralAI::CurrentBaseSignature), slotMeanings.c_str(), MapInfo.Cells, MapInfo.WaterPct,

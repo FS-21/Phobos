@@ -719,6 +719,9 @@ namespace
 			if (avoidActive && cell.DistanceFrom(macro.MobileFactoryAvoidCell) <= MobileFactoryAvoidRadius)
 				return false;
 
+			if (macro.IsStalledDeployCell(cell, now, 3.0))
+				return false;
+
 			for (auto const& r : reserved)
 			{
 				if (r.DistanceFrom(cell) <= 6.0)

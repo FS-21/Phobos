@@ -42,6 +42,7 @@
 #include <Ext/TerrainType/Body.h>
 #include <Ext/WarheadType/Body.h>
 #include <Ext/WeaponType/Body.h>
+#include <Utilities/AresHelper.h>
 #include <Utilities/Debug.h>
 #include <Utilities/GeneralUtils.h>
 #include <algorithm>
@@ -92,6 +93,10 @@ namespace
 	HANDLE TelemetryViewShmHandle = NULL;
 
 	const volatile uint32_t* TelemetryViewRequest = nullptr;
+
+	// Headless training trajectory ring buffer (zero bytes allocated in normal play).
+	HANDLE TrajectoryShmHandle = NULL;
+	AITrajectorySharedBuffer* TrajectoryView = nullptr;
 } // namespace
 
 AIBackpackFile NeuralAI::Backpack = {};

@@ -33,7 +33,9 @@ struct AIBaseHeader
 	int8_t SigmoidLUT[256];
 	int8_t TanhLUT[256];
 	uint32_t ExtraExpertWeightsOffset[2];
-	uint8_t ReservedHeader[376];
+	uint32_t GateWeightsOffset;
+	uint32_t MlpHiddenDim;
+	uint8_t ReservedHeader[368];
 };
 
 struct AIBackpackEntry
@@ -100,6 +102,38 @@ struct AITrainerSharedTelemetry
 	uint8_t RadarCells[128 * 128];
 };
 
+struct AITrajectoryStep
+{
+	uint32_t Frame;
+	uint8_t HouseIndex;
+	uint8_t PolicySlot;
+	uint8_t ActiveExpert;
+	uint8_t Archetype;
+	int32_t OwnNetWorth;
+	int32_t KnownEnemyWorth;
+	int32_t KillsDelta;
+	int32_t LossesDelta;
+	int16_t DeploysGoodDelta;
+	int16_t DeploysBadDelta;
+	int16_t DropsGoodDelta;
+	int16_t DropsBadDelta;
+	int16_t FinisherDelta;
+	int16_t CounterScore;
+	uint64_t OpenGatesMask;
+	int8_t Features[256];
+	int8_t TopActionRanks[8];
+};
+
+struct AITrajectorySharedBuffer
+{
+	char Magic[8]; // "PHOBOSTJ"
+	uint32_t SchemaVersion;
+	uint32_t MatchSerial;
+	uint32_t WriteCount;
+	uint32_t Capacity;
+	AITrajectoryStep Steps[200];
+};
+
 #pragma pack(pop)
 
 // The factory a Neural AI house builds a queue at (src/Ext/Building/Hooks.Production.cpp).
@@ -135,6 +169,8 @@ public:
 	static void OnHeadlessFrameTick();
 	static void OnAutoBaseBuildingTriggered(HouseClass* pHouse, bool enabled);
 	static void OnBuildingDamaged(BuildingClass* pBuilding, TechnoClass* pAttacker, HouseClass* pAttackerHouse);
+	static void OnBuildingCaptured(BuildingClass* pBuilding, HouseClass* pOldOwner, HouseClass* pNewOwner);
+	static void OnBuildingInfiltrated(TechnoClass* pInfiltrator, BuildingClass* pBuilding);
 	static void OnTechnoKilled(TechnoClass* pVictim, TechnoClass* pKiller);
 	static void OnHarvestIncome(HouseClass* pHouse, TechnoClass* pGatherer, TechnoClass* pDock, int money);
 	static void OnHouseDamaged(HouseClass* pVictim, HouseClass* pAttacker, int damage, bool aimed);

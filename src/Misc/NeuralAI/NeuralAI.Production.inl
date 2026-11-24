@@ -583,6 +583,363 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	// Per-match style, opening and surprise tech switch on top of the trained scores.
 	ApplyMatchStyle(pHouse, scores);
 
+	// Headless training trajectory step recorder (zero memory and zero work outside -TRAIN_HEADLESS).
+	if (NeuralAI::HeadlessMode && TrajectoryView && pHouse->ArrayIndex >= 0 && pHouse->ArrayIndex < 8)
+	{
+		static std::array<int, 8> lastTrajFrame {};
+		static std::array<int, 8> lastKilledScore {};
+		static std::array<int, 8> lastLostUnits {};
+		static std::array<int, 8> lastDeploysGood {};
+		static std::array<int, 8> lastDeploysBad {};
+		static std::array<int, 8> lastDropsGood {};
+		static std::array<int, 8> lastDropsBad {};
+		static std::array<int, 8> lastFinisher {};
+		static std::array<int, 8> lastCaptures {};
+		static std::array<int, 8> lastInfiltrations {};
+		static std::array<int, 8> lastExpKept {};
+		static std::array<int, 8> lastExpSwitched {};
+		static std::array<uint32_t, 8> lastAirliftEvents {};
+		static std::array<std::array<uint32_t, 31>, 8> lastGateOpen {};
+		static std::array<std::array<uint32_t, 31>, 8> lastGateClosed {};
+		static int trajTrackSerial = -1;
+
+
+		if (trajTrackSerial != NeuralMatchSerial)
+		{
+			trajTrackSerial = NeuralMatchSerial;
+			lastTrajFrame.fill(-1000);
+			lastKilledScore.fill(0);
+			lastLostUnits.fill(0);
+			lastDeploysGood.fill(0);
+			lastDeploysBad.fill(0);
+			lastDropsGood.fill(0);
+			lastDropsBad.fill(0);
+			lastFinisher.fill(0);
+			lastCaptures.fill(0);
+			lastInfiltrations.fill(0);
+			lastExpKept.fill(0);
+			lastExpSwitched.fill(0);
+			lastAirliftEvents.fill(0);
+			lastGateOpen = {};
+			lastGateClosed = {};
+		}
+
+		const int hIdx = pHouse->ArrayIndex;
+		const int nowFrame = Unsorted::CurrentFrame;
+
+		if (nowFrame - lastTrajFrame[hIdx] >= 240)
+		{
+			lastTrajFrame[hIdx] = nowFrame;
+			auto const& hMacro = GetMacroState(pHouse);
+			auto const& hWave = GetWaveTimingState(pHouse);
+			auto const& hSpecOps = GetSpecOpsState(pHouse);
+			int knownFoeWorth = 0;
+
+			for (auto const& foe : hWave.Enemies)
+				knownFoeWorth = std::max(knownFoeWorth, foe.Army + foe.DefenseValue + foe.KnownBuildings * 120);
+
+			const int killNow = pHouse->TotalKilledUnits * 200 + pHouse->TotalKilledBuildings * 500
+				+ pHouse->StolenBuildingsCredits + hMacro.TrajSpecOpsWorth;
+			int lostNow = hMacro.DefenseLostValue + hMacro.TrajSpecOpsLosses * 300;
+
+			for (const int n : hMacro.TankCensusLost)
+				lostNow += n * 400;
+
+			const int capDelta = std::max(0, hMacro.TrajCaptures - lastCaptures[hIdx]);
+			const int infDelta = std::max(0, hMacro.TrajInfiltrations - lastInfiltrations[hIdx]);
+			const int finDelta = std::max(0, hMacro.TrajFinisherLaunches - lastFinisher[hIdx]) + capDelta + infDelta;
+
+			const uint32_t slotIdx = TrajectoryView->WriteCount % 200u;
+			AITrajectoryStep& step = TrajectoryView->Steps[slotIdx];
+			step.Frame = static_cast<uint32_t>(std::max(0, nowFrame));
+			step.HouseIndex = static_cast<uint8_t>(hIdx);
+			step.PolicySlot = static_cast<uint8_t>(std::clamp(pExt->NeuralAI_PolicySlot, 0, 1));
+			step.ActiveExpert = static_cast<uint8_t>(std::clamp(pExt->NeuralAI_ActiveExpert, 0, 9));
+			step.Archetype = static_cast<uint8_t>(std::clamp(pExt->NeuralAI_Archetype, 0, 7));
+			step.OwnNetWorth = HouseMatchScore(pHouse);
+			step.KnownEnemyWorth = knownFoeWorth;
+			step.KillsDelta = std::max(0, killNow - lastKilledScore[hIdx]);
+			step.LossesDelta = std::max(0, lostNow - lastLostUnits[hIdx]);
+			step.DeploysGoodDelta = static_cast<int16_t>(std::clamp(hMacro.TrajDeploysGood - lastDeploysGood[hIdx], 0, 100));
+			step.DeploysBadDelta = static_cast<int16_t>(std::clamp(hMacro.TrajDeploysBad - lastDeploysBad[hIdx], 0, 100));
+			step.DropsGoodDelta = static_cast<int16_t>(std::clamp(hMacro.TrajDropsGood - lastDropsGood[hIdx], 0, 100));
+			step.DropsBadDelta = static_cast<int16_t>(std::clamp(hMacro.TrajDropsBad - lastDropsBad[hIdx], 0, 100));
+			step.FinisherDelta = static_cast<int16_t>(std::clamp(finDelta, 0, 100));
+			step.CounterScore = scores[25];
+
+			// Tactical micro gates 53..83 (bits 0..30 = opened, bits 32..62 = queried in this window)
+			// plus slot 127 Expert Hysteresis (bit 31 = held, bit 63 = queried).
+			uint64_t gateMask = 0;
+			const uint32_t airliftNow = DecisionCounts[hIdx][static_cast<size_t>(NeuralDecision::AirliftJob)]
+				+ DecisionCounts[hIdx][static_cast<size_t>(NeuralDecision::AirliftDrop)]
+				+ DecisionCounts[hIdx][static_cast<size_t>(NeuralDecision::AirliftRescue)]
+				+ DecisionCounts[hIdx][static_cast<size_t>(NeuralDecision::AirCarrierLost)]
+				+ DecisionCounts[hIdx][static_cast<size_t>(NeuralDecision::DropAbort)];
+
+			for (int bit = 0; bit < 31; ++bit)
+			{
+				const int gSlot = 53 + bit;
+				const uint32_t openNow = GateCounts[hIdx][gSlot][0];
+				const uint32_t closeNow = GateCounts[hIdx][gSlot][1];
+				const uint32_t openD = openNow >= lastGateOpen[hIdx][bit] ? (openNow - lastGateOpen[hIdx][bit]) : 0u;
+				const uint32_t closeD = closeNow >= lastGateClosed[hIdx][bit] ? (closeNow - lastGateClosed[hIdx][bit]) : 0u;
+				lastGateOpen[hIdx][bit] = openNow;
+				lastGateClosed[hIdx][bit] = closeNow;
+
+				bool queried = (openD + closeD) > 0u;
+				bool opened = openD > 0u && openD >= closeD;
+
+				if (bit == 0 && !queried && airliftNow != lastAirliftEvents[hIdx])
+				{
+					queried = true;
+					opened = scores[53] >= 40;
+				}
+
+				if (queried)
+				{
+					gateMask |= (1ULL << (32 + bit));
+
+					if (opened)
+						gateMask |= (1ULL << bit);
+				}
+			}
+
+			lastAirliftEvents[hIdx] = airliftNow;
+			const int keptD = std::max(0, hMacro.ExpertKeptTicks - lastExpKept[hIdx]);
+			const int swD = std::max(0, hMacro.ExpertSwitchedTicks - lastExpSwitched[hIdx]);
+			lastExpKept[hIdx] = hMacro.ExpertKeptTicks;
+			lastExpSwitched[hIdx] = hMacro.ExpertSwitchedTicks;
+
+			if (keptD + swD > 0)
+			{
+				gateMask |= (1ULL << 63);
+
+				if (keptD >= swD)
+					gateMask |= (1ULL << 31);
+			}
+
+			step.OpenGatesMask = gateMask;
+			std::memcpy(step.Features, features.data(), sizeof(step.Features));
+
+			// TopActionRanks[8]: exact output slot indices (0..127, -1 = none) spanning active
+			// SpecOps, strategic plans (89..126), factory queues, and posture/production bands (0..39).
+			std::fill(std::begin(step.TopActionRanks), std::end(step.TopActionRanks), static_cast<int8_t>(-1));
+			int rankCount = 0;
+
+			auto pushSlot = [&](int s)
+			{
+				if (rankCount >= 8 || s < 0 || s >= 128)
+					return;
+
+				for (int j = 0; j < rankCount; ++j)
+				{
+					if (step.TopActionRanks[j] == static_cast<int8_t>(s))
+						return;
+				}
+
+				step.TopActionRanks[rankCount++] = static_cast<int8_t>(s);
+			};
+
+			auto bestInBand = [&](int lo, int hi, int minScore) -> int
+			{
+				int bestS = -1;
+				int bestVal = minScore;
+
+				for (int s = lo; s <= hi; ++s)
+				{
+					if (static_cast<int>(scores[s]) >= bestVal)
+					{
+						bestVal = static_cast<int>(scores[s]);
+						bestS = s;
+					}
+				}
+
+				return bestS;
+			};
+
+			if (capDelta > 0 || !hSpecOps.Captures.empty() || !hMacro.EngineerCaptureTargets.empty())
+			{
+				pushSlot(36);
+				pushSlot(18);
+			}
+
+			if (infDelta > 0 || !hSpecOps.Spies.empty())
+				pushSlot(19);
+
+			int plansPushed = 0;
+
+			for (int pIdx = 0; pIdx < 38 && plansPushed < 2; ++pIdx)
+			{
+				if (static_cast<size_t>(pIdx) < hMacro.Plans.size() && hMacro.Plans[pIdx].Active)
+				{
+					pushSlot(89 + pIdx);
+					plansPushed++;
+				}
+			}
+
+			int prodBldSlot = -1;
+			int prodInfSlot = -1;
+			int prodVehSlot = -1;
+			int prodAirSlot = -1;
+
+			for (auto const pFac : FactoryClass::Array)
+			{
+				if (!pFac || pFac->Owner != pHouse || !pFac->Object)
+					continue;
+
+				auto const pObjType = pFac->Object->GetTechnoType();
+
+				if (!pObjType)
+					continue;
+
+				switch (pFac->Object->WhatAmI())
+				{
+				case AbstractType::Building:
+				{
+					auto const pBT = static_cast<BuildingTypeClass*>(pObjType);
+
+					if (pBT->SuperWeapon != -1)
+						prodBldSlot = 10;
+					else if (pBT->Refinery)
+						prodBldSlot = 1;
+					else if (pBT->Factory == AbstractType::UnitType && pBT->Naval)
+						prodBldSlot = 7;
+					else if (pBT->Factory == AbstractType::UnitType)
+						prodBldSlot = 3;
+					else if (pBT->Factory == AbstractType::InfantryType)
+						prodBldSlot = 2;
+					else if (pBT->Factory == AbstractType::AircraftType || pBT->Helipad)
+						prodBldSlot = 8;
+					else if (pBT->UnitRepair)
+						prodBldSlot = 9;
+					else if (pBT->Storage > 0)
+						prodBldSlot = 11;
+					else if (pBT->IsBaseDefense)
+						prodBldSlot = (GetCombatValueOfType(pBT, true) > GetCombatValueOfType(pBT, false)) ? 6 : 5;
+					else if (pBT->Radar || pBT->TechLevel >= 5)
+						prodBldSlot = 4;
+					else if (pBT->PowerBonus > pBT->PowerDrain)
+						prodBldSlot = 0;
+
+					break;
+				}
+				case AbstractType::Infantry:
+				{
+					auto const pIT = static_cast<InfantryTypeClass*>(pObjType);
+					auto const pWS = pIT->GetWeapon(0);
+					const bool infAA = pWS && pWS->WeaponType && pWS->WeaponType->Projectile && pWS->WeaponType->Projectile->AA;
+
+					if (IsCaptureInfantryType(pIT))
+						prodInfSlot = 18;
+					else if (IsSpyInfantryType(pIT) || pIT->VehicleThief)
+						prodInfSlot = 19;
+					else if (infAA || pIT->C4)
+						prodInfSlot = 20;
+					else if (pIT->Cost >= 250)
+						prodInfSlot = 17;
+					else
+						prodInfSlot = 16;
+
+					break;
+				}
+				case AbstractType::Unit:
+				{
+					auto const pUT = static_cast<UnitTypeClass*>(pObjType);
+					auto const pWS = pUT->GetWeapon(0);
+					const bool unitAA = pWS && pWS->WeaponType && pWS->WeaponType->Projectile && pWS->WeaponType->Projectile->AA;
+					const bool unitArt = pWS && pWS->WeaponType && pWS->WeaponType->Range >= 8 * Unsorted::LeptonsPerCell;
+
+					if (pUT->Harvester || pUT->ResourceGatherer)
+						prodVehSlot = 31;
+					else if (pUT->DeploysInto && pUT->DeploysInto->ConstructionYard)
+						prodVehSlot = 30;
+					else if (pUT->Naval)
+						prodVehSlot = 29;
+					else if (pUT->Passengers > 0 && !pUT->Gunner)
+						prodVehSlot = 28;
+					else if (unitAA && (!pWS->WeaponType->Projectile->AG || pUT->Cost <= 800))
+						prodVehSlot = 26;
+					else if (unitArt && !IsMainBattleTankType(pUT))
+						prodVehSlot = 27;
+					else if (IsMainBattleTankType(pUT))
+						prodVehSlot = 24;
+					else
+						prodVehSlot = 25;
+
+					break;
+				}
+				case AbstractType::Aircraft:
+					prodAirSlot = (pObjType->Cost >= 1300) ? 33 : 32;
+					break;
+				default:
+					break;
+				}
+			}
+
+			pushSlot(prodBldSlot >= 0 ? prodBldSlot : bestInBand(0, 11, 40));
+			pushSlot(prodInfSlot >= 0 ? prodInfSlot : bestInBand(16, 20, 40));
+			pushSlot(prodVehSlot >= 0 ? prodVehSlot : bestInBand(24, 31, 40));
+
+			if (prodAirSlot >= 0 || pHouse->NumAirpads > 0)
+				pushSlot(prodAirSlot >= 0 ? prodAirSlot : bestInBand(32, 33, 40));
+
+			pushSlot(bestInBand(12, 15, 40));
+
+			const int bestSpecPosture = bestInBand(21, 23, 60);
+			const int bestStratPosture = bestInBand(34, 39, 40);
+
+			if (bestSpecPosture >= 0 && (bestStratPosture < 0 || scores[bestSpecPosture] >= scores[bestStratPosture]))
+				pushSlot(bestSpecPosture);
+			else
+				pushSlot(bestStratPosture);
+
+			while (rankCount < 8)
+			{
+				int bestGlobal = -1;
+				int bestVal = 25;
+
+				for (int s = 0; s < 127; ++s)
+				{
+					if (s >= 40 && s < 89)
+						continue;
+
+					bool taken = false;
+
+					for (int j = 0; j < rankCount; ++j)
+					{
+						if (step.TopActionRanks[j] == static_cast<int8_t>(s))
+						{
+							taken = true;
+							break;
+						}
+					}
+
+					if (!taken && static_cast<int>(scores[s]) > bestVal)
+					{
+						bestVal = static_cast<int>(scores[s]);
+						bestGlobal = s;
+					}
+				}
+
+				if (bestGlobal < 0)
+					break;
+
+				pushSlot(bestGlobal);
+			}
+
+			lastKilledScore[hIdx] = killNow;
+			lastLostUnits[hIdx] = lostNow;
+			lastDeploysGood[hIdx] = hMacro.TrajDeploysGood;
+			lastDeploysBad[hIdx] = hMacro.TrajDeploysBad;
+			lastDropsGood[hIdx] = hMacro.TrajDropsGood;
+			lastDropsBad[hIdx] = hMacro.TrajDropsBad;
+			lastFinisher[hIdx] = hMacro.TrajFinisherLaunches;
+			lastCaptures[hIdx] = hMacro.TrajCaptures;
+			lastInfiltrations[hIdx] = hMacro.TrajInfiltrations;
+			TrajectoryView->WriteCount++;
+		}
+	}
+
 	// The main battle tank is the most versatile unit of the war factory: in no archetype its class
 	// weighs less than the light vehicles (user: their near absence is unnatural; outside the tank mass
 	// slot 24 had the lowest median of the five vehicle classes, 331 to 772 against 1398 to 1994).
@@ -664,6 +1021,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	// Before any air lane is planned this tick: remember where our flyers were shot down.
 	{
 		const NeuralSectionTimer sectionTimer { pHouse->ArrayIndex, NeuralSection::Tactics };
+		auto& roleMacro = GetMacroState(pHouse);
+		roleMacro.CounterRoleScores = { scores[80], scores[57], scores[58], ClampInt16(scores[25] - scores[24]) };
+		GetWaveTimingState(pHouse).FinisherAggression = static_cast<int>(scores[37]) + static_cast<int>(scores[79]) / 2;
 		UpdateAirLossMemory(pHouse);
 		UpdateMatchTactics(pHouse, scores);
 		UpdateEnemyStrength(pHouse);
@@ -1573,16 +1933,23 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		// Airfields follow the docks (user): another one while fewer docks than MinFreeAirDocks for
 		// the difficulty stand free (Easy 4, Normal 6, Hard 8), with no cap; an airfield is a hangar,
 		// not a faster factory.
+		const bool airSpecialist = pExt->NeuralAI_ActiveExpert == 8 || pExt->NeuralAI_Archetype == 6;
+		auto const& airForceSum = RefreshAirForceSummary(pHouse);
+		const bool hasAirTargetsNow = airForceSum.StrikeWork > 0 || airForceSum.InterceptWork > 0;
+		const int maxWantedAirDocks = !hasAirTargetsNow
+			? 8
+			: (airSpecialist ? 24 : ((features[21] > 0 || money >= 15000) ? 20 : 16));
+		const bool underAirDockCeiling = pHouse->AirportDocks < maxWantedAirDocks;
 		const bool airDocksFull = ownedDockingAircraft >= pHouse->AirportDocks;
 		const int freeAirDocks = pHouse->AirportDocks - ownedDockingAircraft;
 		const int wantedFreeAirDocks = houseDifficulty >= 2 ? MinFreeAirDocksEasy : (houseDifficulty == 1 ? MinFreeAirDocksNormal : MinFreeAirDocksHard);
-		const bool airDocksShort = freeAirDocks < wantedFreeAirDocks;
+		const bool airDocksShort = underAirDockCeiling && freeAirDocks < wantedFreeAirDocks;
 
-		const bool expert8NeedsMoreAirpadDocks = (ownedAirpads >= 1 && ownedDockingAircraft >= pHouse->AirportDocks
-			&& (scores[32] > 160 || scores[33] > 160 || pExt->NeuralAI_ActiveExpert == 8
-				|| pExt->NeuralAI_Archetype == 6));
+		const bool expert8NeedsMoreAirpadDocks = (underAirDockCeiling && ownedAirpads >= 1
+			&& ownedDockingAircraft >= pHouse->AirportDocks
+			&& (scores[32] > 160 || scores[33] > 160 || airSpecialist));
 		// The aircraft pick wanted a type that needs a dock and had none free: one more airfield.
-		const bool airDockWanted = airDocksFull && ownedAirpads >= 1
+		const bool airDockWanted = underAirDockCeiling && airDocksFull && ownedAirpads >= 1
 			&& Unsorted::CurrentFrame - GetMacroState(pHouse).AirDockWantedFrame <= AirDockWantedFrames;
 
 		// The docks every house keeps (AirDocksFloor*), whatever its archetype: below them, or with every
@@ -3955,8 +4322,11 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				const int tierQualityBonus
 					= isUnarmedBunker ? 100 : std::min(950, (pBld->Cost / 2) + std::max(0, pBld->TechLevel) * 150);
 
-				score = (isPureAA ? scores[6] : std::max(static_cast<int>(scores[5]), 320)) + tierQualityBonus
-					+ CounterBonusFor(pHouse, pBld) + defenseBudgetShift;
+				const bool urgentPureAA = isPureAA && (fillsAirDeficit || airDefenseDeficit > 0 || airRaid);
+				score = (isPureAA
+						? (urgentPureAA ? std::max(static_cast<int>(scores[6]), 320) : static_cast<int>(scores[6]))
+						: std::max(static_cast<int>(scores[5]), 320))
+					+ tierQualityBonus + CounterBonusFor(pHouse, pBld) + defenseBudgetShift;
 
 				// Core ground towers a base wants before anything else in defense.
 				const int desiredCoreGroundDefs = std::clamp(2 + ownedRefineries + (features[65] >= 18 ? 2 : 0), 3, 8);
@@ -4031,7 +4401,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				}
 
 				// AdvAI Proactive Enemy Air Value Scaling: by the guns still missing for the wanted value.
-				if (isAntiAir && enemyAirValue > 0 && airDefenseDeficit > 0)
+				if (isAntiAir && (enemyAirValue > 0 || announcedAirValue > 0 || airRaid) && airDefenseDeficit > 0)
 					score += std::min(AirDefenseMissingGunMost, airDefenseDeficit * AirDefenseMissingGunBonus);
 
 				// An air raid asks for anti-air whether or not the engine counts it as an attack on the
@@ -4253,7 +4623,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 			// An airfield for the docks every house keeps or for a full set of docks (AirDocksFloor*).
 			if (pBld->Factory == AbstractType::AircraftType && hasCoreEconomyAndProduction
-				&& (airDocksBelowFloor || (airDocksFull && pHouse->NumAirpads >= 1)) && score > bestPriorityAirfieldScore)
+				&& (airDocksBelowFloor || (underAirDockCeiling && airDocksFull && pHouse->NumAirpads >= 1))
+				&& score > bestPriorityAirfieldScore)
 			{
 				bestPriorityAirfieldScore = score;
 				bestPriorityAirfieldIdx = pBld->ArrayIndex;
@@ -5019,12 +5390,29 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				else if (pOwnedType->Harvester || pOwnedType->Weeder)
 					liftableHarvesters++;
 
-				if (pOwnedType->Cost >= 1000)
+				const bool worthCarryallSave = (pOwnedType->Cost >= 1000 || IsMainBattleTankType(pOwnedType)
+						|| pOwnedU->Veterancy.IsElite() || pOwnedU->Veterancy.IsVeteran())
+					&& !pOwnedType->Harvester && !pOwnedType->ResourceGatherer;
+				if (worthCarryallSave)
 				{
 					ownedExpensiveVehicles++;
 
-					if (airliftable && pHouse->UnitRepairStations.Count > 0 && pOwnedU->GetHealthPercentage() < 0.40)
-						carryallLiftJobs++;
+					if (airliftable && pHouse->UnitRepairStations.Count > 0
+						&& !IsOnRepairTrip(pHouse, pOwnedU->UniqueID)
+						&& !IsRepairStationFailed(pHouse, pOwnedType, NeuralRepairKind::Depot)
+						&& (pOwnedU->GetHealthPercentage() < 0.40
+							|| (pOwnedU->GetHealthPercentage() < 0.65 && scores[54] > -200))
+						&& CountKnownEnemyDefensesNear(pHouse, pOwnedU->GetMapCoords(), 9.0, true) == 0)
+					{
+						auto const pDepot = FindBestRepairStation(pHouse, pOwnedU, true);
+						const CellStruct uc = pOwnedU->GetMapCoords();
+
+						if (pDepot && (!AreZonesConnected(uc, pDepot->GetMapCoords(), pOwnedType->MovementZone)
+								|| uc.DistanceFrom(pDepot->GetMapCoords()) >= 18.0))
+						{
+							carryallLiftJobs++;
+						}
+					}
 				}
 
 				if (airliftable && pOwnedType->Passengers >= 3 && pOwnedU->Passengers.NumPassengers >= 1
@@ -5122,10 +5510,13 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		}
 	}
 
+	if (features[21] > 0 && liftableUndeployedMCVs > 0 && ownedHeavyIslandTransports == 0)
+		carryallLiftJobs++;
+
 	// Carryalls wanted: one per pending airlift job (at most 3), plus one standing carryall
-	// once there is a repair station and a sizeable expensive vehicle force to rescue.
+	// once there is a repair station and a sizeable tank/veteran/heavy vehicle force to rescue.
 	int wantedCarryalls = std::max(
-		(pHouse->UnitRepairStations.Count > 0 && ownedExpensiveVehicles >= 6) ? 1 : 0, std::min(3, carryallLiftJobs));
+		(pHouse->UnitRepairStations.Count > 0 && ownedExpensiveVehicles >= 5) ? 1 : 0, std::min(3, carryallLiftJobs));
 
 	// Ferry demand is what the transport controller really has to carry this tick
 	// (published by ExecuteTacticalAndSpecOpsMicro), never every ground unit we own:
@@ -6496,7 +6887,27 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			}
 			else if (isArtillery)
 			{
-				score += scores[27];
+				const bool siegeSpecialist = pExt->NeuralAI_Archetype == 4 || pExt->NeuralAI_ActiveExpert == 7;
+				const bool turtleBreakerWanted = ownedFrontLineVehicles >= 4
+					&& ownedArtilleryVehicles < artilleryAllowance
+					&& features[68] >= 10;
+
+				if (turtleBreakerWanted)
+				{
+					score += std::max(static_cast<int>(scores[27]), 280)
+						+ std::min(520, static_cast<int>(features[68]) * 18)
+						+ (ownedArtilleryVehicles == 0 ? 260 : 0);
+				}
+				else
+				{
+					score += scores[27];
+
+					if (!siegeSpecialist && ownedFrontLineVehicles < 3
+						&& (ownedArtilleryVehicles >= 1 || (ownedFrontLineVehicles < 2 && features[68] < 8)))
+					{
+						score -= 450;
+					}
+				}
 			}
 			// The rest: a main battle tank, or a light vehicle. Rules with no Category on their units
 			// fall back on the health.
@@ -6690,16 +7101,23 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			static_cast<int>(scores[26]), static_cast<int>(scores[27]), static_cast<int>(scores[28]), text.c_str());
 	}
 
-	// The tank floor: below it the best main battle tank goes ahead of the pick (TankFloor*).
+	// The tank floor: below it the best main battle tank goes ahead of the pick (TankFloor*), unless we
+	// already field at least two main battle tanks and the scored pick is a strong direct counter to what
+	// the enemy actually fields.
 	{
 		const bool belowFloor = belowTankFloor;
-		// Only an attack from the air alone keeps the scored pick: against a ground attack the tank goes first.
+		const int pickedCounter = bestUnitIdx >= 0
+			? CounterBonusFor(pHouse, UnitTypeClass::Array.GetItem(bestUnitIdx))
+			: 0;
+		const bool counterOverridesFloor = ownedMainTanks >= 2
+			&& (pickedCounter >= 550 || (pExt->NeuralAI_ActiveExpert == 2 && pickedCounter >= 320));
 		const bool airAttackOnly = GetMacroState(pHouse).CounterUnderAttack && !GetMacroState(pHouse).CounterUnderGroundAttack;
 		const bool floorTakes = belowFloor && bestTankIdx >= 0 && bestUnitIdx != bestTankIdx && hasActiveUnitIncome
-			&& !bestUnitRestoresIncome && !airAttackOnly;
+			&& !bestUnitRestoresIncome && !airAttackOnly && !counterOverridesFloor;
 		const char* floorWhy = !belowFloor ? "" : (floorTakes ? ", the tank goes first"
 			: (bestTankIdx < 0 ? ", kept: no tank to build" : (bestUnitIdx == bestTankIdx ? ", the pick is a tank"
-				: (!hasActiveUnitIncome ? ", kept: no income" : (bestUnitRestoresIncome ? ", kept: the pick restores the income" : ", kept: under air attack")))));
+				: (!hasActiveUnitIncome ? ", kept: no income" : (bestUnitRestoresIncome ? ", kept: the pick restores the income"
+					: (counterOverridesFloor ? ", kept: strong counter pick" : ", kept: under air attack"))))));
 
 		// TEMP diagnostic: the floor, the tanks alive and what the floor did, with the vehicle pick line.
 		if (logUnitPicks)
@@ -7183,7 +7601,26 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			if (!isInfInProgress && pInf->GetActualCost(pHouse) * SpyLuxuryMoneyFactor > money)
 				continue;
 
-			score += ((pHouse->OwnedInfantry < 6) ? -400 : scores[19]) - (pInf->Cost / 2);
+			const bool isSpyType = IsSpyInfantryType(pInf);
+			const int openSpyTargets = isSpyType ? GetSpecOpsState(pHouse).SpyTargets : 0;
+
+			if (pHouse->OwnedInfantry < 6)
+			{
+				score -= 400 + (pInf->Cost / 2);
+			}
+			else if (isSpyType && openSpyTargets == 0)
+			{
+				score += scores[19] - 350 - (pInf->Cost / 2);
+			}
+			else if (openSpyTargets > 0 && ownedInfiltrators == 0)
+			{
+				score += std::max(static_cast<int>(scores[19]), -60)
+					+ 420 + std::min(280, openSpyTargets * 90) - (pInf->Cost / 5);
+			}
+			else
+			{
+				score += scores[19] - (pInf->Cost / 2);
+			}
 		}
 		else if (isAA || pInf->C4)
 		{
@@ -7556,8 +7993,11 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			{
 				// Airlift jobs (damaged vehicle rescue, loaded strike APC drops). An idle
 				// carryall already covers the next job.
-				if (!isAirInProgress && (ownedCarryallAircraft >= wantedCarryalls || idleCarryallAircraft > 0))
+				if (!isAirInProgress && (ownedCarryallAircraft + ownedUnitCarryalls >= wantedCarryalls
+						|| idleCarryallAircraft + idleUnitCarryalls > 0))
+				{
 					continue;
+				}
 
 				airTransBonus = std::max(static_cast<int>(scores[28]), 0) + (carryallLiftJobs > 0 ? 700 : 350);
 			}

@@ -4,6 +4,7 @@
 
 #include <WWKeyboardClass.h>
 #include <GameOptionsClass.h>
+#include <Misc/NeuralAI/NeuralAI.h>
 #include <Utilities/SequenceRates.h>
 
 // Allow a Deployer=true infantry that has no Deploy sequence (Sequences[Deploy].CountFrames == 0)
@@ -239,6 +240,8 @@ DEFINE_HOOK(0x51A002, InfantryClass_UpdatePosition_InfiltrateBuilding, 0x6)
 
 	if (const auto pTag = pBuilding->AttachedTag)
 		pTag->RaiseEvent(TriggerEvent::SpyAsInfantry, pThis, CellStruct::Empty);
+
+	NeuralAI::OnBuildingInfiltrated(pThis, pBuilding);
 
 	return 0;
 }

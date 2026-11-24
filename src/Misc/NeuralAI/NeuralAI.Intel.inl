@@ -84,23 +84,37 @@ namespace
 	}
 
 	// Firepower of a weapon for the vehicle pick (Firepower*): damage per 60 frames, times its mean
-	// Verses over the first FirepowerArmorCount armors, more with area damage, times its range.
+	// Verses over active combat armors (including custom [ArmorTypes] and [ShieldTypes]), more with
+	// area damage, times its range.
 	int WeaponFirepowerOf(WeaponTypeClass* pWeapon)
 	{
 		const int rate = GetWeaponThreatRate(pWeapon);
 
-		if (rate <= 0 || !pWeapon->Warhead)
+		if (rate <= 0 || !pWeapon->Warhead || !CanWarheadDamageEnemy(pWeapon->Warhead))
 			return 0;
 
+		const int armorCount = GetRegisteredArmorCount();
 		int versesSum = 0;
+		int countedArmors = 0;
 
-		for (int armor = 0; armor < FirepowerArmorCount; ++armor)
+		for (int armor = 0; armor < armorCount; ++armor)
 		{
+			if (armor >= FirepowerArmorCount
+				&& (GetArmorDomainMask(armor) & (ArmorDomainInfantry | ArmorDomainVehicle | ArmorDomainBuilding | ArmorDomainShield)) == 0)
+			{
+				continue;
+			}
+
 			const double verses = GeneralUtils::GetWarheadVersusArmor(pWeapon->Warhead, static_cast<Armor>(armor));
-			versesSum += std::clamp(static_cast<int>(verses * 100.0 + 0.5), 0, 300);
+			const WarheadFlags flags = GetWarheadVersusFlags(pWeapon->Warhead, static_cast<Armor>(armor));
+
+			if (verses > 0.0 && (flags.ForceFire || verses > 0.0001))
+				versesSum += std::clamp(static_cast<int>(verses * 100.0 + 0.5), 0, 300);
+
+			countedArmors++;
 		}
 
-		const long long verses = versesSum / FirepowerArmorCount;
+		const long long verses = countedArmors > 0 ? (versesSum / countedArmors) : 0;
 		const long long area = 100 + std::clamp(static_cast<int>(pWeapon->Warhead->CellSpread * 35.0f), 0, 70);
 		const long long range = std::clamp(pWeapon->Range * 100 / (FirepowerRangeRefCells * Unsorted::LeptonsPerCell),
 			FirepowerRangeMinPercent, FirepowerRangeMostPercent);
@@ -138,7 +152,8 @@ namespace
 		auto const pWS = pType->GetWeapon(0);
 		auto const pWeapon = pWS ? pWS->WeaponType : nullptr;
 
-		if (!pWeapon || !pWeapon->Warhead || pWeapon->Suicide || pWeapon->Warhead->Parasite || pWeapon->Warhead->MindControl
+		if (!pWeapon || !pWeapon->Warhead || !CanWarheadDamageEnemy(pWeapon->Warhead)
+			|| pWeapon->Suicide || pWeapon->Warhead->Parasite || pWeapon->Warhead->MindControl
 			|| pWeapon->Warhead->Psychedelic
 			|| (pWeapon->Projectile && !pWeapon->Projectile->AG)
 			|| pWeapon->Range <= static_cast<int>(MainTankMinRangeCells * Unsorted::LeptonsPerCell))
@@ -146,8 +161,24 @@ namespace
 			return false;
 		}
 
-		return pWeapon->Damage <= MainTankSpecialDamage || (pType->OpenTopped && pType->Passengers > 0)
-			|| GeneralUtils::GetWarheadVersusArmor(pWeapon->Warhead, Armor::Heavy) >= MainTankHeavyVersus;
+		if (pWeapon->Damage <= MainTankSpecialDamage || (pType->OpenTopped && pType->Passengers > 0)
+			|| GeneralUtils::GetWarheadVersusArmor(pWeapon->Warhead, Armor::Heavy) >= MainTankHeavyVersus)
+		{
+			return true;
+		}
+
+		const int armorCount = GetRegisteredArmorCount();
+
+		for (int a = 11; a < armorCount; ++a)
+		{
+			if ((GetArmorDomainMask(a) & ArmorDomainVehicle) != 0 && IsHeavyLikeArmor(static_cast<Armor>(a))
+				&& GeneralUtils::GetWarheadVersusArmor(pWeapon->Warhead, static_cast<Armor>(a)) >= MainTankHeavyVersus)
+			{
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	// Threat of a unit type weighted by cost, durability and firepower, so one
@@ -767,11 +798,24 @@ namespace
 		else if (!outPureAA && !outUnarmedBunker && (w0AG || w1AG))
 		{
 			const auto pGndW = w0AG ? pW0 : pW1;
-			const bool highTierOrHeavy = (pGndW && (pGndW->Damage >= 65 || pGndW->Range >= 6 * 256))
-				|| pBld->Cost >= 800 || pBld->TechLevel >= 4;
+			double infVerses = 0.0;
+			double vehVerses = 0.0;
+
+			if (pGndW && pGndW->Warhead && CanWarheadDamageEnemy(pGndW->Warhead))
+			{
+				infVerses = (GeneralUtils::GetWarheadVersusArmor(pGndW->Warhead, Armor::None)
+					+ GeneralUtils::GetWarheadVersusArmor(pGndW->Warhead, Armor::Flak)
+					+ GeneralUtils::GetWarheadVersusArmor(pGndW->Warhead, Armor::Plate)) / 3.0;
+				vehVerses = (GeneralUtils::GetWarheadVersusArmor(pGndW->Warhead, Armor::Medium)
+					+ GeneralUtils::GetWarheadVersusArmor(pGndW->Warhead, Armor::Heavy)) / 2.0;
+			}
+
+			const bool highTierOrHeavy = vehVerses >= 0.45
+				|| (vehVerses >= 0.25 && ((pGndW && (pGndW->Damage >= 65 || pGndW->Range >= 6 * 256))
+					|| pBld->Cost >= 800 || pBld->TechLevel >= 4));
 
 			outAntiArmor = highTierOrHeavy;
-			outAntiInf = !highTierOrHeavy || (pGndW && pGndW->Damage >= 65);
+			outAntiInf = infVerses >= 0.35 || !highTierOrHeavy;
 		}
 	}
 

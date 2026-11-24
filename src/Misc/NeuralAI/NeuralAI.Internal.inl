@@ -226,6 +226,13 @@ namespace
 		NavalMassStrike,
 		NavalPassageWait,
 		OrderLeaseRefused,
+		EngineerCaptured,
+		EnemyBldCaptured,
+		ConYardCaptured,
+		EngineerLostOnWay,
+		SpyInfiltrated,
+		SpyDisguisedEntry,
+		SpyLostOnWay,
 		Count
 	};
 
@@ -257,7 +264,8 @@ namespace
 		"mcvIdleUnfold", "mcvIdleSite", "mcvIdleHome", "opHoldMoved", "jamBarrierBreach", "opNoTransportReach", "backdoorNoCarrier",
 		"mcvIdleStepOnSite", "mcvUnfoldRetry", "navalStrikeInRange", "navalPlanShipsFreed", "urbanQuietRelease",
 		"ferryDepartedStuck", "ferryMcvNowhere", "deployerIdleWatchdog", "deployerSiteFailed", "deployerGoalNoFit",
-		"navalStuckReleased", "navalPreyAttacks", "navalSweeps", "navalMassStrikes", "navalPassageWaits", "orderLeaseRefused" };
+		"navalStuckReleased", "navalPreyAttacks", "navalSweeps", "navalMassStrikes", "navalPassageWaits", "orderLeaseRefused",
+		"engineerCaptured", "enemyBldCaptured", "conYardCaptured", "engineerLostOnWay", "spyInfiltrated", "spyDisguisedEntry", "spyLostOnWay" };
 
 	static_assert(std::size(NeuralDecisionNames) == static_cast<size_t>(NeuralDecision::Count));
 
@@ -1334,6 +1342,7 @@ namespace
 		bool Credited { false };
 		bool Economic { false };
 		bool KilledByEnemy { false };
+		bool ConsumedOnMission { false };
 	};
 
 	struct NeuralCreditGone
@@ -2308,13 +2317,428 @@ namespace
 		return heals;
 	}
 
-	// What a weapon does to the base armors (Repairer*), by its effective damage, Damage x Verses: it
-	// repairs vehicles (light, medium, heavy) or buildings (wood, steel, concrete) when that is negative
-	// and its warhead affects allies, and it hurts enemies when it is positive for one armor and the
-	// warhead affects enemies. The sign of Damage alone missed the C&C Reloaded repair weapons that do
-	// positive damage through negative Verses: the Repair Disk's DiskHeal (MDISK, 100 with -10% to
-	// -20%) and CABAL's Mechanic's SuperRepairGun (ROBOTENGINEER2, 10 with -100% to -15%). NeverUse
-	// weapons (target scanners) never fire and do nothing.
+	// Dynamic custom-armor ([ArmorTypes] in Ares / Antares) and shield ([ShieldTypes] in Phobos)
+	// catalog built once per match. Resolves total armor count, transitive base-armor inheritance
+	// (e.g. mm2mec_armor -> super_heavy_armor -> heavy) and which unit/building/shield classes field
+	// each armor index, with zero hot-path allocations.
+	constexpr uint8_t ArmorDomainInfantry = 1;
+	constexpr uint8_t ArmorDomainVehicle = 2;
+	constexpr uint8_t ArmorDomainBuilding = 4;
+	constexpr uint8_t ArmorDomainShield = 8;
+
+	struct NeuralAresVersesEntry
+	{
+		double Verses;
+		WarheadFlags Flags;
+	};
+
+	struct NeuralAresWarheadExtLayout
+	{
+		char Padding[0x24];
+		std::vector<NeuralAresVersesEntry> Verses;
+	};
+
+	struct NeuralArmorCatalog
+	{
+		int MatchSerial { -1 };
+		int ArmorCount { 11 };
+		std::vector<int> RootBaseArmor;
+		std::vector<uint8_t> DomainMask;
+	};
+
+	const NeuralArmorCatalog& GetNeuralArmorCatalog()
+	{
+		static NeuralArmorCatalog catalog {};
+
+		if (catalog.MatchSerial == NeuralMatchSerial && catalog.ArmorCount >= 11)
+			return catalog;
+
+		catalog.MatchSerial = NeuralMatchSerial;
+		int armorCount = 11;
+
+		if (AresHelper::CanUseAres && WarheadTypeClass::Array.Count > 0)
+		{
+			if (auto const pWH = WarheadTypeClass::Array.GetItem(0))
+			{
+				if (auto const pExt = reinterpret_cast<const NeuralAresWarheadExtLayout*>(*reinterpret_cast<const uintptr_t*>(reinterpret_cast<const char*>(pWH) + 0x1CC)))
+					armorCount = std::max(armorCount, static_cast<int>(pExt->Verses.size()));
+			}
+		}
+
+		// Parse [ArmorTypes] names and parent links in exact registration order (works identically
+		// under Ares and Antares, even if AresHelper::CanUseAres is false on a custom Antares build).
+		static constexpr const char* DefaultArmorNames[11] =
+		{
+			"none", "flak", "plate", "light", "medium", "heavy",
+			"wood", "steel", "concrete", "special_1", "special_2"
+		};
+
+		std::vector<std::string> names;
+		names.reserve(64);
+
+		for (const char* pDef : DefaultArmorNames)
+			names.emplace_back(pDef);
+
+		auto findArmorNameIndex = [&](const char* pName) -> int
+		{
+			if (!pName || pName[0] == '\0')
+				return -1;
+
+			for (size_t i = 0; i < names.size(); ++i)
+			{
+				if (_stricmp(names[i].c_str(), pName) == 0)
+					return static_cast<int>(i);
+			}
+
+			return -1;
+		};
+
+		if (auto const pINI = CCINIClass::INI_Rules)
+		{
+			const int keyCount = pINI->GetKeyCount("ArmorTypes");
+
+			for (int i = 0; i < keyCount; ++i)
+			{
+				const char* pKey = pINI->GetKeyName("ArmorTypes", i);
+
+				if (pKey && pKey[0] != '\0' && findArmorNameIndex(pKey) < 0)
+					names.emplace_back(pKey);
+			}
+		}
+
+		armorCount = std::max(armorCount, static_cast<int>(names.size()));
+
+		auto bumpCount = [&](Armor armor)
+		{
+			const int idx = static_cast<int>(armor);
+
+			if (idx >= armorCount && idx < 4096)
+				armorCount = idx + 1;
+		};
+
+		for (auto const pInf : InfantryTypeClass::Array)
+		{
+			if (pInf)
+				bumpCount(pInf->Armor);
+		}
+
+		for (auto const pUnit : UnitTypeClass::Array)
+		{
+			if (pUnit)
+				bumpCount(pUnit->Armor);
+		}
+
+		for (auto const pAir : AircraftTypeClass::Array)
+		{
+			if (pAir)
+				bumpCount(pAir->Armor);
+		}
+
+		for (auto const pBld : BuildingTypeClass::Array)
+		{
+			if (pBld)
+				bumpCount(pBld->Armor);
+		}
+
+		for (auto const& pShield : ShieldTypeClass::Array)
+		{
+			if (pShield)
+				bumpCount(pShield->Armor.Get());
+		}
+
+		for (auto const pOv : OverlayTypeClass::Array)
+		{
+			if (pOv)
+				bumpCount(pOv->Armor);
+		}
+
+		std::vector<int> parentIndex(armorCount, -1);
+
+		for (int a = 0; a < 11 && a < armorCount; ++a)
+			parentIndex[a] = a;
+
+		if (auto const pINI = CCINIClass::INI_Rules)
+		{
+			char valueBuf[0x40] {};
+
+			for (size_t i = 11; i < names.size() && static_cast<int>(i) < armorCount; ++i)
+			{
+				if (pINI->ReadString("ArmorTypes", names[i].c_str(), "", valueBuf, sizeof(valueBuf)) > 0)
+					parentIndex[i] = findArmorNameIndex(valueBuf);
+			}
+		}
+
+		catalog.ArmorCount = armorCount;
+		catalog.RootBaseArmor.assign(armorCount, -1);
+		catalog.DomainMask.assign(armorCount, 0);
+
+		for (int a = 0; a < armorCount; ++a)
+		{
+			int cur = a;
+
+			for (int hop = 0; hop < 16 && cur >= 11 && cur < armorCount; ++hop)
+				cur = parentIndex[cur];
+
+			catalog.RootBaseArmor[a] = (cur >= 0 && cur < 11) ? cur : -1;
+
+			const int root = catalog.RootBaseArmor[a];
+
+			if (root >= 0 && root <= 2)
+				catalog.DomainMask[a] |= ArmorDomainInfantry;
+			else if (root >= 3 && root <= 5)
+				catalog.DomainMask[a] |= ArmorDomainVehicle;
+			else if (root >= 6 && root <= 8)
+				catalog.DomainMask[a] |= ArmorDomainBuilding;
+		}
+
+		for (auto const pInf : InfantryTypeClass::Array)
+		{
+			if (pInf && static_cast<int>(pInf->Armor) >= 0 && static_cast<int>(pInf->Armor) < armorCount)
+				catalog.DomainMask[static_cast<int>(pInf->Armor)] |= ArmorDomainInfantry;
+		}
+
+		for (auto const pUnit : UnitTypeClass::Array)
+		{
+			if (pUnit && static_cast<int>(pUnit->Armor) >= 0 && static_cast<int>(pUnit->Armor) < armorCount)
+				catalog.DomainMask[static_cast<int>(pUnit->Armor)] |= ArmorDomainVehicle;
+		}
+
+		for (auto const pAir : AircraftTypeClass::Array)
+		{
+			if (pAir && static_cast<int>(pAir->Armor) >= 0 && static_cast<int>(pAir->Armor) < armorCount)
+				catalog.DomainMask[static_cast<int>(pAir->Armor)] |= ArmorDomainVehicle;
+		}
+
+		for (auto const pBld : BuildingTypeClass::Array)
+		{
+			if (pBld && static_cast<int>(pBld->Armor) >= 0 && static_cast<int>(pBld->Armor) < armorCount)
+				catalog.DomainMask[static_cast<int>(pBld->Armor)] |= ArmorDomainBuilding;
+		}
+
+		for (auto const& pShield : ShieldTypeClass::Array)
+		{
+			if (pShield && pShield->Strength.Get() > 0)
+			{
+				const int sIdx = static_cast<int>(static_cast<Armor>(pShield->Armor.Get()));
+
+				if (sIdx >= 0 && sIdx < armorCount)
+					catalog.DomainMask[sIdx] |= ArmorDomainShield;
+			}
+		}
+
+		return catalog;
+	}
+
+	inline int GetRegisteredArmorCount()
+	{
+		return GetNeuralArmorCatalog().ArmorCount;
+	}
+
+	inline int GetRootBaseArmor(Armor armor)
+	{
+		auto const& cat = GetNeuralArmorCatalog();
+		const int idx = static_cast<int>(armor);
+
+		return (idx >= 0 && idx < cat.ArmorCount) ? cat.RootBaseArmor[idx] : -1;
+	}
+
+	inline bool IsHeavyLikeArmor(Armor armor)
+	{
+		return armor == Armor::Heavy || GetRootBaseArmor(armor) == static_cast<int>(Armor::Heavy);
+	}
+
+	inline uint8_t GetArmorDomainMask(int armorIndex)
+	{
+		auto const& cat = GetNeuralArmorCatalog();
+
+		return (armorIndex >= 0 && armorIndex < cat.ArmorCount) ? cat.DomainMask[armorIndex] : 0;
+	}
+
+	inline WarheadFlags GetWarheadVersusFlags(WarheadTypeClass* pWH, Armor armor)
+	{
+		if (!pWH)
+			return WarheadFlags { false, false, false };
+
+		const int idx = static_cast<int>(armor);
+
+		if (idx < 0)
+			return WarheadFlags { false, false, false };
+
+		if (AresHelper::CanUseAres)
+		{
+			if (auto const pExt = reinterpret_cast<const NeuralAresWarheadExtLayout*>(*reinterpret_cast<const uintptr_t*>(reinterpret_cast<const char*>(pWH) + 0x1CC)))
+			{
+				if (static_cast<size_t>(idx) < pExt->Verses.size())
+					return pExt->Verses[idx].Flags;
+			}
+		}
+
+		const double v = GeneralUtils::GetWarheadVersusArmor(pWH, armor);
+		const bool negHeal = v < -0.0001;
+		const bool forceFire = negHeal || v > 0.0001;
+		const bool retaliate = negHeal || v > 0.0101;
+		const bool passiveAcquire = negHeal || v > 0.0201;
+
+		return WarheadFlags { forceFire, retaliate, passiveAcquire };
+	}
+
+	inline bool CanWarheadDamageEnemy(WarheadTypeClass* pWH)
+	{
+		if (!pWH)
+			return false;
+
+		if (auto const pWHExt = WarheadTypeExt::TryFetch(pWH))
+		{
+			if (!pWHExt->AffectsEnemies.Get())
+				return false;
+
+			if (pWHExt->FakeEngineer_CanCaptureBuildings)
+				return false;
+		}
+
+		return true;
+	}
+
+	inline ShieldTypeClass* GetActiveTypeShield(const TechnoTypeClass* pType, Armor& outShieldArmor, int& outShieldStrength)
+	{
+		outShieldArmor = pType ? pType->Armor : Armor::None;
+		outShieldStrength = 0;
+
+		if (!pType)
+			return nullptr;
+
+		auto const pMutType = const_cast<TechnoTypeClass*>(pType);
+		auto const pTypeExt = TechnoTypeExt::TryFetch(pMutType);
+		auto const pShieldType = pTypeExt ? pTypeExt->ShieldType.Get() : nullptr;
+
+		if (!pShieldType || pShieldType->Strength.Get() <= 0)
+			return nullptr;
+
+		outShieldStrength = pShieldType->Strength.Get();
+
+		if (pShieldType->InheritArmorFromTechno
+			&& (pShieldType->InheritArmor_Allowed.empty() || pShieldType->InheritArmor_Allowed.Contains(pMutType))
+			&& !pShieldType->InheritArmor_Disallowed.Contains(pMutType))
+		{
+			outShieldArmor = pType->Armor;
+		}
+		else
+		{
+			outShieldArmor = pShieldType->Armor.Get();
+		}
+
+		return pShieldType;
+	}
+
+	inline bool WarheadPenetratesShieldType(WarheadTypeClass* pWH, ShieldTypeClass* pShieldType)
+	{
+		if (!pWH || !pShieldType)
+			return true;
+
+		if (pWH->Temporal)
+			return true;
+
+		auto const pWHExt = WarheadTypeExt::TryFetch(pWH);
+
+		if (!pWHExt || !pWHExt->Shield_Penetrate.Get())
+			return false;
+
+		auto const affected = pWHExt->Shield_Penetrate_Types.GetElements(pWHExt->Shield_AffectTypes);
+
+		return affected.empty() || affected.contains(pShieldType);
+	}
+
+	inline bool WarheadBreaksShieldType(WarheadTypeClass* pWH, ShieldTypeClass* pShieldType)
+	{
+		if (!pWH || !pShieldType)
+			return false;
+
+		auto const pWHExt = WarheadTypeExt::TryFetch(pWH);
+
+		if (!pWHExt || !pWHExt->Shield_Break.Get())
+			return false;
+
+		auto const affected = pWHExt->Shield_Break_Types.GetElements(pWHExt->Shield_AffectTypes);
+
+		return affected.empty() || affected.contains(pShieldType);
+	}
+
+	// Deterministic integer permille effectiveness of pWH against pTargetType, accounting for custom
+	// [ArmorTypes], Ares ForceFire/PassiveAcquire flags, and Phobos [ShieldTypes] absorption/penetration/break.
+	int GetEffectiveVersusAgainstTypePermille(WarheadTypeClass* pWH, const TechnoTypeClass* pTargetType, bool* outBreaksShield = nullptr)
+	{
+		if (outBreaksShield)
+			*outBreaksShield = false;
+
+		if (!pWH || !pTargetType || !CanWarheadDamageEnemy(pWH))
+			return 0;
+
+		const Armor hullArmor = pTargetType->Armor;
+		const double rawHull = GeneralUtils::GetWarheadVersusArmor(pWH, hullArmor);
+		const WarheadFlags hullFlags = GetWarheadVersusFlags(pWH, hullArmor);
+		int hullPermille = (rawHull > 0.0 && (hullFlags.ForceFire || rawHull > 0.0001))
+			? std::clamp(static_cast<int>(rawHull * 1000.0 + 0.5), 0, 3000)
+			: 0;
+
+		if (hullPermille > 0 && !hullFlags.PassiveAcquire)
+			hullPermille = hullPermille * 55 / 100;
+
+		Armor shieldArmor = hullArmor;
+		int shieldStrength = 0;
+		ShieldTypeClass* pShieldType = GetActiveTypeShield(pTargetType, shieldArmor, shieldStrength);
+
+		if (!pShieldType || shieldStrength <= 0)
+			return hullPermille;
+
+		const bool breaksShield = WarheadBreaksShieldType(pWH, pShieldType);
+
+		if (outBreaksShield)
+			*outBreaksShield = breaksShield;
+
+		if (WarheadPenetratesShieldType(pWH, pShieldType))
+			return breaksShield ? std::min(3000, hullPermille * 135 / 100 + 250) : hullPermille;
+
+		const double rawShield = GeneralUtils::GetWarheadVersusArmor(pWH, shieldArmor);
+		const WarheadFlags shieldFlags = GetWarheadVersusFlags(pWH, shieldArmor);
+		int shieldPermille = (rawShield > 0.0 && (shieldFlags.ForceFire || rawShield > 0.0001))
+			? std::clamp(static_cast<int>(rawShield * 1000.0 + 0.5), 0, 3000)
+			: 0;
+
+		if (shieldPermille > 0 && !shieldFlags.PassiveAcquire)
+			shieldPermille = shieldPermille * 55 / 100;
+
+		auto const pWHExt = WarheadTypeExt::TryFetch(pWH);
+		const bool affectsShield = !pWHExt || pWHExt->Shield_AffectTypes.empty() || pWHExt->Shield_AffectTypes.Contains(pShieldType);
+		const double absorbD = affectsShield && pWHExt
+			? pWHExt->Shield_AbsorbPercent.Get(pShieldType->AbsorbPercent)
+			: pShieldType->AbsorbPercent.Get();
+		const double passD = affectsShield && pWHExt
+			? pWHExt->Shield_PassPercent.Get(pShieldType->PassPercent)
+			: pShieldType->PassPercent.Get();
+		const int absorbPct = std::clamp(static_cast<int>(absorbD * 100.0 + 0.5), 0, 200);
+		const int passPct = std::clamp(static_cast<int>(passD * 100.0 + 0.5), 0, 200);
+
+		if (breaksShield && shieldPermille > 0)
+			return std::min(3000, std::max(hullPermille, shieldPermille) * 135 / 100 + 250);
+
+		// A non-penetrating warhead with 0% vs shield_armor and 0% pass-through cannot even target or
+		// scratch an intact shield (ShieldClass::CanBeTargeted == false).
+		if (shieldPermille <= 0 && passPct <= 0)
+			return hullPermille / 5;
+
+		const int hullHP = std::max(1, pTargetType->Strength);
+		const int totalHP = hullHP + shieldStrength;
+		const int shieldEff = shieldPermille * absorbPct / 100 + hullPermille * passPct / 100;
+		const long long blended = (static_cast<long long>(hullPermille) * hullHP
+			+ static_cast<long long>(shieldEff) * shieldStrength) / totalHP;
+
+		return std::clamp(static_cast<int>(blended), 0, 3000);
+	}
+
+	// What a weapon does to registered armors (Repairer*), including custom [ArmorTypes] for vehicles
+	// and buildings, by its effective damage, Damage x Verses: it repairs vehicles or buildings when
+	// that is negative and its warhead affects allies, and it hurts enemies when it is positive for
+	// one armor and the warhead affects enemies. NeverUse weapons never fire and do nothing.
 	constexpr int RepairsVehicles = 1;
 	constexpr int RepairsBuildings = 2;
 	constexpr int HurtsEnemies = 4;
@@ -2327,16 +2751,27 @@ namespace
 		auto const pWH = pWeapon->Warhead;
 		auto const pWHExt = WarheadTypeExt::TryFetch(pWH);
 		const bool affectsEnemies = !pWHExt || pWHExt->AffectsEnemies.Get();
+		const int armorCount = GetRegisteredArmorCount();
 		int abilities = 0;
 
-		for (int armor = 0; armor < 11; ++armor)
+		for (int armor = 0; armor < armorCount; ++armor)
 		{
 			const double effect = pWeapon->Damage * GeneralUtils::GetWarheadVersusArmor(pWH, static_cast<Armor>(armor));
 
 			if (effect < 0.0 && pWH->AffectsAllies)
-				abilities |= armor >= 6 && armor <= 8 ? RepairsBuildings : (armor >= 3 && armor <= 5 ? RepairsVehicles : 0);
+			{
+				const uint8_t domain = GetArmorDomainMask(armor);
+
+				if (domain & ArmorDomainBuilding)
+					abilities |= RepairsBuildings;
+
+				if (domain & ArmorDomainVehicle)
+					abilities |= RepairsVehicles;
+			}
 			else if (effect > 0.0 && affectsEnemies)
+			{
 				abilities |= HurtsEnemies;
+			}
 		}
 
 		return abilities;
@@ -2679,8 +3114,17 @@ namespace
 
 		if (!CCINIClass::INI_Rules->ReadBool(pType->ID, "TiberiumProof", proofByDefault))
 		{
+			Armor shieldArmor = pType->Armor;
+			int shieldStrength = 0;
+			ShieldTypeClass* pShieldType = GetActiveTypeShield(pType, shieldArmor, shieldStrength);
+
 			for (auto const& [damage, pWarhead] : rules.Damages)
-				worst = std::max(worst, MapClass::GetTotalDamage(damage, pWarhead, pType->Armor, 0));
+			{
+				const Armor effArmor = (pShieldType && shieldStrength > 0 && !WarheadPenetratesShieldType(pWarhead, pShieldType))
+					? shieldArmor
+					: pType->Armor;
+				worst = std::max(worst, MapClass::GetTotalDamage(damage, pWarhead, effArmor, 0));
+			}
 		}
 
 		rules.DamageByType[pType] = worst;

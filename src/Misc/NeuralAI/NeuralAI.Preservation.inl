@@ -598,7 +598,10 @@ namespace
 				{
 					// A station trip that ended unrepaired at the station or kept losing its way: that type
 					// never goes to such a station again this match.
-					if (abstract_cast<BuildingClass*>(pSource) && (trip.Kind == NeuralRepairKind::Depot || trip.Kind == NeuralRepairKind::Hospital)
+					if (auto const pStationBld = abstract_cast<BuildingClass*>(pSource);
+						pStationBld && (trip.Kind == NeuralRepairKind::Depot || trip.Kind == NeuralRepairKind::Hospital)
+						&& (!pStationBld->HasAnyLink() || pFoot->ContainsLink(pStationBld))
+						&& (trip.Kind != NeuralRepairKind::Depot || pHouse->Available_Money() >= 100)
 						&& (trip.SettledFrame >= 0 || trip.Orders >= 4) && !IsRepairStationFailed(pHouse, pFoot->GetTechnoType(), trip.Kind))
 					{
 						state.FailedStations.emplace_back(pFoot->GetTechnoType(), trip.Kind);
@@ -656,7 +659,11 @@ namespace
 					auto const pFootCell = pFoot->GetCell();
 					auto const pCellBld = pFootCell ? pFootCell->GetBuilding() : nullptr;
 
-					if (pCellBld == pBld && trip.SettledFrame < 0)
+					const bool stationBusyWithOther = pBld->HasAnyLink() && !pFoot->ContainsLink(pBld);
+
+					if (stationBusyWithOther)
+						trip.BestHealthFrame = now;
+					else if (pCellBld == pBld && trip.SettledFrame < 0)
 						trip.SettledFrame = now;
 
 					// Standing on the pad without docking: ask again once.

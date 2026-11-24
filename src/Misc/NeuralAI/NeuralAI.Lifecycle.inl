@@ -62,6 +62,20 @@ void NeuralAI::Shutdown()
 		TelemetryViewShmHandle = NULL;
 	}
 
+	if (TrajectoryView)
+	{
+		UnmapViewOfFile(TrajectoryView);
+
+		TrajectoryView = nullptr;
+	}
+
+	if (TrajectoryShmHandle)
+	{
+		CloseHandle(TrajectoryShmHandle);
+
+		TrajectoryShmHandle = NULL;
+	}
+
 	if (NeuralAI::TelemetryView)
 	{
 		UnmapViewOfFile(NeuralAI::TelemetryView);
@@ -724,6 +738,28 @@ void NeuralAI::InitTelemetrySharedMemory()
 		}
 	}
 
+	if (NeuralAI::HeadlessMode && !TrajectoryView)
+	{
+		char trajShmName[128];
+		std::snprintf(trajShmName, sizeof(trajShmName), "Local\\PhobosAITrajShm_%d", NeuralAI::TrainSlotIndex);
+		TrajectoryShmHandle = CreateFileMappingA(
+			INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, sizeof(AITrajectorySharedBuffer), trajShmName);
+
+		if (TrajectoryShmHandle)
+		{
+			TrajectoryView = static_cast<AITrajectorySharedBuffer*>(
+				MapViewOfFile(TrajectoryShmHandle, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(AITrajectorySharedBuffer)));
+
+			if (TrajectoryView)
+			{
+				std::memset(TrajectoryView, 0, sizeof(AITrajectorySharedBuffer));
+				std::memcpy(TrajectoryView->Magic, "PHOBOSTJ", 8);
+				TrajectoryView->SchemaVersion = 1;
+				TrajectoryView->Capacity = 200;
+			}
+		}
+	}
+
 	if (NeuralAI::TelemetryView)
 		return;
 
@@ -829,6 +865,16 @@ void NeuralAI::OnScenarioStart()
 	OreFieldCache.clear();
 	OreFieldCacheFrame = -100000;
 	NeuralMatchSerial++;
+
+	if (NeuralAI::HeadlessMode && TrajectoryView)
+	{
+		std::memcpy(TrajectoryView->Magic, "PHOBOSTJ", 8);
+		TrajectoryView->SchemaVersion = 1;
+		TrajectoryView->MatchSerial = static_cast<uint32_t>(NeuralMatchSerial);
+		TrajectoryView->WriteCount = 0;
+		TrajectoryView->Capacity = 200;
+	}
+
 	WaterZoneCells.clear();
 	LargestWaterZoneCells = -1;
 	MapInfo = NeuralMapInfo {};
@@ -1583,16 +1629,103 @@ void NeuralAI::OnHeadlessFrameTick()
 		NeuralAI::LastCombatFrame = frame;
 	}
 
+	const bool isRegularTrainSlot = NeuralAI::TrainSlotIndex >= 1 && NeuralAI::TrainSlotIndex < 60;
 	const bool onlyOneSideLeft = (frame > 300 && (aliveCombatHouses <= 1 || !hasHostilePairAlive));
 	const bool activeRecentCombat = ((frame - NeuralAI::LastCombatFrame) < 2700);
-	const int baseMaxFrames = (aliveCombatHouses >= 3) ? 162000 : 135000;
-	const int maxMatchFrames = activeRecentCombat ? (baseMaxFrames + 27000) : baseMaxFrames;
-	const int noCombatLimit = (aliveCombatHouses >= 3) ? 13500 : 10800;
+	const int baseMaxFrames = isRegularTrainSlot
+		? ((aliveCombatHouses >= 3) ? 90000 : 72000)
+		: ((aliveCombatHouses >= 3) ? 162000 : 135000);
+	const int maxMatchFrames = activeRecentCombat
+		? (baseMaxFrames + (isRegularTrainSlot ? 9000 : 27000))
+		: baseMaxFrames;
+	const int noCombatLimit = (aliveCombatHouses >= 3) ? 12600 : 9000;
 
-	const bool stalemate = !onlyOneSideLeft
-		&& ((frame > 18000 && (frame - NeuralAI::LastCombatFrame) >= noCombatLimit) || (frame >= maxMatchFrames));
+	bool mercyDecisiveWin = false;
 
-	if (stalemate || onlyOneSideLeft)
+	if (!onlyOneSideLeft && isRegularTrainSlot && frame >= 9000)
+	{
+		static int mercyEnvChecked = -1;
+
+		if (mercyEnvChecked < 0)
+		{
+			char envBuf[16] = {};
+			const DWORD envLen = GetEnvironmentVariableA("PHOBOS_TRAIN_MERCY", envBuf, sizeof(envBuf));
+			mercyEnvChecked = (envLen > 0 && envBuf[0] == '1') ? 1 : 0;
+		}
+
+		static int mercySerial = -1;
+		static int mercyStreakFrames = 0;
+		static int mercyLeadSlot = -1;
+
+		if (mercySerial != NeuralMatchSerial)
+		{
+			mercySerial = NeuralMatchSerial;
+			mercyStreakFrames = 0;
+			mercyLeadSlot = -1;
+		}
+
+		if (mercyEnvChecked == 1)
+		{
+			std::array<int, 2> slotScore {};
+			std::array<int, 2> slotCoreProd {};
+			std::array<int, 2> slotReadySuper {};
+			std::array<int, 2> slotAliveCount {};
+
+			for (auto const pH : aliveCombatList)
+			{
+				auto const pHExt = HouseExt::TryFetch(pH);
+				const int pSlot = (pHExt && pHExt->NeuralAI_PolicySlot == 1) ? 1 : 0;
+				slotAliveCount[pSlot]++;
+				slotScore[pSlot] += std::max(0, HouseMatchScore(pH));
+				slotCoreProd[pSlot] += pH->NumConYards + pH->NumWarFactories + pH->NumShipyards;
+
+				for (auto const pSW : pH->Supers)
+				{
+					if (pSW && pSW->IsPresent && pSW->IsReady && pSW->Type && !pSW->Type->DisableableFromShell)
+						slotReadySuper[pSlot]++;
+				}
+			}
+
+			int domSlot = -1;
+
+			if (slotAliveCount[0] > 0 && slotAliveCount[1] > 0)
+			{
+				if (slotCoreProd[0] >= 2 && slotCoreProd[1] == 0 && slotReadySuper[1] == 0
+					&& slotScore[0] >= std::max(4000, slotScore[1] * 5))
+				{
+					domSlot = 0;
+				}
+				else if (slotCoreProd[1] >= 2 && slotCoreProd[0] == 0 && slotReadySuper[0] == 0
+					&& slotScore[1] >= std::max(4000, slotScore[0] * 5))
+				{
+					domSlot = 1;
+				}
+			}
+
+			if (domSlot >= 0 && domSlot == mercyLeadSlot)
+			{
+				mercyStreakFrames += 60;
+			}
+			else if (domSlot >= 0)
+			{
+				mercyLeadSlot = domSlot;
+				mercyStreakFrames = 60;
+			}
+			else
+			{
+				mercyLeadSlot = -1;
+				mercyStreakFrames = 0;
+			}
+
+			if (mercyStreakFrames >= 1800)
+				mercyDecisiveWin = true;
+		}
+	}
+
+	const bool stalemate = !onlyOneSideLeft && !mercyDecisiveWin
+		&& ((frame > 16200 && (frame - NeuralAI::LastCombatFrame) >= noCombatLimit) || (frame >= maxMatchFrames));
+
+	if (stalemate || onlyOneSideLeft || mercyDecisiveWin)
 	{
 		int bestHouseIdx = lastAliveHouseIdx;
 		int bestScore = -1;
