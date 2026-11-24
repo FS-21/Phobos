@@ -5681,8 +5681,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		}
 
 		// Yuri Grinder Economy: Recycle heavily damaged Mind-Controlled enemy
-		// vehicles into the Grinder for instant cash!
-		if (pGrinder && pUnit->MindControlledBy != nullptr && pUnit->GetHealthPercentage() < 0.45
+		// vehicles into the Grinder for instant cash (never suicide demolition trucks, which
+		// turn back into the enemy for massive blast damage and free the mind-control slot on impact).
+		if (pGrinder && !IsVehicleRaiderType(pType) && pUnit->MindControlledBy != nullptr && pUnit->GetHealthPercentage() < 0.45
 			&& pUnit->CurrentMission != Mission::Enter)
 		{
 			OrderFootToEnter(pUnit, pGrinder);
@@ -7520,10 +7521,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		// Worth a repair trip: expensive, veteran, or clearly above what our army fields on average
 		// (an army of cheap units has no 800 credit tanks to save).
-		const bool valuableUnit = pType->Cost >= 800 || pUnit->Veterancy.IsElite() || pUnit->Veterancy.IsVeteran()
-			|| (pType->Cost >= 400 && pType->Cost * 4 >= armyAverageCost * 5);
+		const bool isSuicideVehicle = IsVehicleRaiderType(pType);
+		const bool valuableUnit = !isSuicideVehicle && (pType->Cost >= 800 || pUnit->Veterancy.IsElite() || pUnit->Veterancy.IsVeteran()
+			|| (pType->Cost >= 400 && pType->Cost * 4 >= armyAverageCost * 5));
 
-		if (pRepairDepot && !IsAmphibiousOrAirTransport(pType)
+		if (pRepairDepot && !IsAmphibiousOrAirTransport(pType) && !isSuicideVehicle
 			&& (parasiteToRemove || (valuableUnit && pUnit->GetHealthPercentage() < repairThreshold)))
 		{
 			if (pUnit->CurrentMission == Mission::Enter || isAtOrBoundForRepair(pUnit) || repairTripRecent(pUnit))
@@ -7548,7 +7550,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// Slot 65 (Grinder Mind-Control Recycling & Salvage): Send mind-controlled
 		// vehicles we captured (MindControlledBy != nullptr) into our Grinder for
 		// instant cash AND to immediately free our Yuri/Mastermind's control slot!
-		if (pGrinderBld && !pType->Naval && SlotGateHeld(scores[65], 80, 65, pUnit->UniqueID)
+		// Suicide demolition vehicles are excluded whenever enemy structures exist so UpdateSneakStrikes
+		// hurls them into the highest-value enemy cluster instead of parking nuclear bombs in our own base.
+		if (pGrinderBld && !pType->Naval
+			&& (!isSuicideVehicle || GetKnownEnemyBuildingCache(pHouse).Entries.empty())
+			&& SlotGateHeld(scores[65], 80, 65, pUnit->UniqueID)
 			&& (pUnit->MindControlledBy != nullptr
 				|| (!pRepairDepot && pUnit->GetHealthPercentage() < 0.18 && pHouse->Available_Money() < 600)))
 		{
@@ -7710,7 +7716,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			{
 				return pVehicle && pVehicle->Owner == pHouse && !pVehicle->InLimbo && pVehicle->IsAlive && pVehicle->Type
 					&& !pVehicle->Type->Naval && !pVehicle->Type->Harvester && !pVehicle->Type->ResourceGatherer
-					&& pVehicle->Type->GetWeapon(0) && pVehicle->Type->GetWeapon(0)->WeaponType && !IsRepairerUnit(pVehicle);
+					&& pVehicle->Type->GetWeapon(0) && pVehicle->Type->GetWeapon(0)->WeaponType && !IsRepairerUnit(pVehicle) && !IsVehicleRaiderType(pVehicle->Type);
 			};
 
 			// A vehicle in a group (user, 2026-11-19: approved «Sí, hazlo»): RepairerEscortGroupMin armed
@@ -8098,7 +8104,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// Slot 58 (Tank Infantry Crushing): Heavy Crusher=yes tanks run over nearby
 		// Crushable=yes enemy infantry (<= 3 cells) instead of wasting slow cannon
 		// shells!
-		if (pType->Crusher && !pType->Naval && SlotGateHeld(scores[58], 100, 58, pUnit->UniqueID)
+		if (pType->Crusher && !pType->Naval && !isSuicideVehicle && SlotGateHeld(scores[58], 100, 58, pUnit->UniqueID)
 			&& (isUnitIdle || pUnit->CurrentMission == Mission::Attack) && (IsAITickWindow(45, 15)))
 		{
 			CellClass* pCrushCell = nullptr;
@@ -9605,7 +9611,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 		}
 
-		if (pGrinderBld && pInf->MindControlledBy != nullptr && SlotGateHeld(scores[65], 80, 65, pInf->UniqueID))
+		if (pGrinderBld && pInf->MindControlledBy != nullptr
+			&& (!IsSuicideInfantryType(pInf->Type) || GetKnownEnemyBuildingCache(pHouse).Entries.empty())
+			&& SlotGateHeld(scores[65], 80, 65, pInf->UniqueID))
 		{
 			DispatchFootToTargetOrTransport(pInf, pGrinderBld, Mission::Enter, false);
 
@@ -11962,7 +11970,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// a unit wave toward an island it could not reach and drove round its own).
 		if (pUnit->Type->Harvester || pUnit->Type->ResourceGatherer
 			|| (pUnit->Type->DeploysInto && (pUnit->Type->DeploysInto->ConstructionYard || !IsDeployableSiegeUnitType(pUnit->Type)))
-			|| IsRepairerUnit(pUnit))
+			|| IsRepairerUnit(pUnit) || IsVehicleRaiderType(pUnit->Type))
 		{
 			continue;
 		}
@@ -12207,7 +12215,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		// Slaves belong to their miner (match #7106: a Yuri slave on an attack-move to the enemy base
 		// 110 cells away, pulled back by its master, standing still between the two orders).
-		if (pInf->Type->Engineer || IsSpyInfantryType(pInf->Type) || pInf->SlaveOwner)
+		if (pInf->Type->Engineer || IsSpyInfantryType(pInf->Type) || IsSuicideInfantryType(pInf->Type) || pInf->SlaveOwner)
 			continue;
 
 		// Soldiers of a transport operation are on their way already.

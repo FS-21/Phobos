@@ -2970,8 +2970,10 @@ namespace
 		return pWeapon;
 	}
 
-	// A raid transport of ours that can carry a raider of this size (passenger aircraft, flying,
-	// burrowing or amphibious transport): the raider waits for an airborne raid instead of walking.
+	bool RequestTransportOperation(HouseClass* pHouse, NeuralOpClient client, FootClass* pFoot, const CellStruct& target);
+
+	// A fast flying or subterranean raid transport of ours that can carry a raider of this size:
+	// the raider waits briefly for AirborneFront instead of walking; surface hovercraft never delay land strikes.
 	bool HasRaidTransportFor(HouseClass* pHouse, double size)
 	{
 		for (auto const pFoot : FootClass::Array)
@@ -2988,57 +2990,200 @@ namespace
 			const bool flies = pFoot->WhatAmI() == AbstractType::Aircraft || pType->JumpJet || pType->ConsideredAircraft
 				|| pType->MovementZone == MovementZone::Fly;
 
-			if (flies || IsUndergroundTransportType(pUnitType) || IsAmphibiousGroundTransportType(pUnitType))
+			if (flies || IsUndergroundTransportType(pUnitType))
 				return true;
 		}
 
 		return false;
 	}
 
-	// Where a suicide raider does the most harm: the known enemy building whose blast area holds the
-	// most building value (cost / 100 of every known building within the warhead's CellSpread plus
-	// one cell), less 6 per known defense within 7 cells of it and a cell of the walk per 8.
-	// Reachable by the raider's movement zone only; UniqueID breaks ties.
-	BuildingClass* PickSneakStrikeTarget(HouseClass* pHouse, FootClass* pRaider)
+	// Where a suicide raider (DTRUCK, TERROR) deals the highest net blast + radiation damage:
+	// evaluates both known enemy building clusters and dense visible enemy ground-force clusters
+	// within the warhead's CellSpread, subtracting friendly-fire risk and counting only ground-capable
+	// enemy defenses (never AA-only flak/SAMs) so distant bases never score <= 0 and freeze the raider.
+	TechnoClass* PickSneakStrikeTarget(HouseClass* pHouse, FootClass* pRaider, bool crossIsland = false)
 	{
 		auto const pType = pRaider->GetTechnoType();
 		auto const pBlast = GetSuicideBlastWeapon(pType);
-		const double spread = (pBlast && pBlast->Warhead ? pBlast->Warhead->CellSpread : 1.0) + 1.0;
+		const double rawSpread = (pBlast && pBlast->Warhead && pBlast->Warhead->CellSpread > 0.0)
+			? static_cast<double>(pBlast->Warhead->CellSpread)
+			: 2.0;
+		const double spread = std::clamp(rawSpread, 2.0, 9.0) + 1.0;
+		const bool radBlast = pBlast && pBlast->RadLevel >= 100;
 		const CellStruct from = pRaider->GetMapCoords();
 		auto const& entries = GetKnownEnemyBuildingCache(pHouse).Entries;
-		BuildingClass* pBest = nullptr;
-		int bestScore = 0;
+
+		struct VisibleGroundUnit
+		{
+			FootClass* Foot;
+			CellStruct Coords;
+			int Worth;
+			bool Friendly;
+		};
+
+		std::vector<VisibleGroundUnit> groundUnits;
+		groundUnits.reserve(96);
+
+		auto collectFoot = [&](FootClass* pF)
+		{
+			if (!pF || pF == pRaider || pF->InLimbo || !pF->IsAlive || !pF->Owner || pF->Owner->IsNeutral() || pF->IsInAir())
+				return;
+
+			auto const pFT = pF->GetTechnoType();
+
+			if (!pFT || pFT->Naval)
+				return;
+
+			const bool friendly = pF->Owner == pHouse || pHouse->IsAlliedWith(pF->Owner);
+
+			if (!friendly && (!pF->GetCell() || !IsCellVisibleToAI(pHouse, pF->GetCell())))
+				return;
+
+			const int w = std::max(3, pFT->Cost / (radBlast ? 45 : 65));
+			groundUnits.push_back({ pF, pF->GetMapCoords(), w, friendly });
+		};
+
+		for (auto const pU : UnitClass::Array)
+			collectFoot(pU);
+
+		for (auto const pI : InfantryClass::Array)
+			collectFoot(pI);
+
+		auto friendlyBuildingNear = [&](const CellStruct& center)
+		{
+			for (auto const pOwnB : pHouse->Buildings)
+			{
+				if (pOwnB && pOwnB->IsAlive && !pOwnB->InLimbo && pOwnB->GetMapCoords().DistanceFrom(center) <= spread + 1.0)
+					return true;
+			}
+
+			return false;
+		};
+
+		auto groundDefensesNear = [&](const CellStruct& center, const BuildingClass* pSkip)
+		{
+			int defs = 0;
+
+			for (auto const& other : entries)
+			{
+				if (!other.IsDefense || other.Building == pSkip || !other.Building || !other.Building->Type)
+					continue;
+
+				if (GroundRangeOf(other.Building->Type) <= 0)
+					continue;
+
+				if (other.Coords.DistanceFrom(center) <= 8.0)
+					defs++;
+			}
+
+			return defs;
+		};
+
+		TechnoClass* pBest = nullptr;
+		int bestScore = INT_MIN;
 
 		for (auto const& info : entries)
 		{
 			auto const pBld = info.Building;
 
-			if (!pBld->IsAlive || pBld->InLimbo || !pBld->Owner || pBld->Type->Insignificant || pBld->Type->InvisibleInGame
-				|| !AreZonesConnected(from, info.Coords, pType->MovementZone))
+			if (!pBld || !pBld->IsAlive || pBld->InLimbo || !pBld->Owner || pHouse->IsAlliedWith(pBld->Owner)
+				|| pBld->Type->Insignificant || pBld->Type->InvisibleInGame || pBld->Type->Wall)
 			{
 				continue;
 			}
 
+			const bool sameLand = AreZonesConnected(from, info.Coords, pType->MovementZone);
+
+			if (sameLand == crossIsland)
+				continue;
+
+			if (friendlyBuildingNear(info.Coords))
+				continue;
+
 			int worth = 0;
-			int defenses = 0;
 
 			for (auto const& other : entries)
 			{
-				const double dist = other.Coords.DistanceFrom(info.Coords);
+				if (!other.Building || !other.Building->Type || other.Coords.DistanceFrom(info.Coords) > spread)
+					continue;
 
-				if (dist <= spread)
-					worth += other.Building->Type->Cost / 100;
+				auto const pOT = other.Building->Type;
+				worth += std::max(4, pOT->Cost / 50);
 
-				if (other.IsDefense && other.Building != pBld && dist <= 7.0)
-					defenses++;
+				if (pOT->ConstructionYard || pOT->BuildCat == BuildCat::Tech)
+					worth += 24;
+				else if (pOT->WeaponsFactory || pOT->Factory != AbstractType::None || pOT->Refinery)
+					worth += 16;
 			}
 
-			const int score = worth - defenses * 6 - static_cast<int>(from.DistanceFrom(info.Coords)) / 8;
+			int friendlyLoss = 0;
+
+			for (auto const& gu : groundUnits)
+			{
+				if (gu.Coords.DistanceFrom(info.Coords) <= spread)
+				{
+					if (gu.Friendly)
+						friendlyLoss += gu.Worth * 3;
+					else
+						worth += gu.Worth;
+				}
+			}
+
+			if (worth <= friendlyLoss || worth < 8)
+				continue;
+
+			const int defenses = groundDefensesNear(info.Coords, pBld);
+			const int score = (worth - friendlyLoss) - defenses * 8 - static_cast<int>(from.DistanceFrom(info.Coords)) / 12;
 
 			if (score > bestScore || (score == bestScore && pBest && pBld->UniqueID < pBest->UniqueID))
 			{
 				bestScore = score;
 				pBest = pBld;
+			}
+		}
+
+		// Also evaluate dense visible enemy ground-force clusters (e.g. massed enemy armor/infantry):
+		if (!crossIsland)
+		{
+			for (auto const& anchor : groundUnits)
+			{
+				if (anchor.Friendly || !AreZonesConnected(from, anchor.Coords, pType->MovementZone))
+					continue;
+
+				if (friendlyBuildingNear(anchor.Coords))
+					continue;
+
+				int enemyClusterWorth = 0;
+				int enemyCount = 0;
+				int friendlyLoss = 0;
+
+				for (auto const& gu : groundUnits)
+				{
+					if (gu.Coords.DistanceFrom(anchor.Coords) > spread)
+						continue;
+
+					if (gu.Friendly)
+					{
+						friendlyLoss += gu.Worth * 3;
+					}
+					else
+					{
+						enemyClusterWorth += gu.Worth;
+						enemyCount++;
+					}
+				}
+
+				if (enemyCount < 3 || enemyClusterWorth < 36 || enemyClusterWorth <= friendlyLoss * 2)
+					continue;
+
+				const int defenses = groundDefensesNear(anchor.Coords, nullptr);
+				const int score = (enemyClusterWorth - friendlyLoss) - defenses * 8 - static_cast<int>(from.DistanceFrom(anchor.Coords)) / 10;
+
+				if (score > bestScore || (score == bestScore && pBest && anchor.Foot->UniqueID < pBest->UniqueID))
+				{
+					bestScore = score;
+					pBest = anchor.Foot;
+				}
 			}
 		}
 
@@ -3055,12 +3200,7 @@ namespace
 	}
 
 	// Suicide raiders without a ride (demolition trucks, terrorists): fragile and only useful once
-	// they blow up among buildings, so they do not join the army. An idle one with no enemy close
-	// waits up to 2700 frames for a raid transport that can carry it (AirborneFront takes it), then
-	// sneaks to the best known target along a detour around known defenses and armed enemies in
-	// sight (FindSafeFerryWaypoint, land mode) and charges it from 8 cells, or from 14 once shot at
-	// or with enemies close in. A strike gives up after 9000 frames; a raid that boards the raider
-	// ends it. Every 60 frames.
+	// they blow up among buildings or massed enemy forces, so they never join regular army waves.
 	void UpdateSneakStrikes(HouseClass* pHouse)
 	{
 		if (!pHouse || pHouse->ArrayIndex < 0 || pHouse->ArrayIndex >= 32)
@@ -3076,12 +3216,30 @@ namespace
 		auto& strikes = state.SneakStrikes;
 		std::unordered_set<DWORD> seen;
 
-		auto findTarget = [pHouse](DWORD id) -> BuildingClass*
+		auto findTarget = [pHouse](DWORD id) -> TechnoClass*
 		{
 			for (auto const& info : GetKnownEnemyBuildingCache(pHouse).Entries)
 			{
-				if (info.Building->UniqueID == id)
+				if (info.Building && info.Building->UniqueID == id)
 					return (info.Building->IsAlive && !info.Building->InLimbo) ? info.Building : nullptr;
+			}
+
+			for (auto const pU : UnitClass::Array)
+			{
+				if (pU && pU->UniqueID == id && pU->IsAlive && !pU->InLimbo && pU->Owner && !pHouse->IsAlliedWith(pU->Owner)
+					&& pU->GetCell() && IsCellVisibleToAI(pHouse, pU->GetCell()))
+				{
+					return pU;
+				}
+			}
+
+			for (auto const pI : InfantryClass::Array)
+			{
+				if (pI && pI->UniqueID == id && pI->IsAlive && !pI->InLimbo && pI->Owner && !pHouse->IsAlliedWith(pI->Owner)
+					&& pI->GetCell() && IsCellVisibleToAI(pHouse, pI->GetCell()))
+				{
+					return pI;
+				}
 			}
 
 			return nullptr;
@@ -3095,7 +3253,7 @@ namespace
 			auto it = strikes.find(id);
 
 			// A plan's member and a unit of a transport operation take their orders from them alone.
-			if (IsPlanMember(pHouse, id) || IsInTransportOp(pHouse, id))
+			if (IsPlanMember(pHouse, id) || IsInTransportOp(pHouse, id) || IsLeavingItsFactory(pFoot))
 			{
 				if (it != strikes.end())
 					strikes.erase(it);
@@ -3103,34 +3261,52 @@ namespace
 				return;
 			}
 
-			const bool idle = (pFoot->CurrentMission == Mission::Guard || pFoot->CurrentMission == Mission::Area_Guard)
-				&& !pFoot->Target;
+			auto const pCurTargetTech = abstract_cast<TechnoClass*>(pFoot->Target);
+			const bool hasValidEnemyAttackTarget = pCurTargetTech && pCurTargetTech->IsAlive && !pCurTargetTech->InLimbo
+				&& pCurTargetTech->Owner && pCurTargetTech->Owner != pHouse && !pHouse->IsAlliedWith(pCurTargetTech->Owner);
+			const bool readyForStrike = !hasValidEnemyAttackTarget
+				&& (pFoot->CurrentMission == Mission::Guard || pFoot->CurrentMission == Mission::Area_Guard
+					|| pFoot->CurrentMission == Mission::Move || pFoot->CurrentMission == Mission::Enter
+					|| pFoot->MindControlledBy != nullptr);
 
 			if (it == strikes.end() || it->second.Target == 0)
 			{
-				if (!idle)
+				if (!readyForStrike)
 					return;
 
 				if (it == strikes.end())
 					it = strikes.emplace(id, NeuralSneakStrike { 0, now, false }).first;
 
-				if (VisibleEnemyThreatNear(pHouse, pFoot->GetMapCoords(), 8) > 0)
-					return;
-
-				const bool waitForRide = now - it->second.StartFrame < 2700 && now >= it->second.StartFrame;
+				const bool threatRightHere = VisibleEnemyThreatNear(pHouse, pFoot->GetMapCoords(), 8) > 0;
+				const bool waitForRide = !threatRightHere && pFoot->MindControlledBy == nullptr
+					&& now - it->second.StartFrame < 450 && now >= it->second.StartFrame;
 
 				if (waitForRide && HasRaidTransportFor(pHouse, size))
 					return;
 
-				auto const pTarget = PickSneakStrikeTarget(pHouse, pFoot);
+				auto pTarget = PickSneakStrikeTarget(pHouse, pFoot, false);
 
 				if (!pTarget)
-					return;
+				{
+					if (auto const pIslandTarget = PickSneakStrikeTarget(pHouse, pFoot, true))
+					{
+						if (RequestTransportOperation(pHouse, NeuralOpClient::Wave, pFoot, pIslandTarget->GetMapCoords()))
+							return;
+					}
 
-				it->second = NeuralSneakStrike { pTarget->UniqueID, now, false };
+					return;
+				}
+
+				if (pFoot->CurrentMission == Mission::Enter)
+				{
+					pFoot->SetDestination(nullptr, true);
+					pFoot->ForceMission(Mission::Guard);
+				}
+
+				it->second = NeuralSneakStrike { pTarget->UniqueID, now, threatRightHere };
 				const CellStruct cell = pTarget->GetMapCoords();
 				Debug::Log("[NeuralAI] House %d SneakStrike: %s %u sneaks to %s of house %d at (%d,%d), %d cells, frame %d.\n",
-					pHouse->ArrayIndex, pFoot->GetTechnoType()->ID, id, pTarget->Type->ID, pTarget->Owner->ArrayIndex,
+					pHouse->ArrayIndex, pFoot->GetTechnoType()->ID, id, pTarget->GetTechnoType()->ID, pTarget->Owner->ArrayIndex,
 					cell.X, cell.Y, static_cast<int>(pFoot->GetMapCoords().DistanceFrom(cell)), now);
 			}
 
@@ -3139,15 +3315,16 @@ namespace
 
 			if (!pTarget || pHouse->IsAlliedWith(pTarget->Owner) || now - strike.StartFrame > 9000 || now < strike.StartFrame)
 			{
-				// Target gone or too long on the way: pick again at once next time it is idle.
-				strike = NeuralSneakStrike { 0, now - 2700, false };
+				// Target gone or too long on the way: pick again at once next tick.
+				strike = NeuralSneakStrike { 0, now - 900, false };
 				return;
 			}
 
 			if (strike.Charging)
 			{
-				if (pFoot->Target != pTarget)
+				if (pFoot->Target != pTarget || pFoot->CurrentMission != Mission::Attack)
 				{
+					pFoot->SetDestination(nullptr, true);
 					pFoot->SetTarget(pTarget);
 					pFoot->QueueMission(Mission::Attack, false);
 				}
@@ -3166,7 +3343,7 @@ namespace
 				pFoot->SetTarget(pTarget);
 				pFoot->QueueMission(Mission::Attack, false);
 				Debug::Log("[NeuralAI] House %d SneakStrike: %s %u charges %s of house %d from %d cells, frame %d.\n",
-					pHouse->ArrayIndex, pFoot->GetTechnoType()->ID, id, pTarget->Type->ID, pTarget->Owner->ArrayIndex,
+					pHouse->ArrayIndex, pFoot->GetTechnoType()->ID, id, pTarget->GetTechnoType()->ID, pTarget->Owner->ArrayIndex,
 					static_cast<int>(dist), now);
 			}
 			else

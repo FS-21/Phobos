@@ -1021,7 +1021,7 @@ namespace
 			if (pType->Harvester || pType->ResourceGatherer || pType->JumpJet || pType->MovementZone == MovementZone::Fly
 				|| IsWaterBound(pType) || pType->CanDisguise || pType->PermaDisguise || pUnit->Deployed || pUnit->Passengers.NumPassengers > 0
 				|| (pType->DeploysInto && (pType->DeploysInto->ConstructionYard || !IsDeployableSiegeUnitType(pType)))
-				|| IsImmobileUnitTypeOnLand(pType) || IsRepairerUnit(pUnit) || GroundRangeOf(pType) <= 0)
+				|| IsImmobileUnitTypeOnLand(pType) || IsRepairerUnit(pUnit) || IsVehicleRaiderType(pType) || GroundRangeOf(pType) <= 0)
 			{
 				continue;
 			}
@@ -1044,7 +1044,7 @@ namespace
 
 			auto const pType = pInf->Type;
 
-			if (pType->Engineer || IsSpyInfantryType(pType) || pInf->SlaveOwner || GroundRangeOf(pType) <= 0)
+			if (pType->Engineer || IsSpyInfantryType(pType) || IsSuicideInfantryType(pType) || pInf->SlaveOwner || GroundRangeOf(pType) <= 0)
 				continue;
 
 			const DWORD uid = pInf->UniqueID;
