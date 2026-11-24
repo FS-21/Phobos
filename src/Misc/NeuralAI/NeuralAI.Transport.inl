@@ -1617,6 +1617,30 @@ namespace
 
 		LastGroundRouteAnswer = NeuralRouteAnswer::Given;
 
+		if (((TelemetryViewRequest && TelemetryViewRequest[0] != 0u) || !TelemetryJsonShmFromTrainer)
+			&& next + 3 < cells.size())
+		{
+			if (TelemetryGroundRoutes.size() > 256)
+			{
+				std::erase_if(TelemetryGroundRoutes, [now](const auto& entry)
+				{
+					return entry.second.MatchSerial != NeuralMatchSerial || now < entry.second.Frame || now - entry.second.Frame > 360;
+				});
+			}
+
+			std::vector<CellStruct> wps;
+			wps.reserve(10);
+			wps.push_back(cells[next]);
+			const size_t rem = cells.size() - 1 - next;
+			const size_t stride = std::max<size_t>(10, (rem + 7) / 8);
+
+			for (size_t idx = next + stride; idx + 3 < cells.size() && wps.size() < 9; idx += stride)
+				wps.push_back(cells[idx]);
+
+			wps.push_back(cells.back());
+			TelemetryGroundRoutes[pFoot->UniqueID] = { NeuralMatchSerial, now, cells[next], std::move(wps) };
+		}
+
 		return MapClass::Instance.TryGetCellAt(cells[next]);
 	}
 
