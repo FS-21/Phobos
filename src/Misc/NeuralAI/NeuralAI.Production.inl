@@ -1919,27 +1919,39 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			? GetFactoryCategoryCap(pHouse, 2)
 			: (houseDifficulty >= 2 ? 1 : (houseDifficulty == 1 ? 2 : 3));
 
-		// Aircraft that need a dock, the ones in production included (they hold one already).
+		// Aircraft that need a dock, the ones in production included (they hold one already),
+		// plus fully loaded armed aircraft sitting unused on their docks.
+		auto const& airForceSum = RefreshAirForceSummary(pHouse);
 		int ownedDockingAircraft = 0;
+		int idleDockedAircraft = 0;
 		for (auto const pOwnAir : AircraftClass::Array)
 		{
 			if (pOwnAir && pOwnAir->Owner == pHouse && pOwnAir->IsAlive && pOwnAir->Type
 				&& !pOwnAir->SpawnOwner && (pOwnAir->Type->AirportBound || pOwnAir->Type->Dock.Count > 0))
 			{
 				ownedDockingAircraft++;
+
+				if (!pOwnAir->InLimbo && !pOwnAir->IsInAir() && IsAirForceCraft(pOwnAir->Type)
+					&& HasFullAirLoad(pOwnAir)
+					&& (pOwnAir->CurrentMission == Mission::Guard || pOwnAir->CurrentMission == Mission::Sleep
+						|| (pOwnAir->CurrentMission == Mission::Area_Guard && pOwnAir->Target == nullptr))
+					&& !airForceSum.Orders.contains(pOwnAir->UniqueID)
+					&& !IsPlanMember(pHouse, pOwnAir->UniqueID))
+				{
+					idleDockedAircraft++;
+				}
 			}
 		}
 
-		// Airfields follow the docks (user): another one while fewer docks than MinFreeAirDocks for
-		// the difficulty stand free (Easy 4, Normal 6, Hard 8), with no cap; an airfield is a hangar,
-		// not a faster factory.
+		// Airfields follow the docks with no cap on active fleets (human-style mass air strikes on key
+		// factories/ConYards stay unrestricted); extra hangars only pause once 16+ (24 for air specialists)
+		// fully armed aircraft sit idle on their docks unused, or when no air/strike targets exist.
 		const bool airSpecialist = pExt->NeuralAI_ActiveExpert == 8 || pExt->NeuralAI_Archetype == 6;
-		auto const& airForceSum = RefreshAirForceSummary(pHouse);
 		const bool hasAirTargetsNow = airForceSum.StrikeWork > 0 || airForceSum.InterceptWork > 0;
-		const int maxWantedAirDocks = !hasAirTargetsNow
-			? 8
-			: (airSpecialist ? 24 : ((features[21] > 0 || money >= 15000) ? 20 : 16));
-		const bool underAirDockCeiling = pHouse->AirportDocks < maxWantedAirDocks;
+		const int maxIdleDockedAircraft = airSpecialist ? 24 : 16;
+		const bool underAirDockCeiling = hasAirTargetsNow
+			? (idleDockedAircraft < maxIdleDockedAircraft)
+			: (pHouse->AirportDocks < 8);
 		const bool airDocksFull = ownedDockingAircraft >= pHouse->AirportDocks;
 		const int freeAirDocks = pHouse->AirportDocks - ownedDockingAircraft;
 		const int wantedFreeAirDocks = houseDifficulty >= 2 ? MinFreeAirDocksEasy : (houseDifficulty == 1 ? MinFreeAirDocksNormal : MinFreeAirDocksHard);
