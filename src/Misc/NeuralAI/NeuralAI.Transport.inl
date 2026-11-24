@@ -30,6 +30,18 @@ namespace
 			|| pType->MovementZone == MovementZone::Subterrannean || pType->JumpJet || pType->ConsideredAircraft;
 	}
 
+	// An armed, closed, non-amphibious/non-subterranean land APC (e.g. Soviet Flak Track HTK,
+	// Passengers >= 3, OpenTopped=no): carries slow ground infantry at vehicle speed (both in waves
+	// and as a point-to-point land taxi) and unloads them automatically upon combat contact.
+	bool IsGroundCombatAPCType(const TechnoTypeClass* pType)
+	{
+		return pType && pType->WhatAmI() == AbstractType::UnitType && !pType->Naval
+			&& !pType->OpenTopped && !pType->Gunner && pType->Passengers >= 3
+			&& !IsAmphibiousOrAirTransport(pType) && pType->MovementZone != MovementZone::Subterrannean
+			&& const_cast<TechnoTypeClass*>(pType)->GetWeapon(0) && const_cast<TechnoTypeClass*>(pType)->GetWeapon(0)->WeaponType
+			&& !HasNoManualEnter(pType) && !HasNoManualUnload(pType);
+	}
+
 	// An amphibious/air/subterranean ground transport doubles as a land strike APC (engineer
 	// or C4 insertion) whenever no water crossing needs it: it has no ferry trip in progress
 	// and its house has no fresh ferry demand. Naval transports never do land strikes.

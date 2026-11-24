@@ -1029,7 +1029,7 @@ namespace
 			const DWORD uid = pUnit->UniqueID;
 
 			if (macro.PlanMembers.contains(uid) || macro.CapitalHeld.contains(uid) || macro.TankGuard.contains(uid)
-				|| IsInTransportOp(pHouse, uid) || IsOnRepairTrip(pHouse, uid) || IsFerryParkedToLoad(pHouse, uid) || IsHeldByTransportOp(pUnit))
+				|| IsInTransportOp(pHouse, uid) || IsInLandTaxi(pHouse, uid) || IsOnRepairTrip(pHouse, uid) || IsFerryParkedToLoad(pHouse, uid) || IsHeldByTransportOp(pUnit))
 			{
 				continue;
 			}
@@ -1049,7 +1049,7 @@ namespace
 
 			const DWORD uid = pInf->UniqueID;
 
-			if (macro.PlanMembers.contains(uid) || IsInTransportOp(pHouse, uid) || IsOnRepairTrip(pHouse, uid) || IsHeldByTransportOp(pInf))
+			if (macro.PlanMembers.contains(uid) || IsInTransportOp(pHouse, uid) || IsInLandTaxi(pHouse, uid) || IsOnRepairTrip(pHouse, uid) || IsHeldByTransportOp(pInf))
 				continue;
 
 			strike(pInf);
@@ -10181,8 +10181,11 @@ namespace
 				{
 					auto const pUnit = abstract_cast<UnitClass*>(pFoot);
 
-					if (pUnit && pUnit->Type && !pUnit->Type->Naval && pUnit->Type->Passengers >= 2 && !pUnit->Type->OpenTopped
-						&& !pUnit->Type->Gunner && !IsAmphibiousOrAirTransport(pUnit->Type) && pUnit->Passengers.NumPassengers == 0
+					// Accepts closed land APCs (Soviet HTK Flak Track, Passengers=5) and fast empty 1-seat
+					// Gunner IFVs (Allied FV, Passengers=1, Speed=10) for rapid engineer building capture.
+					if (pUnit && pUnit->Type && !pUnit->Type->Naval && pUnit->Type->Passengers >= 1 && !pUnit->Type->OpenTopped
+						&& (pUnit->Type->Passengers >= 2 || (pUnit->Type->Gunner && pUnit->Type->Speed >= 8))
+						&& !IsAmphibiousOrAirTransport(pUnit->Type) && pUnit->Passengers.NumPassengers == 0
 						&& !HasNoManualEnter(pUnit->Type) && !HasNoManualUnload(pUnit->Type) && isFreeForPlan(pUnit)
 						&& ObjectZone(pUnit, MovementZone::Normal) == homeZone && (!pTransport || uid < pTransport->UniqueID))
 					{
