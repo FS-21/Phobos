@@ -4773,8 +4773,15 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			techMacro.TechStepWaitSince = techNow;
 
 		const int techStepWaited = techNow - techMacro.TechStepWaitSince;
-		const bool techFloorPick = bestTechStepIdx >= 0 && techStepWaited >= TechStepFloorFrames && hasActiveBuildingIncome
-			&& !bestFillsAirDeficit && inProgressBldIdx < 0 && inProgressDefIdx < 0;
+		// 50/50 parity between expanding the tech tree and hoarding map ore: once a new refinery was placed
+		// since our last tech step (and income is healthy), the next tech step alternates right after it!
+		const bool techAlternatesWithRefinery = bestTechStepIdx >= 0 && hasCoreEconomyAndProduction && !techStepInProgress
+			&& ownedRefineries >= 2 && !techMacro.IncomeFalling && !conYardWithNoRefineryInZone
+			&& techMacro.LastRefineryPlacedFrame > techMacro.TechStepWaitSince
+			&& techStepWaited >= 600 && bestBldIdx == awaitedRefineryIdx;
+		const bool techFloorPick = bestTechStepIdx >= 0
+			&& (techStepWaited >= TechStepFloorFrames || techAlternatesWithRefinery)
+			&& hasActiveBuildingIncome && !bestFillsAirDeficit && inProgressBldIdx < 0 && inProgressDefIdx < 0;
 
 		if (techFloorPick && bestBldIdx != bestTechStepIdx)
 		{
@@ -4930,7 +4937,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				// TechStepRefineryYieldFrames, then takes one building between refineries.
 				const bool keepPick = pPicked
 					&& (pPicked->Refinery || (pHouse->HasLowPower() && pPicked->PowerBonus > pPicked->PowerDrain)
-						|| (techFloorPick && bestBldIdx == bestTechStepIdx && techStepWaited >= TechStepRefineryYieldFrames));
+						|| (techFloorPick && bestBldIdx == bestTechStepIdx
+							&& (techAlternatesWithRefinery || techStepWaited >= TechStepRefineryYieldFrames)));
 
 				if (!keepPick)
 					bestBldIdx = awaitedRefineryIdx;

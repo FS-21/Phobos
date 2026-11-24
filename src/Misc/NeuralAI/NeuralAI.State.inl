@@ -2890,10 +2890,10 @@ namespace
 	// no tech step in construction for TechStepFloorFrames the best one is the pick; it waits for the
 	// refinery the economy hold saves for until TechStepRefineryYieldFrames. TechFloorLogLines and
 	// TechFloorLogFrames: lines a match of its TEMP diagnostic, at most one per house in that time.
-	constexpr int CoreTechStepBonus = 750;
+	constexpr int CoreTechStepBonus = 1150;
 	constexpr int TechUnlockTransitiveDepth = 3;
-	constexpr int TechStepFloorFrames = 3600;
-	constexpr int TechStepRefineryYieldFrames = 7200;
+	constexpr int TechStepFloorFrames = 2700;
+	constexpr int TechStepRefineryYieldFrames = 2700;
 	constexpr int TechFloorLogLines = 40;
 	constexpr int TechFloorLogFrames = 900;
 	constexpr double OpTransportMinHealth = 0.5;
