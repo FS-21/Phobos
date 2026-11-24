@@ -5784,7 +5784,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 
 			const CellStruct mcvCell = pUnit->GetMapCoords();
-			const bool isForeignTechMCV = (pHouse->CountOwnedNow(pType->DeploysInto) == 0 && pHouse->NumConYards >= 1);
+			const bool isBuildableMcvType = CanBuildUnderHumanRules(pHouse, pType);
+			const bool isForeignTechMCV = (pHouse->CountOwnedNow(pType->DeploysInto) == 0 && pHouse->NumConYards >= 1
+				&& (!isBuildableMcvType || (homeGroundZone >= 0 && ObjectZone(pUnit, MovementZone::Normal) == homeGroundZone)));
 			// The MCV danger rule (CollectMcvDangerBuildings), the same one its expansion goals keep off. An
 			// MCV in danger at its last look leaves it only McvDangerExitCells farther: at the edge of a reach
 			// it turned home and back each AI tick.
@@ -6219,7 +6221,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			const bool mcvIslandHasNoRoom = mcvZone >= 0 && mcvNoRoomIslands.contains(mcvZone)
 				&& mcvNoRoomIslands.at(mcvZone) > Unsorted::CurrentFrame;
 			const bool landedOnNewIsland = (homeGroundZone >= 0 && mcvZone >= 0 && mcvZone != homeGroundZone
-				&& conYardsInMcvZone == 0 && hubsAndFactoriesInMcvZone < 2 && !mcvIslandHasNoRoom);
+				&& conYardsInMcvZone == 0 && (hubsAndFactoriesInMcvZone < 2 || isBuildableMcvType) && !mcvIslandHasNoRoom);
 			// Stolen MCVs (StolenMcv*, NeuralAI.State.inl): the engine's hunt goes; one out of danger near our
 			// buildings unfolds there, its tech tree on safe ground; one that never unfolded goes into our Grinder.
 			if (isForeignTechMCV && !landedOnNewIsland)
@@ -6257,7 +6259,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					continue;
 				}
 
-				if (now - stolenFrom >= StolenMcvGrinderFrames && pGrinder && pGrinder->IsAlive && !pGrinder->InLimbo
+				if (!isBuildableMcvType && now - stolenFrom >= StolenMcvGrinderFrames && pGrinder && pGrinder->IsAlive && !pGrinder->InLimbo
 					&& FootReachesAlone(pUnit, pGrinder->GetMapCoords(), pGrinder))
 				{
 					if (pUnit->CurrentMission != Mission::Enter && pUnit->QueuedMission != Mission::Enter)
@@ -6477,8 +6479,47 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					{
 						const CellStruct safeHomeCell
 							= CachedTetrisBuildCell(pHouse, pType->DeploysInto);
+						CellStruct goalCoords = (safeHomeCell != CellStruct::Empty) ? safeHomeCell : homeCoords;
 
-						const CellStruct goalCoords = (safeHomeCell != CellStruct::Empty) ? safeHomeCell : homeCoords;
+						// Never send a land MCV via ground IssueMoveOrder to a cell on another island across water:
+						// retreat to our nearest safe building or deployable fallback cell on THIS landmass instead!
+						if (!CrossesWaterAlone(pType) && mcvZone >= 0
+							&& MapClass::Instance.GetMovementZoneType(goalCoords, MovementZone::Normal, false) != mcvZone)
+						{
+							CellStruct localRefuge = FindMcvFallbackSpot(pUnit, pType->DeploysInto, mcvZone, mcvDangers);
+
+							if (localRefuge == CellStruct::Empty)
+							{
+								int bestOwnDist = INT_MAX;
+
+								for (auto const pOwnBld : pHouse->Buildings)
+								{
+									if (!pOwnBld || pOwnBld->InLimbo || !pOwnBld->IsAlive || !pOwnBld->Type || pOwnBld->Type->Wall)
+										continue;
+
+									const CellStruct bc = pOwnBld->GetMapCoords();
+									if (MapClass::Instance.GetMovementZoneType(bc, MovementZone::Normal, pOwnBld->OnBridge) != mcvZone)
+										continue;
+
+									const int d = std::max(std::abs(mcvCell.X - bc.X), std::abs(mcvCell.Y - bc.Y));
+									if (d < bestOwnDist)
+									{
+										bestOwnDist = d;
+										localRefuge = bc;
+									}
+								}
+							}
+
+							if (localRefuge != CellStruct::Empty)
+							{
+								goalCoords = localRefuge;
+							}
+							else if (auto const pCrossDest = MapClass::Instance.TryGetCellAt(goalCoords))
+							{
+								DispatchFootToTargetOrTransport(pUnit, pCrossDest, Mission::Move, false);
+								continue;
+							}
+						}
 
 						if (auto const pHomeDest = MapClass::Instance.TryGetCellAt(goalCoords))
 						{
@@ -6509,6 +6550,34 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					}
 
 					continue;
+				}
+			}
+
+			// Drop any stale cross-island Destination on a non-amphibious/non-flying MCV so it never sits on
+			// a shoreline in Mission::Move pointing across the sea instead of deploying!
+			if (!CrossesWaterAlone(pType) && mcvZone >= 0 && pUnit->CurrentMission == Mission::Move && pUnit->Destination != nullptr
+				&& pUnit->QueuedMission != Mission::Enter && !abstract_cast<UnitClass*>(pUnit->Destination))
+			{
+				const CellStruct dc = CellClass::Coord2Cell(pUnit->Destination->GetCoords());
+				bool touchesMcvZone = (MapClass::Instance.GetMovementZoneType(dc, MovementZone::Normal, false) == mcvZone);
+
+				for (int r = 1; r <= 2 && !touchesMcvZone; ++r)
+				{
+					for (int dy = -r; dy <= r && !touchesMcvZone; ++dy)
+					{
+						for (int dx = -r; dx <= r && !touchesMcvZone; ++dx)
+						{
+							const CellStruct adj { static_cast<short>(dc.X + dx), static_cast<short>(dc.Y + dy) };
+							if (MapClass::Instance.GetMovementZoneType(adj, MovementZone::Normal, false) == mcvZone)
+								touchesMcvZone = true;
+						}
+					}
+				}
+
+				if (!touchesMcvZone)
+				{
+					pUnit->SetDestination(nullptr, true);
+					pUnit->QueueMission(Mission::Guard, true);
 				}
 			}
 
