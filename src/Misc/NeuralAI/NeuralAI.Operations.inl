@@ -373,19 +373,37 @@ namespace
 		auto const pCargoType = pCargoFoot ? pCargoFoot->GetTechnoType() : nullptr;
 		std::vector<CellStruct> taken;
 
-		for (auto const& other : op.Transports)
+		if (pTransport->Owner)
 		{
-			if (other.UniqueID != pTransport->UniqueID && other.Leg == NeuralOpLeg::Crossing && other.Landing != CellStruct::Empty)
-				taken.push_back(other.Landing);
+			for (auto const& houseOp : GetMacroState(pTransport->Owner).TransportOps)
+			{
+				if (houseOp.Over)
+					continue;
+
+				for (auto const& other : houseOp.Transports)
+				{
+					if (other.UniqueID != pTransport->UniqueID && other.Leg == NeuralOpLeg::Crossing && other.Landing != CellStruct::Empty)
+						taken.push_back(other.Landing);
+				}
+			}
+		}
+		else
+		{
+			for (auto const& other : op.Transports)
+			{
+				if (other.UniqueID != pTransport->UniqueID && other.Leg == NeuralOpLeg::Crossing && other.Landing != CellStruct::Empty)
+					taken.push_back(other.Landing);
+			}
 		}
 
+		const CellStruct ownAt = pTransport->GetMapCoords();
 		NeuralWaitAsker asker {};
 		asker.Speed = pCargoType ? pCargoType->SpeedType : pType->SpeedType;
 		asker.Movement = pCargoType ? pCargoType->MovementZone : pType->MovementZone;
 		asker.ZoneMovement = static_cast<int>(MovementZone::Normal);
 		asker.Zone = op.TargetZone;
 		NeuralWaitSearch search {};
-		search.MaxRing = pRecord ? std::min(12, 6 + pRecord->Tries) : 6;
+		search.MaxRing = pRecord ? std::min(18, 6 + 4 * pRecord->Tries) : 8;
 		const int flags = WaitLegal | WaitLand | WaitNoBuilding | WaitZone
 			| (flies ? (WaitNotBeach | WaitNoObject | (pCargoType ? WaitClearOfUnits : 0)) : WaitClearOfUnits);
 
@@ -396,7 +414,15 @@ namespace
 					return true;
 
 				if (pRecord && std::any_of(pRecord->FailedLandings.begin(), pRecord->FailedLandings.end(),
-					[&c](const CellStruct& bad) { return bad != CellStruct::Empty && bad == c; }))
+					[&c, &ownAt](const CellStruct& bad)
+					{
+						if (bad == CellStruct::Empty)
+							return false;
+
+						const double minSkip = ownAt.DistanceFrom(bad) <= 3.5 ? 2.5 : 5.0;
+
+						return bad == c || bad.DistanceFrom(c) < minSkip;
+					}))
 				{
 					return true;
 				}
@@ -1325,7 +1351,8 @@ namespace
 	// can stand on by the land of the members (a flyer: a free cell of that land off the beach). wait:
 	// where its passengers wait for it, OpBerthWaitCells farther out from the staging cell on their land
 	// (the berth itself when that is no such land). Empty when there is none.
-	CellStruct PickOpBerth(const NeuralTransportOperation& op, FootClass* pTransport, OpCarrier carrier, CellStruct& wait)
+	CellStruct PickOpBerth(const NeuralTransportOperation& op, FootClass* pTransport, OpCarrier carrier, CellStruct& wait,
+		const CellStruct& failedBerth = CellStruct::Empty, int stagingTries = 0)
 	{
 		auto const pType = pTransport->GetTechnoType();
 		const bool flies = carrier != OpCarrier::Surface;
@@ -1334,10 +1361,27 @@ namespace
 		std::vector<CellStruct> taken;
 		wait = CellStruct::Empty;
 
-		for (auto const& other : op.Transports)
+		if (pTransport->Owner)
 		{
-			if (other.UniqueID != pTransport->UniqueID && other.Berth != CellStruct::Empty)
-				taken.push_back(other.Berth);
+			for (auto const& houseOp : GetMacroState(pTransport->Owner).TransportOps)
+			{
+				if (houseOp.Over)
+					continue;
+
+				for (auto const& other : houseOp.Transports)
+				{
+					if (other.UniqueID != pTransport->UniqueID && other.Berth != CellStruct::Empty)
+						taken.push_back(other.Berth);
+				}
+			}
+		}
+		else
+		{
+			for (auto const& other : op.Transports)
+			{
+				if (other.UniqueID != pTransport->UniqueID && other.Berth != CellStruct::Empty)
+					taken.push_back(other.Berth);
+			}
 		}
 
 		auto const originLand = [&op](const CellStruct& c)
@@ -1356,11 +1400,14 @@ namespace
 		asker.Movement = flies ? MovementZone::Normal : pType->MovementZone;
 		asker.Zone = flies ? op.OriginZone : transportZone;
 		NeuralWaitSearch search {};
-		search.MaxRing = OpBerthRingCells;
+		search.MaxRing = std::min(20, OpBerthRingCells + 4 * stagingTries);
 		auto const pBerth = FindWaitCellNear(op.Staging, search, asker,
 			WaitLegal | WaitNoBuilding | WaitZone | WaitClearOfUnits | (flies ? (WaitLand | WaitNotBeach) : 0u),
 			[&](const CellStruct& c, const CellClass*)
 			{
+				if (failedBerth != CellStruct::Empty && (c == failedBerth || failedBerth.DistanceFrom(c) < 5.0))
+					return true;
+
 				if (std::any_of(taken.begin(), taken.end(), [&c](const CellStruct& at) { return at.DistanceFrom(c) < OpBerthSpacingCells; }))
 					return true;
 
@@ -3976,8 +4023,17 @@ namespace
 							break;
 						}
 
-						transport.Berth = CellStruct::Empty;
-						transport.BerthWait = CellStruct::Empty;
+						const CellStruct oldBerth = transport.Berth;
+						transport.Berth = PickOpBerth(op, pTransport, carrier, transport.BerthWait, oldBerth, transport.StagingTries);
+
+						if (transport.Berth == CellStruct::Empty)
+						{
+							transport.Berth = op.Staging;
+							transport.BerthWait = CellStruct::Empty;
+						}
+
+						transport.Route.clear();
+						transport.RouteFrame = -1;
 						break;
 					}
 
@@ -4107,8 +4163,12 @@ namespace
 
 				const double toLanding = pTransport->GetMapCoords().DistanceFrom(transport.Landing);
 				const double unloadCells = carrier == OpCarrier::Carryall ? 3.0 : OpUnloadCells;
+				const bool ashoreOnTargetLand = !aloft && onLand && carrier != OpCarrier::Carryall
+					&& TransportLandZone(pTransport->GetMapCoords(), pTransport->OnBridge) == op.TargetZone;
+				const double ashoreDeliverLimit = op.Client == NeuralOpClient::Strike ? BackdoorDeliverCells - 1.0 : 12.0;
 
-				if (toLanding <= unloadCells && (onLand || aloft))
+				if ((toLanding <= unloadCells && (onLand || aloft))
+					|| (ashoreOnTargetLand && toLanding <= ashoreDeliverLimit && IsFootHeldStill(pHouse, pTransport, 90)))
 				{
 					unloadAt(transport, pTransport, carrier, aloft);
 					break;
@@ -4146,6 +4206,18 @@ namespace
 					transport.ProgressFrame = now;
 					transport.Tries++;
 
+					// Already ashore on the destination island (and within BackdoorDeliverCells for back-door strikes):
+					// unload right here instead of spending minutes trying to push inland past unloaded troops.
+					if (ashoreOnTargetLand
+						&& (op.Client != NeuralOpClient::Strike || pTransport->GetMapCoords().DistanceFrom(op.Landing) <= BackdoorDeliverCells)
+						&& putAshore(transport, pTransport, op.TargetZone) > 0)
+					{
+						Debug::Log("[NeuralAI] House %d transport op %d: %s %u ashore on zone %d and blocked on its way to (%d,%d), sets its load down at (%d,%d), frame %d.\n",
+							houseIndex, op.Id, pTransport->GetTechnoType()->ID, pTransport->UniqueID, op.TargetZone,
+							transport.Landing.X, transport.Landing.Y, pTransport->GetMapCoords().X, pTransport->GetMapCoords().Y, now);
+						break;
+					}
+
 					if (transport.Tries > OpMaxLandingTries)
 					{
 						if (!aloft && onLand && carrier != OpCarrier::Carryall && putAshore(transport, pTransport) > 0)
@@ -4162,7 +4234,15 @@ namespace
 						break;
 					}
 
-					if (auto const pNext = PickOpLandingCell(op, pTransport, carrier, transport.Landing, transport.Landing))
+					if (transport.Landing != CellStruct::Empty)
+					{
+						transport.FailedLandings[transport.FailedLandingCursor % transport.FailedLandings.size()] = transport.Landing;
+						transport.FailedLandingCursor++;
+					}
+
+					const CellStruct searchCenter = op.Landing != CellStruct::Empty ? op.Landing : transport.Landing;
+
+					if (auto const pNext = PickOpLandingCell(op, pTransport, carrier, searchCenter, transport.Landing, &transport))
 					{
 						Debug::Log("[NeuralAI] House %d transport op %d: %s %u stuck at (%d,%d) on its way to (%d,%d), tries (%d,%d), frame %d.\n",
 							houseIndex, op.Id, pTransport->GetTechnoType()->ID, pTransport->UniqueID, pTransport->GetMapCoords().X,
