@@ -1799,6 +1799,23 @@ namespace
 		const int ownWaitSince = asker.Client != NeuralOpClient::Shuttle && asker.Transports.empty() && now >= asker.LastTransportFrame
 			&& now - asker.LastTransportFrame >= OpStarvedFrames ? asker.LastTransportFrame : INT_MAX;
 		auto const pType = pTransport->GetTechnoType();
+		int askerUnseatedSize = 0;
+		int askerTransCap = 0;
+
+		if (asker.Client != NeuralOpClient::Shuttle && !asker.Transports.empty())
+		{
+			for (auto const& member : asker.Members)
+			{
+				if (!member.Aboard && member.Work == NeuralShuttleWork::None)
+					askerUnseatedSize += member.Size;
+			}
+
+			for (auto const& tr : asker.Transports)
+			{
+				if (tr.Type)
+					askerTransCap += std::max(1, static_cast<int>(tr.Type->Passengers));
+			}
+		}
 
 		for (auto const& other : macro.TransportOps)
 		{
@@ -1810,8 +1827,39 @@ namespace
 				continue;
 			}
 
-			if (!std::any_of(other.Members.begin(), other.Members.end(),
-				[](const NeuralOpMember& member) { return !member.Aboard && member.Work == NeuralShuttleWork::None; }))
+			int otherWaitingCount = 0;
+			int otherWaitingSize = 0;
+			bool otherHasSpecialist = false;
+
+			for (auto const& member : other.Members)
+			{
+				if (member.Aboard || member.Work != NeuralShuttleWork::None)
+					continue;
+
+				otherWaitingCount++;
+				otherWaitingSize += member.Size;
+				auto const itFoot = foots.find(member.UniqueID);
+				auto const pOtherType = (itFoot != foots.end() && itFoot->second) ? itFoot->second->GetTechnoType() : nullptr;
+
+				if (auto const pUT = abstract_cast<const UnitTypeClass*>(pOtherType))
+				{
+					if (pUT->DeploysInto && pUT->DeploysInto->ConstructionYard)
+						otherHasSpecialist = true;
+				}
+				else if (auto const pIT = abstract_cast<const InfantryTypeClass*>(pOtherType))
+				{
+					if (pIT->Engineer)
+						otherHasSpecialist = true;
+				}
+			}
+
+			if (otherWaitingCount == 0)
+				continue;
+
+			// Keep an overloaded main operation from losing its active transports to 1-2 non-specialist stragglers
+			// while its own staging beach still holds more cargo than its fleet can lift in one wave.
+			if (!otherHasSpecialist && otherWaitingCount <= 2 && otherWaitingSize <= 6
+				&& askerUnseatedSize > askerTransCap && askerUnseatedSize >= otherWaitingSize * 4)
 			{
 				continue;
 			}
@@ -2206,6 +2254,10 @@ namespace
 					member.Transport = itAboard->second;
 					member.ProgressCell = CellStruct::Empty;
 					aboardCount++;
+
+					if (!shuttle)
+						macro.OpWaitingSizeBySize[std::clamp(member.Size, 1, 15)] += member.Size;
+
 					return false;
 				}
 
