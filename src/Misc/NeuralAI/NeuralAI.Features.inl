@@ -117,6 +117,8 @@ void NeuralAI::ExtractFogFilteredFeatures(HouseClass* pHouse, std::array<int8_t,
 		? MapClass::Instance.GetMovementZoneType(earlyHomeCoords, MovementZone::Normal, false)
 		: -1;
 	int islandCapturableTechs = 0;
+	int seenEnemyTechTier = 0;
+	auto const& knownEnemyBuildingIds = GetMacroState(pHouse).SeenEnemyBuildings;
 
 	for (auto const pBld : BuildingClass::Array)
 	{
@@ -203,6 +205,16 @@ void NeuralAI::ExtractFogFilteredFeatures(HouseClass* pHouse, std::array<int8_t,
 				foreignConYardAndCaptureScore += 2;
 
 				camouflageAmbushAndGroveScore += 3;
+			}
+		}
+		else if (pBld->Owner && !pBld->Owner->IsNeutral() && !pBld->Owner->IsObserver() && !pHouse->IsAlliedWith(pBld->Owner))
+		{
+			if (knownEnemyBuildingIds.count(pBld->UniqueID) > 0 || IsCellVisibleToAI(pHouse, pBld->GetCell()))
+			{
+				if (pBld->Type->TechLevel >= 7 || pBld->Type->SuperWeapon != -1)
+					seenEnemyTechTier = 100;
+				else if (pBld->Type->Radar || pBld->Type->Factory == AbstractType::AircraftType || pBld->Type->TechLevel >= 4)
+					seenEnemyTechTier = std::max(seenEnemyTechTier, 55);
 			}
 		}
 	}
@@ -856,6 +868,57 @@ void NeuralAI::ExtractFogFilteredFeatures(HouseClass* pHouse, std::array<int8_t,
 
 	if (features[21] > 0 && features[67] < 40)
 		features[67] = 40; // Ensure Shipyard is prioritized whenever an enemy or
+
+	// 40..55: Clean One-Hot Archetype, Tech Tier, Super-Economy & Macro Context
+	const int curArchSlot = std::clamp(pExt->NeuralAI_Archetype, 0, NeuralAI::NumArchetypes - 1);
+	features[40 + curArchSlot] = 100;
+
+	int ownTechTier = -60;
+	if (pHouse->NumWarFactories > 0 || pHouse->NumBarracks > 0)
+		ownTechTier = 0;
+	for (auto const pOwnBld : pHouse->Buildings)
+	{
+		if (!pOwnBld || pOwnBld->InLimbo || !pOwnBld->IsAlive || !pOwnBld->Type)
+			continue;
+		if (pOwnBld->Type->TechLevel >= 7 || pOwnBld->Type->SpySat)
+		{
+			ownTechTier = 100;
+			break;
+		}
+		if (pOwnBld->Type->Radar || pOwnBld->Type->Factory == AbstractType::AircraftType || pOwnBld->Type->TechLevel >= 4)
+			ownTechTier = std::max(ownTechTier, 55);
+	}
+	features[48] = ClampInt8(ownTechTier);
+	features[49] = ClampInt8(seenEnemyTechTier);
+
+	features[50] = credits > 15000 ? ClampInt8((credits - 15000) / 1200) : 0;
+	features[51] = ClampInt8((pHouse->CountResourceGatherers - pHouse->CountResourceDestinations * 2) * 20);
+	features[52] = ClampInt8(pHouse->NumWarFactories * 22 + pHouse->NumBarracks * 10 + pHouse->NumAirpads * 6 + pHouse->NumShipyards * 14);
+	features[53] = ClampInt8(GetMacroState(pHouse).UncolonizedOreFields * 22);
+	features[54] = ClampInt8(GetMacroState(pHouse).DefensePressure / 6);
+
+	int aliveEnemyHouses = 0;
+	for (auto const pOther : HouseClass::Array)
+	{
+		if (!pOther || pOther == pHouse || pOther->IsNeutral() || pOther->IsObserver() || pOther->Defeated
+			|| pHouse->IsAlliedWith(pOther))
+		{
+			continue;
+		}
+		aliveEnemyHouses++;
+		const int otherIdx = std::clamp(pOther->ArrayIndex, 0, 7);
+		if ((pExt->NeuralAI_ScoutedEnemyMask & (1 << otherIdx)) != 0
+			&& pOther->SideIndex >= 0 && pOther->SideIndex < 32)
+		{
+			features[172 + pOther->SideIndex] = 100;
+		}
+	}
+	features[55] = ClampInt8(aliveEnemyHouses * 25);
+
+	// 140..171: Own SideIndex One-Hot (0..31, resolves Allies=0 dead input & Nod/CABAL=127 collision, +22 future factions)
+	// 172..203: Scouted Enemy SideIndex One-Hot (0..31, fog-fair, populated above once enemy is seen)
+	if (pHouse->SideIndex >= 0 && pHouse->SideIndex < 32)
+		features[140 + pHouse->SideIndex] = 100;
 
 	// Ore expansion is on a disconnected island!
 	// 128..191: Dynamic Rules & GameModeOptions Context
