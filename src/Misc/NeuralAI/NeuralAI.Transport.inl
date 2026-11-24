@@ -67,11 +67,17 @@ namespace
 	{
 		auto const pCargo = abstract_cast<const UnitTypeClass*>(pCargoType);
 
-		if (!pCarryType || !pCargo || pCargo->Organic || pCargo->Naval || pCargo->NonVehicle)
+		if (!pCarryType || !pCargo || pCargo->Organic || pCargo->NonVehicle)
 			return false;
 
 		auto const pCargoExt = TechnoTypeExt::Fetch(pCargo);
 		auto const pCarryExt = TechnoTypeExt::Fetch(pCarryType);
+		const bool isUnitCarryall = pCarryType->WhatAmI() == AbstractType::UnitType && pCarryExt && pCarryExt->Carryall.Get();
+
+		// Vanilla AircraftClass Carryalls cannot land on water or get RADIO_ROGER from ships,
+		// whereas Phobos UnitClass (Jumpjet) Carryalls lift and drop Naval units on water via UnitExt.
+		if (pCargo->Naval && !isUnitCarryall)
+			return false;
 
 		if (pCargoExt && !pCargoExt->Carryall_Allowed.Get())
 			return false;

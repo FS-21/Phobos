@@ -7053,11 +7053,29 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		if (IsRepairerUnit(pUnit))
 		{
 			auto const pRepairTarget = abstract_cast<TechnoClass*>(pUnit->Target);
+			auto const pRepairTargetFoot = abstract_cast<FootClass*>(pRepairTarget);
 
-			if (pRepairTarget && pRepairTarget->IsAlive && !pRepairTarget->InLimbo && pRepairTarget->Owner
-				&& pHouse->IsAlliedWith(pRepairTarget->Owner) && pRepairTarget->GetHealthPercentage() < 1.0)
+			if (pRepairTarget && pRepairTarget->Owner && pHouse->IsAlliedWith(pRepairTarget->Owner))
 			{
-				continue;
+				if (pRepairTarget->IsAlive && !pRepairTarget->InLimbo
+					&& (pRepairTarget->GetHealthPercentage() < 0.99
+						|| (pRepairTargetFoot && pRepairTargetFoot->ParasiteEatingMe != nullptr)))
+				{
+					if (!pUnit->IsCloseEnoughToAttack(pRepairTarget) && pUnit->CurrentMission != Mission::Move)
+					{
+						pUnit->ClearMegaMissionData();
+						pUnit->SetTarget(pRepairTarget);
+						pUnit->QueueMission(Mission::Attack, true);
+					}
+
+					continue;
+				}
+
+				// Patient is fully healed (or gone): release Target immediately so hover repairers
+				// like MDISK never sit in Mission::Attack on a 100%-HP unit/building for 600 frames.
+				pUnit->SetTarget(nullptr);
+				pUnit->ClearMegaMissionData();
+				pUnit->QueueMission(Mission::Guard, true);
 			}
 
 			const bool repairerFlies = pType->MovementZone == MovementZone::Fly || pType->JumpJet || pType->BalloonHover;
@@ -9953,8 +9971,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 
 			// Expert 2: Patrol idle defensive infantry & dogs around fragile key buildings
-			// (Superweapons, Power Plants, Radar/SpySat, Factories, ConYard)!
-			if ((Unsorted::CurrentFrame + pInf->UniqueID * 13) % 180 < 20)
+			// (Superweapons, Power Plants, Radar/SpySat, Factories, ConYard) — never pull wave members back!
+			if (((Unsorted::CurrentFrame + pInf->UniqueID * 13) % 180 < 20)
+				&& !GetMacroState(pHouse).WaveGoals.contains(pInf->UniqueID))
 			{
 				BuildingClass* pPatrolBld = nullptr;
 				const int patrolSlot = ((Unsorted::CurrentFrame / 180) + pInf->UniqueID) % 7;
@@ -12523,6 +12542,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			pWaveTargetCell ? pWaveTargetCell->MapCoords.Y : -1, teamOrder.Hold ? 1 : 0, endgameRemnantHunt ? 1 : 0,
 			waveArmy, static_cast<int>(armyShareUnits), missions(notIdleMissionShips).c_str(), missions(notIdleMissionVehicles).c_str());
 	}
+	std::unordered_set<DWORD> waveDispatchedUIDs;
 	NeuralWaveCheck waveCheck {};
 	waveCheck.Launch = true;
 
@@ -13119,6 +13139,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				{
 					IssueMoveOrder(pU, pFlankCell, 6.0);
 					NoteExpertCommand(pHouse, pU, CreditSourceWave);
+					waveDispatchedUIDs.insert(pU->UniqueID);
 					dispatchedVeh++;
 					continue;
 				}
@@ -13181,6 +13202,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 
 			NoteExpertCommand(pHouse, pU, CreditSourceWave);
+			waveDispatchedUIDs.insert(pU->UniqueID);
 			dispatchedVeh++;
 		}
 
@@ -13267,6 +13289,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 
 			NoteExpertCommand(pHouse, pI, CreditSourceWave);
+			waveDispatchedUIDs.insert(pI->UniqueID);
 			dispatchedInf++;
 		}
 
@@ -13898,8 +13921,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		for (auto const pBeachU : idleCombatUnits)
 		{
-			if (!pBeachU || !pBeachU->Type || IsAmphibiousOrAirTransport(pBeachU->Type))
+			if (!pBeachU || !pBeachU->Type || IsAmphibiousOrAirTransport(pBeachU->Type)
+				|| waveDispatchedUIDs.contains(pBeachU->UniqueID))
+			{
 				continue;
+			}
 
 			// A ship let go from an attack out of its reach this tick is idle whatever its mission still reads.
 			if (std::find(releasedShips.begin(), releasedShips.end(), pBeachU) == releasedShips.end()
@@ -14144,7 +14170,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				// idleCombatUnits.size() < minWaveUnits! Only engage on home island
 				// once critical mass (>= minWaveUnits) is assembled, or if the unit is
 				// already at the enemy perimeter (<= 20 cells)!
-				if (onEnemyIsland || endgameRemnantHunt || distToBld <= 20.0 || (idleCombatUnits.size() >= minWaveUnits && waveStrengthReady))
+				if ((onEnemyIsland || endgameRemnantHunt || distToBld <= 20.0 || (idleCombatUnits.size() >= minWaveUnits && waveStrengthReady))
+					&& MayOrderUnit(pBeachU, pSameIslBld->GetMapCoords(), __FILE__, __LINE__))
 				{
 					const bool attackNow = CanFootDamageBuildings(pBeachU) && pBeachU->DistanceFrom(pSameIslBld) <= maxWpnRangeLeptons + 384
 						&& pSameIslBld->GetCell() && IsCellVisibleToAI(pHouse, pSameIslBld->GetCell());
@@ -14377,8 +14404,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		for (auto const pBeachI : idleCombatInf)
 		{
-			if (!pBeachI || !pBeachI->Type)
+			if (!pBeachI || !pBeachI->Type
+				|| waveDispatchedUIDs.contains(pBeachI->UniqueID))
+			{
 				continue;
+			}
 
 			if (IsFootActivelyAttackingOrMovingToEnemy(pBeachI))
 				continue;
@@ -14397,8 +14427,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			{
 				const double distToBld = ic.DistanceFrom(pSameIslBld->GetMapCoords());
 				const bool onEnemyIsland = (homeGroundZone >= 0 && iz >= 0 && iz != homeGroundZone);
-				if (onEnemyIsland || endgameRemnantHunt || distToBld <= 20.0
-					|| ((idleCombatUnits.size() >= minWaveUnits || idleCombatInf.size() >= (minWaveUnits + 3)) && waveStrengthReady))
+				if ((onEnemyIsland || endgameRemnantHunt || distToBld <= 20.0
+						|| ((idleCombatUnits.size() >= minWaveUnits || idleCombatInf.size() >= (minWaveUnits + 3)) && waveStrengthReady))
+					&& MayOrderUnit(pBeachI, pSameIslBld->GetMapCoords(), __FILE__, __LINE__))
 				{
 					const auto pInfW0 = pBeachI->Type->GetWeapon(0) ? pBeachI->Type->GetWeapon(0)->WeaponType : nullptr;
 					const int infWpnRange = pInfW0 ? static_cast<int>(pInfW0->Range) : 1024;
@@ -15257,6 +15288,143 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		}
 	}
 
+	bool hasOwnNavalRepairYard = false;
+
+	for (auto const pOwnB : pHouse->Buildings)
+	{
+		if (pOwnB && pOwnB->IsAlive && !pOwnB->InLimbo && pOwnB->Type && pOwnB->Type->UnitRepair && pOwnB->Type->Naval)
+		{
+			hasOwnNavalRepairYard = true;
+			break;
+		}
+	}
+
+	// Finds a safe, navigable water drop cell in another water body with known enemy naval or coastal
+	// targets when a Carryall-liftable ship is stranded in an isolated/cleared water body.
+	auto const findUsefulWaterDropForShip = [pHouse](UnitClass* pShip) -> CellClass*
+	{
+		if (!pHouse || !pShip || !pShip->Type || !pShip->Type->Naval
+			|| pShip->Type->Harvester || pShip->Type->ResourceGatherer)
+		{
+			return nullptr;
+		}
+
+		const MovementZone shipMZ = pShip->Type->MovementZone;
+		const CellStruct shipCell = pShip->GetMapCoords();
+		const int shipWaterZone = pShip->InLimbo ? -1 : ObjectZone(pShip, shipMZ);
+		auto const& knownBlds = GetKnownEnemyBuildingCache(pHouse).Entries;
+		auto const& sightings = GetMacroState(pHouse).EnemySightings;
+
+		auto const pickSafeWaterNear = [&](const CellStruct& ref, int radius, int excludeZone) -> CellClass*
+		{
+			CellClass* pBest = nullptr;
+			double bestDist = 1e9;
+
+			for (int dy = -radius; dy <= radius; dy += 2)
+			{
+				for (int dx = -radius; dx <= radius; dx += 2)
+				{
+					const CellStruct wc { static_cast<short>(ref.X + dx), static_cast<short>(ref.Y + dy) };
+					auto const pWC = MapClass::Instance.TryGetCellAt(wc);
+
+					if (!pWC || pWC->LandType != LandType::Water)
+						continue;
+
+					const int wz = MapClass::Instance.GetMovementZoneType(wc, shipMZ, false);
+
+					if (wz < 0 || wz == excludeZone)
+						continue;
+
+					if (!UnitExt::CanCargoLandOnCell(pShip, pWC)
+						|| CountKnownEnemyDefensesNear(pHouse, wc, 10.0, true) > 0)
+					{
+						continue;
+					}
+
+					const double d = shipCell.DistanceFrom(wc);
+
+					if (d < bestDist)
+					{
+						bestDist = d;
+						pBest = pWC;
+					}
+				}
+			}
+
+			return pBest;
+		};
+
+		// If the ship is currently on the map, check if its present water body already has enemy targets.
+		if (shipWaterZone >= 0)
+		{
+			for (auto const& [uid, s] : sightings)
+			{
+				if (Unsorted::CurrentFrame - s.LastSeenFrame <= 3600 && s.LastCoords != CellStruct::Empty)
+				{
+					auto const pSC = MapClass::Instance.TryGetCellAt(s.LastCoords);
+
+					if (pSC && pSC->LandType == LandType::Water
+						&& MapClass::Instance.GetMovementZoneType(s.LastCoords, shipMZ, false) == shipWaterZone)
+					{
+						return nullptr;
+					}
+				}
+			}
+
+			for (auto const& entry : knownBlds)
+			{
+				for (int dy = -10; dy <= 10; dy += 4)
+				{
+					for (int dx = -10; dx <= 10; dx += 4)
+					{
+						const CellStruct wc { static_cast<short>(entry.Coords.X + dx), static_cast<short>(entry.Coords.Y + dy) };
+						auto const pWC = MapClass::Instance.TryGetCellAt(wc);
+
+						if (pWC && pWC->LandType == LandType::Water
+							&& MapClass::Instance.GetMovementZoneType(wc, shipMZ, false) == shipWaterZone)
+						{
+							return nullptr;
+						}
+					}
+				}
+			}
+		}
+
+		// Search other water bodies that contain known enemy naval units or coastal structures.
+		for (auto const& [uid, s] : sightings)
+		{
+			if (Unsorted::CurrentFrame - s.LastSeenFrame <= 3600 && s.LastCoords != CellStruct::Empty)
+			{
+				auto const pSC = MapClass::Instance.TryGetCellAt(s.LastCoords);
+
+				if (pSC && pSC->LandType == LandType::Water)
+				{
+					if (CellClass* const pDrop = pickSafeWaterNear(s.LastCoords, 14, shipWaterZone))
+						return pDrop;
+				}
+			}
+		}
+
+		for (auto const& entry : knownBlds)
+		{
+			if (CellClass* const pDrop = pickSafeWaterNear(entry.Coords, 12, shipWaterZone))
+				return pDrop;
+		}
+
+		// Fallback: move stranded ship back to our own Naval Yard's sea if that sea is useful.
+		for (auto const pOwnB : pHouse->Buildings)
+		{
+			if (pOwnB && pOwnB->IsAlive && !pOwnB->InLimbo && pOwnB->Type && pOwnB->Type->Naval
+				&& IsUsefulWaterCell(pOwnB->GetMapCoords()))
+			{
+				if (CellClass* const pDrop = pickSafeWaterNear(pOwnB->GetMapCoords(), 8, shipWaterZone))
+					return pDrop;
+			}
+		}
+
+		return nullptr;
+	};
+
 	for (auto const pTrans : UnitClass::Array)
 	{
 		// Transports flying a strategic plan (e.g. the airborne second front) belong to that plan, those of
@@ -15339,8 +15507,21 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 						if (auto const itLast = jumpjetLastCargo.find(pTrans->UniqueID); itLast != jumpjetLastCargo.end())
 						{
-							AirliftRefusedUntil[itLast->second] = Unsorted::CurrentFrame + 900;
+							const DWORD unloadedUID = itLast->second;
+							AirliftRefusedUntil[unloadedUID] = Unsorted::CurrentFrame + 900;
 							jumpjetLastCargo.erase(itLast);
+
+							if (auto const pUnloaded = FindOwnFootByID(pHouse, unloadedUID);
+								pUnloaded && !pUnloaded->InLimbo && pUnloaded->GetHealthPercentage() < 0.85
+								&& !IsOnRepairTrip(pHouse, unloadedUID))
+							{
+								if (auto const pNearStation = FindBestRepairStation(pHouse, pUnloaded);
+									pNearStation && pUnloaded->GetMapCoords().DistanceFrom(pNearStation->GetMapCoords()) <= 12.0)
+								{
+									OrderFootToEnter(pUnloaded, pNearStation);
+									BeginRepairTrip(pHouse, pUnloaded, NeuralRepairKind::Depot, pNearStation->UniqueID, CellStruct::Empty);
+								}
+							}
 						}
 
 						if (carryMacro.CarryallDropSince.contains(pTrans->UniqueID))
@@ -15365,14 +15546,19 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 							const bool carriedWorthSave = pCarriedUnit->Type->Cost >= 1000
 								|| IsMainBattleTankType(pCarriedUnit->Type)
 								|| pCarriedUnit->Veterancy.IsElite() || pCarriedUnit->Veterancy.IsVeteran();
-							BuildingClass* const pCarriedRepair = (pRepairDepot && (pCarriedUnit->GetHealthPercentage() < 0.45
-									|| (carriedWorthSave && pCarriedUnit->GetHealthPercentage() < 0.75)))
+							BuildingClass* const pCarriedRepair = ((pRepairDepot || pCarriedUnit->Type->Naval)
+								&& (pCarriedUnit->GetHealthPercentage() < 0.45
+									|| ((carriedWorthSave || pCarriedUnit->Type->Naval) && pCarriedUnit->GetHealthPercentage() < 0.75)))
 								? FindBestRepairStation(pHouse, pCarriedUnit, true)
 								: nullptr;
 
 							if (pCarriedRepair)
 							{
 								pDropCell = pCarriedRepair->GetCell();
+							}
+							else if (pCarriedUnit->Type->Naval)
+							{
+								pDropCell = findUsefulWaterDropForShip(pCarriedUnit);
 							}
 							else if (pCarriedUnit->Type->Harvester || pCarriedUnit->Type->Weeder)
 							{
@@ -15390,7 +15576,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 							}
 						}
 
-						if (!pDropCell && !(pCarriedUnit->Type && (pCarriedUnit->Type->Harvester || pCarriedUnit->Type->Weeder)))
+						if (!pDropCell && !(pCarriedUnit->Type && (pCarriedUnit->Type->Harvester || pCarriedUnit->Type->Weeder || pCarriedUnit->Type->Naval)))
 						{
 							pDropCell = pIslandGoalCell
 								? pIslandGoalCell
@@ -15632,7 +15818,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 						const bool islandLiftsPaused
 							= Unsorted::CurrentFrame - GetMacroState(pHouse).LastAirDropAbortFrame < 1800;
-						const bool evacuationAllowed = pRepairDepot && SlotGateHeld(scores[54], -200, 54, pTrans->UniqueID);
+						const bool evacuationAllowed = (pRepairDepot || hasOwnNavalRepairYard)
+							&& SlotGateHeld(scores[54], -200, 54, pTrans->UniqueID);
 
 						for (auto const pU : UnitClass::Array)
 						{
@@ -15648,14 +15835,14 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 							const int uZone = ObjectZone(pU, MovementZone::Normal);
 							const CellStruct uCoords = pU->GetMapCoords();
-							const bool worthCarryallCandidate = (pU->Type->Cost >= 1000 || IsMainBattleTankType(pU->Type)
+							const bool worthCarryallCandidate = (pU->Type->Cost >= 1000 || pU->Type->Naval || IsMainBattleTankType(pU->Type)
 									|| pU->Veterancy.IsElite() || pU->Veterancy.IsVeteran())
 								&& !pU->Type->Harvester && !pU->Type->ResourceGatherer
 								&& !IsOnRepairTrip(pHouse, pU->UniqueID)
 								&& !IsRepairStationFailed(pHouse, pU->Type, NeuralRepairKind::Depot)
 								&& pU->GetHealthPercentage() < 0.70
 								&& CountKnownEnemyDefensesNear(pHouse, uCoords, 9.0, true) == 0;
-							BuildingClass* const pSaveDepot = (pRepairDepot && worthCarryallCandidate)
+							BuildingClass* const pSaveDepot = ((pRepairDepot || pU->Type->Naval) && worthCarryallCandidate)
 								? FindBestRepairStation(pHouse, pU, true)
 								: nullptr;
 							const bool worthCarryallSave = pSaveDepot != nullptr
@@ -15689,9 +15876,14 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 							// Combat evacuation: an expensive unit losing its fight is pulled out early.
 							const bool isLosingExpensiveUnit = evacuationAllowed && !isCriticallyDamagedTank
 								&& worthCarryallSave && pU->GetHealthPercentage() < 0.70 && IsFootOutmatched(pHouse, pU, 7.0);
+							const bool isStrandedNavalRelocation = pU->Type->Naval && !isCriticallyDamagedTank && !isLosingExpensiveUnit
+								&& (pU->CurrentMission == Mission::Guard || pU->CurrentMission == Mission::Area_Guard)
+								&& !IsFootActivelyAttackingOrMovingToEnemy(pU)
+								&& CountKnownEnemyDefensesNear(pHouse, uCoords, 9.0, true) == 0
+								&& findUsefulWaterDropForShip(pU) != nullptr;
 							const bool isIslandJob = isIslandExpansionMCV || isIslandHarvester || isIslandCombatVehicle;
-							if (isCriticallyDamagedTank || isLosingExpensiveUnit || isLoadedStrikeAPC || strandedHarvester
-								|| (isIslandJob && !islandLiftsPaused))
+							if (isCriticallyDamagedTank || isLosingExpensiveUnit || isStrandedNavalRelocation
+								|| isLoadedStrikeAPC || strandedHarvester || (isIslandJob && !islandLiftsPaused))
 							{
 								AdvanceRoutedPickup(pHouse, pTrans, pU);
 								CountDecision(NeuralDecision::AirliftJob, pHouse->ArrayIndex);
@@ -18140,9 +18332,22 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 			if (auto const itLast = airLastCarryCargo.find(pAir->UniqueID); itLast != airLastCarryCargo.end())
 			{
-				AirliftRefusedUntil[itLast->second] = Unsorted::CurrentFrame + 900;
+				const DWORD unloadedUID = itLast->second;
+				AirliftRefusedUntil[unloadedUID] = Unsorted::CurrentFrame + 900;
 				airLastCarryCargo.erase(itLast);
 				EndAirliftJob(pHouse, pAir);
+
+				if (auto const pUnloaded = FindOwnFootByID(pHouse, unloadedUID);
+					pUnloaded && !pUnloaded->InLimbo && pUnloaded->GetHealthPercentage() < 0.85
+					&& !IsOnRepairTrip(pHouse, unloadedUID))
+				{
+					if (auto const pNearStation = FindBestRepairStation(pHouse, pUnloaded);
+						pNearStation && pUnloaded->GetMapCoords().DistanceFrom(pNearStation->GetMapCoords()) <= 12.0)
+					{
+						OrderFootToEnter(pUnloaded, pNearStation);
+						BeginRepairTrip(pHouse, pUnloaded, NeuralRepairKind::Depot, pNearStation->UniqueID, CellStruct::Empty);
+					}
+				}
 			}
 
 			if (airCleanMacro.CarryallCargoSince.erase(pAir->UniqueID) > 0)

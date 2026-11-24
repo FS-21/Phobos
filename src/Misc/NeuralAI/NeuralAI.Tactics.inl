@@ -1632,8 +1632,30 @@ namespace
 				track = *pCarried;
 			}
 
-			if (pUnit->IsFiring || (pUnit->LastFireBulletFrame > 0 && now >= pUnit->LastFireBulletFrame && now - pUnit->LastFireBulletFrame < 300))
+			auto const pHoverTargetTech = abstract_cast<TechnoClass*>(pUnit->Target);
+			auto const pHoverTargetFoot = abstract_cast<FootClass*>(pHoverTargetTech);
+			const bool hoverTargetAllied = pHoverTargetTech && pHoverTargetTech->IsAlive && !pHoverTargetTech->InLimbo
+				&& pHoverTargetTech->Owner && pHouse->IsAlliedWith(pHoverTargetTech->Owner);
+			const bool hoverTargetParasited = pHoverTargetFoot && pHoverTargetFoot->ParasiteEatingMe != nullptr;
+			const bool activelyHoverHealing = hoverTargetAllied && IsRepairerUnit(pUnit)
+				&& (pHoverTargetTech->GetHealthPercentage() < 0.99 || hoverTargetParasited)
+				&& here.DistanceFrom(pHoverTargetTech->GetMapCoords()) <= 2.5;
+
+			if (hoverTargetAllied && IsRepairerUnit(pUnit)
+				&& pHoverTargetTech->GetHealthPercentage() >= 0.99 && !hoverTargetParasited)
+			{
+				pUnit->SetTarget(nullptr);
+				pUnit->ClearMegaMissionData();
+				pUnit->SetDestination(nullptr, true);
+				pUnit->QueueMission(Mission::Guard, true);
+				continue;
+			}
+
+			if (activelyHoverHealing || pUnit->IsFiring
+				|| (pUnit->LastFireBulletFrame > 0 && now >= pUnit->LastFireBulletFrame && now - pUnit->LastFireBulletFrame < 300))
+			{
 				track.Since = now;
+			}
 
 			const bool inPlan = macro.PlanMembers.contains(pUnit->UniqueID);
 
@@ -1702,7 +1724,10 @@ namespace
 			pUnit->SetDestination(nullptr, true);
 
 			if (!exposed)
+			{
 				pUnit->QueueMission(Mission::Guard, true);
+				ChainFlyerStrike(pHouse, pUnit);
+			}
 			else if (auto const pHome = FindCarrierHomeCell(pHouse, pUnit))
 				IssueMoveOrder(pUnit, pHome, 0.0);
 			else
@@ -3724,14 +3749,20 @@ namespace
 		if (baseRate <= 0 || multiplePermille <= 0 || multiplePermille >= 1000)
 			return;
 
-		auto const queueRate = [baseRate, multiplePermille](int factories) -> int64_t
+		// In YR engine each build has 54 steps at >= 1 frame/step, so MultipleFactory gains saturate
+		// instead of growing unboundedly to 1,000,000+ credits/1000f across 40 helipads.
+		const int64_t maxSingleQueueRate = std::max<int64_t>(baseRate * 10, 18000);
+		auto const queueRate = [baseRate, multiplePermille, maxSingleQueueRate](int factories) -> int64_t
 		{
+			if (factories <= 0)
+				return 0;
+
 			int64_t rate = baseRate;
 
-			for (int i = 1; i < factories && rate < 100000000; ++i)
-				rate = rate * 1000 / multiplePermille;
+			for (int i = 1; i < factories && rate < maxSingleQueueRate; ++i)
+				rate = std::min(maxSingleQueueRate, rate * 1000 / multiplePermille);
 
-			return factories > 0 ? rate : 0;
+			return rate;
 		};
 
 		std::array<int, static_cast<size_t>(BankQueue::Count)> counts {};
@@ -3745,8 +3776,18 @@ namespace
 
 		int64_t capacity = queueRate(pHouse->NumConYards);
 
-		for (auto const count : counts)
-			capacity += queueRate(count);
+		for (size_t q = 0; q < counts.size(); ++q)
+		{
+			// Full/idle airfields spend 0 credits and must not mask War Factory deficit; Barracks build
+			// cheap infantry and cannot absorb tank-scale macro income beyond a modest ceiling.
+			if (q == static_cast<size_t>(BankQueue::Aircraft) && !queueKeptBusy[q])
+				continue;
+
+			const int64_t qCap = queueRate(counts[q]);
+			capacity += (q == static_cast<size_t>(BankQueue::Infantry))
+				? std::min<int64_t>(qCap, baseRate * 3)
+				: qCap;
+		}
 
 		// The reserve covers an expansion MCV, ferries and a raid on the harvesters: plans and
 		// economy rebuilds never wait for money the governor spent.
@@ -3767,24 +3808,49 @@ namespace
 			return;
 
 		auto wanted = counts;
+		const int maxAdded = surplus >= 50000 ? 12 : 8;
 
-		for (int added = 0; added < 8 && capacity < needed; ++added)
+		for (int added = 0; added < maxAdded && capacity < needed; ++added)
 		{
 			int best = -1;
+			int bestEffectiveCount = INT_MAX;
 
 			for (int q = 0; q < static_cast<int>(BankQueue::Count); ++q)
 			{
-				if (q != static_cast<int>(BankQueue::Aircraft) && counts[q] > 0 && queueKeptBusy[q]
-					&& (best < 0 || wanted[q] < wanted[best]))
+				if (q == static_cast<int>(BankQueue::Aircraft) || counts[q] <= 0)
+					continue;
+
+				// Vehicle queue may briefly flicker idle between picks; with an offensive bank keep
+				// scaling War Factories as long as we have fewer than the cap.
+				const bool queueEligible = queueKeptBusy[q]
+					|| (q == static_cast<int>(BankQueue::Vehicle) && surplus >= 25000 && counts[q] < 14);
+
+				if (!queueEligible)
+					continue;
+
+				// Avoid spamming 10-15 Barracks on rich maps: cap governor Barracks additions at 5
+				// and require at least ~2.5x as many War Factories as Barracks.
+				if (q == static_cast<int>(BankQueue::Infantry)
+					&& (wanted[q] >= 5 || macro.ArmyUnused[1] >= 4 || wanted[q] * 5 >= wanted[static_cast<int>(BankQueue::Vehicle)] * 2))
+				{
+					continue;
+				}
+
+				const int effectiveCount = (q == static_cast<int>(BankQueue::Infantry)) ? (wanted[q] * 2 + 2) : wanted[q];
+
+				if (best < 0 || effectiveCount < bestEffectiveCount)
 				{
 					best = q;
+					bestEffectiveCount = effectiveCount;
 				}
 			}
 
 			if (best < 0)
 				break;
 
-			capacity += queueRate(wanted[best] + 1) - queueRate(wanted[best]);
+			const int64_t prevRate = queueRate(wanted[best]);
+			const int64_t nextRate = queueRate(wanted[best] + 1);
+			capacity += std::max<int64_t>(baseRate / 4, nextRate - prevRate);
 			wanted[best]++;
 		}
 
