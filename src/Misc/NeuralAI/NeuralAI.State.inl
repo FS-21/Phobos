@@ -5048,6 +5048,17 @@ namespace
 		return pHouse && GetLandTaxiState(pHouse).Members.contains(uid);
 	}
 
+	// Observer-only multi-hop trajectory cache for GroundRouteHop / NavalRouteHop (never read by AI decisions).
+	struct NeuralTelemetryGroundRoute
+	{
+		int MatchSerial { -1 };
+		int Frame { -1 };
+		CellStruct HopCell { CellStruct::Empty };
+		std::vector<CellStruct> Waypoints {};
+	};
+
+	std::unordered_map<DWORD, NeuralTelemetryGroundRoute> TelemetryGroundRoutes {};
+
 	// A unit or transport working for a transport operation (NeuralAI.Operations.inl): it takes its
 	// orders from the operation alone until the operation lets it go.
 	bool IsInTransportOp(const HouseClass* pHouse, DWORD uid)

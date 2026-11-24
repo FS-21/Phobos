@@ -1904,6 +1904,80 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 		// The point's own cell follows, then the garrison (infantry inside a building) and 1 when a
 		// vehicle sits in it (tank bunker); both 0 for anything else. Last, what is inside as
 		// "TYPE:count;..." (garrison, bunker vehicle, passengers, slung vehicle; 6 types at most).
+		// While the map view of this slot is open, every radar point also says which houses have it
+		// in sight now, which enemy houses remember a building, and all planned route waypoints ahead.
+		const uint32_t viewRequest = TelemetryViewRequest ? TelemetryViewRequest[0] : 0u;
+		const bool withVision = viewRequest != 0u;
+		const bool withWaypoints = withVision || !TelemetryJsonShmFromTrainer;
+		const int viewHouse = viewRequest >= 2u ? static_cast<int>(viewRequest - 2u) : -1;
+
+		std::unordered_map<DWORD, std::pair<const NeuralOpTransport*, CellStruct>> opTransportRoutes;
+		std::unordered_map<DWORD, std::pair<const NeuralPlanInstance*, size_t>> planMemberRoutes;
+		std::unordered_map<DWORD, CellStruct> unitCoordsByUid;
+		std::unordered_map<DWORD, CellStruct> taxiDropByUid;
+
+		if (withWaypoints)
+		{
+			for (int hi = 0; hi < HouseClass::Array.Count; ++hi)
+			{
+				auto const pH = HouseClass::Array.GetItem(hi);
+
+				if (!pH || pH->Defeated || pH->IsNeutral() || pH->IsObserver())
+					continue;
+
+				auto const& hMacro = GetMacroState(pH);
+
+				for (auto const& op : hMacro.TransportOps)
+				{
+					if (op.Over)
+						continue;
+
+					for (auto const& tr : op.Transports)
+					{
+						CellStruct legGoal = op.Staging;
+
+						if (tr.Leg == NeuralOpLeg::Crossing)
+							legGoal = tr.Landing != CellStruct::Empty ? tr.Landing : op.Landing;
+						else if (tr.Leg == NeuralOpLeg::ToStaging || tr.Leg == NeuralOpLeg::Parked)
+							legGoal = tr.Berth != CellStruct::Empty ? tr.Berth : op.Staging;
+
+						opTransportRoutes[tr.UniqueID] = { &tr, legGoal };
+					}
+				}
+
+				for (size_t pi = 0; pi < hMacro.Plans.size(); ++pi)
+				{
+					auto const& plan = hMacro.Plans[pi];
+
+					if (!plan.Active)
+						continue;
+
+					const bool isBlitz = pi == static_cast<size_t>(NeuralPlanId::EdgeBlitz)
+						&& plan.AuxPeak >= 0 && plan.AuxPeak < static_cast<int>(plan.Cells.size());
+
+					if (!isBlitz && plan.Route.empty())
+						continue;
+
+					for (const DWORD mUid : plan.Members)
+						planMemberRoutes[mUid] = { &plan, pi };
+				}
+
+				auto const& taxiState = GetLandTaxiState(pH);
+
+				for (auto const& job : taxiState.Jobs)
+				{
+					if (job.Phase == 0 && job.TaxiID != 0 && job.DropCell != CellStruct::Empty)
+						taxiDropByUid[job.TaxiID] = job.DropCell;
+				}
+			}
+
+			for (auto const pU : UnitClass::Array)
+			{
+				if (pU && pU->IsAlive && !pU->InLimbo)
+					unitCoordsByUid[pU->UniqueID] = pU->GetMapCoords();
+			}
+		}
+
 		auto objectDetail = [&](TechnoClass* pTechno, char* out, size_t outCap)
 		{
 			if (!out || outCap == 0)
@@ -1918,7 +1992,7 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 			auto const pFoot = abstract_cast<FootClass*>(pTechno);
 			const int mega = pFoot ? static_cast<int>(pFoot->MegaMission) : -1;
 			char targetText[80] = "0";
-			char destText[48] = "0";
+			char destText[480] = "0";
 
 			if (AbstractClass* const pTarget = pTechno->Target)
 			{
@@ -1936,12 +2010,206 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 			if (pFoot)
 			{
 				AbstractClass* const pDest = pFoot->Destination ? pFoot->Destination : pFoot->MegaDestination;
+				const CellStruct immCell = pDest ? CellClass::Coord2Cell(pDest->GetCoords()) : CellStruct::Empty;
 
-				if (pDest)
+				if (!withWaypoints)
 				{
-					char destCell[48];
-					projectWithCell(CellClass::Coord2Cell(pDest->GetCoords()), destCell, sizeof(destCell));
-					std::snprintf(destText, sizeof(destText), "[%s]", destCell);
+					if (pDest)
+					{
+						char destCell[48];
+						projectWithCell(immCell, destCell, sizeof(destCell));
+						std::snprintf(destText, sizeof(destText), "[%s]", destCell);
+					}
+				}
+				else
+				{
+					const DWORD uid = pFoot->UniqueID;
+					const CellStruct fromCell = pFoot->GetMapCoords();
+					const int nowFrame = Unsorted::CurrentFrame;
+					std::vector<CellStruct> rawWps;
+					rawWps.reserve(14);
+
+					if (auto const itOpTr = opTransportRoutes.find(uid); itOpTr != opTransportRoutes.end())
+					{
+						auto const* pOpTr = itOpTr->second.first;
+
+						for (auto const& wp : pOpTr->Route)
+							rawWps.push_back(wp);
+
+						if (itOpTr->second.second != CellStruct::Empty)
+							rawWps.push_back(itOpTr->second.second);
+					}
+					else if (pFoot->Owner)
+					{
+						auto const& ownMacro = GetMacroState(pFoot->Owner);
+
+						if (auto const itDep = ownMacro.DeployOrders.find(uid); itDep != ownMacro.DeployOrders.end())
+						{
+							auto const& dep = itDep->second;
+
+							if (dep.Refuge != CellStruct::Empty)
+							{
+								rawWps.push_back(dep.Refuge);
+
+								if (dep.Site != CellStruct::Empty)
+									rawWps.push_back(dep.Site);
+							}
+							else if (dep.Site != CellStruct::Empty)
+							{
+								for (auto const& wp : dep.Route)
+									rawWps.push_back(wp);
+
+								rawWps.push_back(dep.Site);
+							}
+						}
+					}
+
+					if (rawWps.empty())
+					{
+						if (auto const itPlan = planMemberRoutes.find(uid); itPlan != planMemberRoutes.end())
+						{
+							auto const* pPlan = itPlan->second.first;
+							const size_t planIdx = itPlan->second.second;
+
+							if (planIdx == static_cast<size_t>(NeuralPlanId::EdgeBlitz)
+								&& pPlan->AuxPeak >= 0 && pPlan->AuxPeak < static_cast<int>(pPlan->Cells.size()))
+							{
+								for (size_t k = static_cast<size_t>(pPlan->AuxPeak); k < pPlan->Cells.size(); ++k)
+									rawWps.push_back(pPlan->Cells[k]);
+							}
+							else
+							{
+								for (auto const& wp : pPlan->Route)
+									rawWps.push_back(wp);
+							}
+
+							if (pPlan->TargetCell != CellStruct::Empty)
+								rawWps.push_back(pPlan->TargetCell);
+						}
+					}
+
+					if (rawWps.empty())
+					{
+						if (auto const itAir = AirRoutes.find(uid); itAir != AirRoutes.end()
+							&& itAir->second.Waypoint != CellStruct::Empty && nowFrame >= itAir->second.Frame
+							&& nowFrame - itAir->second.Frame <= 900)
+						{
+							rawWps.push_back(itAir->second.Waypoint);
+							CellStruct airGoal = itAir->second.Target;
+
+							if (auto const itPick = AirPickups.find(uid); itPick != AirPickups.end()
+								&& nowFrame >= itPick->second.Frame && nowFrame - itPick->second.Frame <= 2700)
+							{
+								if (auto const itCargo = unitCoordsByUid.find(itPick->second.CargoID); itCargo != unitCoordsByUid.end())
+									airGoal = itCargo->second;
+							}
+
+							if (airGoal != CellStruct::Empty)
+								rawWps.push_back(airGoal);
+						}
+					}
+
+					if (rawWps.empty())
+					{
+						for (auto const& trip : FerryTrips)
+						{
+							if (trip.TransportID == uid && trip.RouteFrame >= 0 && nowFrame >= trip.RouteFrame && nowFrame - trip.RouteFrame <= 900 && trip.RouteWaypoint != CellStruct::Empty
+								&& trip.RouteTarget != CellStruct::Empty)
+							{
+								rawWps.push_back(trip.RouteWaypoint);
+								rawWps.push_back(trip.RouteTarget);
+								break;
+							}
+						}
+					}
+
+					if (rawWps.empty() && immCell != CellStruct::Empty)
+					{
+						if (auto const itTaxi = taxiDropByUid.find(uid); itTaxi != taxiDropByUid.end())
+						{
+							rawWps.push_back(immCell);
+							rawWps.push_back(itTaxi->second);
+						}
+					}
+
+					if (rawWps.empty() && immCell != CellStruct::Empty)
+					{
+						if (auto const itGr = TelemetryGroundRoutes.find(uid); itGr != TelemetryGroundRoutes.end()
+							&& itGr->second.MatchSerial == NeuralMatchSerial && nowFrame >= itGr->second.Frame
+							&& nowFrame - itGr->second.Frame <= 240 && immCell.DistanceFrom(itGr->second.HopCell) <= 4.5)
+						{
+							for (auto const& wp : itGr->second.Waypoints)
+								rawWps.push_back(wp);
+						}
+					}
+
+					if (rawWps.empty() && pFoot->NavQueue.Count > 0)
+					{
+						if (immCell != CellStruct::Empty)
+							rawWps.push_back(immCell);
+
+						for (int k = 0; k < pFoot->NavQueue.Count && k < 12; ++k)
+						{
+							if (auto const pNav = pFoot->NavQueue.GetItem(k))
+								rawWps.push_back(CellClass::Coord2Cell(pNav->GetCoords()));
+						}
+					}
+
+					std::vector<CellStruct> cleanWps;
+					cleanWps.reserve(12);
+
+					for (size_t wi = 0; wi < rawWps.size(); ++wi)
+					{
+						CellStruct wc = rawWps[wi];
+
+						if (wc == CellStruct::Empty || (wc.X <= 0 && wc.Y <= 0))
+							continue;
+
+						if (cleanWps.empty() && immCell != CellStruct::Empty && wc.DistanceFrom(immCell) <= 4.5)
+							wc = immCell;
+
+						const bool isLast = wi + 1 == rawWps.size();
+
+						if (!isLast && cleanWps.empty() && wc.DistanceFrom(fromCell) <= 1.8)
+							continue;
+
+						if (!cleanWps.empty() && wc.DistanceFrom(cleanWps.back()) <= 2.0)
+						{
+							if (isLast)
+								cleanWps.back() = wc;
+
+							continue;
+						}
+
+						if (cleanWps.size() < 12)
+							cleanWps.push_back(wc);
+						else if (isLast)
+							cleanWps.back() = wc;
+					}
+
+					if (cleanWps.empty() && pDest)
+						cleanWps.push_back(immCell);
+
+					if (!cleanWps.empty())
+					{
+						size_t dLen = 0;
+						destText[dLen++] = '[';
+
+						for (size_t wi = 0; wi < cleanWps.size(); ++wi)
+						{
+							char wpBuf[44];
+							projectWithCell(cleanWps[wi], wpBuf, sizeof(wpBuf));
+							const int w = std::snprintf(destText + dLen, sizeof(destText) - dLen - 2, "%s%s", wi ? "," : "", wpBuf);
+
+							if (w <= 0 || dLen + static_cast<size_t>(w) >= sizeof(destText) - 2)
+								break;
+
+							dLen += static_cast<size_t>(w);
+						}
+
+						destText[dLen++] = ']';
+						destText[dLen] = '\0';
+					}
 				}
 			}
 
@@ -2033,13 +2301,6 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 				static_cast<int>(ownCell.Y), garrison, bunkered, insideClean);
 		};
 
-		// While the map view of this slot is open, every radar point also says which houses have it
-		// in sight now and, for a building, which enemy houses remember it (house index bits). With
-		// a house chosen in the view, the sight grid of that house follows the radar.
-		const uint32_t viewRequest = TelemetryViewRequest ? TelemetryViewRequest[0] : 0u;
-		const bool withVision = viewRequest != 0u;
-		const int viewHouse = viewRequest >= 2u ? static_cast<int>(viewRequest - 2u) : -1;
-
 		if (withVision)
 			BuildTelemetrySight(*dst);
 
@@ -2055,7 +2316,7 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 			return visionBuf;
 		};
 
-		char detailBuf[336];
+		char detailBuf[832];
 		bool firstPt = true;
 		int ptCount = 0;
 
