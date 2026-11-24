@@ -1498,11 +1498,60 @@ namespace
 		return true;
 	}
 
+	// Nearest cell around `center` in `zone` where `pSensorBld` can genuinely deploy (no ore/tiberium,
+	// flat buildable ground, outside known enemy defense reach). Prevents LPST from picking ore patches
+	// or sloped ramps where it cannot unfold.
+	CellStruct FindDeployableSensorCellNear(HouseClass* pHouse, BuildingTypeClass* pSensorBld, const CellStruct& center,
+		int zone, int maxRing, UnitClass* pSelf = nullptr)
+	{
+		if (!pHouse || !pSensorBld || center == CellStruct::Empty)
+			return CellStruct::Empty;
+
+		const bool offsetTopLeft = pSensorBld->GetFoundationWidth() > 2 || pSensorBld->GetFoundationHeight(false) > 2;
+
+		for (int r = 0; r <= maxRing; ++r)
+		{
+			for (int dy = -r; dy <= r; ++dy)
+			{
+				for (int dx = -r; dx <= r; ++dx)
+				{
+					if (std::max(std::abs(dx), std::abs(dy)) != r)
+						continue;
+
+					const CellStruct cand { static_cast<short>(center.X + dx), static_cast<short>(center.Y + dy) };
+
+					if (!IsScoutableCell(cand))
+						continue;
+
+					auto const pCell = MapClass::Instance.TryGetCellAt(cand);
+
+					if (!pCell || pCell->LandType == LandType::Water || pCell->GetContainedTiberiumIndex() >= 0
+						|| pCell->SlopeIndex != 0 || pCell->GetBuilding() != nullptr
+						|| MapClass::Instance.GetMovementZoneType(cand, MovementZone::Normal, false) != zone
+						|| IsCellInKnownEnemyDefenseReach(pHouse, cand, 2))
+					{
+						continue;
+					}
+
+					const CellStruct topLeft = offsetTopLeft ? (cand + CellStruct { -1, -1 }) : cand;
+					UnitExt::Deployer = pSelf;
+					const bool canCreate = pSensorBld->CanCreateHere(topLeft, pHouse);
+					UnitExt::Deployer = nullptr;
+
+					if (canCreate)
+						return cand;
+				}
+			}
+		}
+
+		return CellStruct::Empty;
+	}
+
 	// Where a sensor array of this sensor radius, unfolded in the given movement zone, covers the most
 	// playable ground no sensor of ours covers: places of a ScoutSweepStepCells grid in that zone, out
-	// of known enemy defense reach and away from the lookouts in taken, by the uncovered samples
-	// (every 5 cells) less a cell per 2 of the way from `from`. Empty when none covers 8 samples.
-	CellStruct FindSensorLookout(HouseClass* pHouse, const CellStruct& from, int zone, int radius, const std::vector<CellStruct>& taken)
+	// of known enemy defense reach and away from the lookouts in taken, snapped to a deployable cell.
+	CellStruct FindSensorLookout(HouseClass* pHouse, BuildingTypeClass* pSensorBld, const CellStruct& from, int zone,
+		int radius, const std::vector<CellStruct>& taken)
 	{
 		const unsigned int houseIdx = static_cast<unsigned int>(pHouse->ArrayIndex);
 		CellStruct best = CellStruct::Empty;
@@ -1512,16 +1561,24 @@ namespace
 		{
 			for (int x = ScoutSweepStepCells / 2; x < VisionMapSide; x += ScoutSweepStepCells)
 			{
-				const CellStruct cell { static_cast<short>(x), static_cast<short>(y) };
+				const CellStruct rawCell { static_cast<short>(x), static_cast<short>(y) };
 
-				if (!IsScoutableCell(cell))
+				if (!IsScoutableCell(rawCell))
 					continue;
 
-				auto const pCell = MapClass::Instance.TryGetCellAt(cell);
+				auto const pRawCell = MapClass::Instance.TryGetCellAt(rawCell);
 
-				if (!pCell || pCell->LandType == LandType::Water
-					|| MapClass::Instance.GetMovementZoneType(cell, MovementZone::Normal, false) != zone
-					|| IsCellInKnownEnemyDefenseReach(pHouse, cell, 2)
+				if (!pRawCell || pRawCell->LandType == LandType::Water
+					|| MapClass::Instance.GetMovementZoneType(rawCell, MovementZone::Normal, false) != zone
+					|| IsCellInKnownEnemyDefenseReach(pHouse, rawCell, 2)
+					|| std::any_of(taken.begin(), taken.end(), [&rawCell, radius](const CellStruct& spot) { return spot.DistanceFrom(rawCell) < radius; }))
+				{
+					continue;
+				}
+
+				const CellStruct cell = pSensorBld ? FindDeployableSensorCellNear(pHouse, pSensorBld, rawCell, zone, 5) : rawCell;
+
+				if (cell == CellStruct::Empty
 					|| std::any_of(taken.begin(), taken.end(), [&cell, radius](const CellStruct& spot) { return spot.DistanceFrom(cell) < radius; }))
 				{
 					continue;
@@ -1536,7 +1593,7 @@ namespace
 						if (dx * dx + dy * dy > radius * radius)
 							continue;
 
-						const CellStruct sample { static_cast<short>(x + dx), static_cast<short>(y + dy) };
+						const CellStruct sample { static_cast<short>(cell.X + dx), static_cast<short>(cell.Y + dy) };
 						auto const pSample = IsScoutableCell(sample) ? MapClass::Instance.TryGetCellAt(sample) : nullptr;
 
 						if (pSample && !pSample->Sensors_InclHouse(houseIdx))
@@ -1558,12 +1615,9 @@ namespace
 	}
 
 	// Sensor lookouts (SensorLookoutMinSight), every scouting update: a mobile sensor array on its way
-	// unfolds once there (or stopped within 8 cells), is sent on again when stopped short and given up
-	// after SensorLookoutLateFrames. Every ScoutSweepEveryFrames an idle one goes where enemy stealth
-	// units were seen lately and no sensor of ours covers, else (no enemy in sight) to the best
-	// lookout; an unfolded one packs up for such a place SensorLookoutMinMoveCells or more away after
-	// SensorLookoutDwellFrames with no enemy in sight, or after ScoutSweepEveryFrames x 2 for a
-	// stealth sighting no sensor of ours covers.
+	// unfolds once there (or steps onto the nearest deployable cell free of ore/slopes), and an idle
+	// packed sensor vehicle ALWAYS deploys at a useful forward/lookout spot even while enemies are in
+	// sight elsewhere on the map (whereas already-deployed arrays stay put while enemies are in sight).
 	void UpdateSensorLookouts(HouseClass* pHouse, NeuralScoutState& state, bool enemyInSight)
 	{
 		auto& macro = GetMacroState(pHouse);
@@ -1571,7 +1625,7 @@ namespace
 		const int houseIdx = pHouse->ArrayIndex;
 		std::vector<NeuralSensorTrip> keep;
 
-		for (auto const& trip : state.SensorTrips)
+		for (auto trip : state.SensorTrips)
 		{
 			auto const pUnit = abstract_cast<UnitClass*>(FindOwnFootByID(pHouse, trip.ID));
 
@@ -1581,7 +1635,8 @@ namespace
 			const double dist = pUnit->GetMapCoords().DistanceFrom(trip.Target);
 			const bool moving = pUnit->CurrentMission == Mission::Move || pUnit->QueuedMission == Mission::Move;
 
-			if (pUnit->IsDeploying || pUnit->CurrentMission == Mission::Unload)
+			if (pUnit->IsDeploying || pUnit->CurrentMission == Mission::Unload || pUnit->QueuedMission == Mission::Unload
+				|| pUnit->PrimaryFacing.IsRotating())
 			{
 				macro.PlanMembers.insert(trip.ID);
 				keep.push_back(trip);
@@ -1590,7 +1645,8 @@ namespace
 
 			const bool there = dist <= 3.0 || (!moving && dist <= 8.0);
 
-			if (there && UnitExt::CanDeployIntoBuilding(pUnit))
+			if (there && UnitExt::CanDeployIntoBuilding(pUnit)
+				&& pUnit->GetCell() && pUnit->GetCell()->GetContainedTiberiumIndex() < 0)
 			{
 				// UnitClass::TryToDeploy gives up while the unit has a destination.
 				pUnit->SetDestination(nullptr, true);
@@ -1608,9 +1664,21 @@ namespace
 			}
 			else if (there)
 			{
-				// No room to unfold here: it steps aside and tries again.
-				if (!moving)
+				// Arrived on ore, a ramp, or a blocked cell: move directly to the nearest clean deployable cell!
+				const int uZone = ObjectZone(pUnit, MovementZone::Normal);
+				const CellStruct cleanSpot = FindDeployableSensorCellNear(pHouse, pUnit->Type->DeploysInto,
+					pUnit->GetMapCoords(), uZone, 10, pUnit);
+
+				if (cleanSpot != CellStruct::Empty && cleanSpot != pUnit->GetMapCoords())
+				{
+					trip.Target = cleanSpot;
+					if (auto const pCleanCell = MapClass::Instance.TryGetCellAt(cleanSpot))
+						OrderScoutMove(pUnit, pCleanCell, false);
+				}
+				else if (!moving)
+				{
 					pUnit->Scatter(CoordStruct::Empty, true, false);
+				}
 			}
 			else if (!moving)
 			{
@@ -1653,9 +1721,6 @@ namespace
 			}
 		}
 
-		if (enemyInSight && stealthCell == CellStruct::Empty)
-			return;
-
 		const CellStruct home = GetHouseHomeCell(pHouse);
 		std::vector<CellStruct> taken;
 
@@ -1663,8 +1728,10 @@ namespace
 			taken.push_back(trip.Target);
 
 		// Where a sensor array at `from` in `zone` goes next: the stealth sighting (out of known defense
-		// reach), else with no enemy in sight the best lookout.
-		auto nextLookout = [&](const CellStruct& from, int zone, int radius, bool& forStealth) -> CellStruct
+		// reach), else for an idle packed vehicle a safe forward frontline post or best lookout (for an
+		// already-deployed building, stay put while enemies are in sight unless stealthCell needs cover).
+		auto nextLookout = [&](BuildingTypeClass* pSensorBld, const CellStruct& from, int zone, int radius,
+			bool isPackedVehicle, UnitClass* pSelf, bool& forStealth) -> CellStruct
 		{
 			forStealth = false;
 
@@ -1675,15 +1742,49 @@ namespace
 
 				if (look != CellStruct::Empty)
 				{
-					if (auto const pLand = ScoutLandCellInZone(look, zone, 6))
+					const CellStruct dep = FindDeployableSensorCellNear(pHouse, pSensorBld, look, zone, 8, pSelf);
+
+					if (dep != CellStruct::Empty)
 					{
 						forStealth = true;
-						return pLand->MapCoords;
+						return dep;
 					}
 				}
 			}
 
-			return enemyInSight ? CellStruct::Empty : FindSensorLookout(pHouse, from, zone, radius, taken);
+			if (enemyInSight && !isPackedVehicle)
+				return CellStruct::Empty;
+
+			if (isPackedVehicle && macro.FrontlineThreatCoords != CellStruct::Empty)
+			{
+				const CellStruct frontLook = ScoutStandoffCell(pHouse, macro.FrontlineThreatCoords, home == CellStruct::Empty ? from : home);
+
+				if (frontLook != CellStruct::Empty)
+				{
+					const CellStruct dep = FindDeployableSensorCellNear(pHouse, pSensorBld, frontLook, zone, 8, pSelf);
+
+					if (dep != CellStruct::Empty)
+					{
+						auto const pDepCell = MapClass::Instance.TryGetCellAt(dep);
+
+						if (pDepCell && !pDepCell->Sensors_InclHouse(static_cast<unsigned int>(houseIdx))
+							&& std::none_of(taken.begin(), taken.end(), [&dep, radius](const CellStruct& spot) { return spot.DistanceFrom(dep) < radius / 2; }))
+						{
+							return dep;
+						}
+					}
+				}
+			}
+
+			CellStruct best = FindSensorLookout(pHouse, pSensorBld, from, zone, radius, taken);
+
+			if (best == CellStruct::Empty && isPackedVehicle)
+			{
+				// Never leave a packed LPST sitting uselessly as a vehicle: unfold at the nearest clean cell!
+				best = FindDeployableSensorCellNear(pHouse, pSensorBld, from, zone, 10, pSelf);
+			}
+
+			return best;
 		};
 
 		// Unfolded ones: the frame each was first seen standing.
@@ -1712,7 +1813,7 @@ namespace
 			const int zone = MapClass::Instance.GetMovementZoneType(here, MovementZone::Normal, pBld->OnBridge);
 			const int radius = std::max(1, static_cast<int>(pBld->Type->SensorsSight));
 			bool forStealth = false;
-			const CellStruct next = nextLookout(here, zone, radius, forStealth);
+			const CellStruct next = nextLookout(pBld->Type, here, zone, radius, false, nullptr, forStealth);
 
 			if (next == CellStruct::Empty || next.DistanceFrom(here) < SensorLookoutMinMoveCells
 				|| now - since < (forStealth ? 2 * ScoutSweepEveryFrames : SensorLookoutDwellFrames))
@@ -1733,7 +1834,7 @@ namespace
 		std::sort(stands.begin(), stands.end());
 		state.SensorStands = std::move(stands);
 
-		// Idle mobile ones go to the next lookout.
+		// Idle mobile ones ALWAYS find a deployable lookout (even when enemyInSight == true!).
 		for (auto const pUnit : UnitClass::Array)
 		{
 			if (!pUnit || pUnit->Owner != pHouse || !pUnit->IsAlive || pUnit->InLimbo || !IsSensorLookoutType(pUnit->Type)
@@ -1753,7 +1854,7 @@ namespace
 			const CellStruct from = pUnit->GetMapCoords();
 			const int radius = std::max(1, static_cast<int>(pUnit->Type->DeploysInto->SensorsSight));
 			bool forStealth = false;
-			const CellStruct next = nextLookout(from, zone, radius, forStealth);
+			const CellStruct next = nextLookout(pUnit->Type->DeploysInto, from, zone, radius, true, pUnit, forStealth);
 			auto const pNext = next != CellStruct::Empty ? MapClass::Instance.TryGetCellAt(next) : nullptr;
 
 			if (!pNext)
