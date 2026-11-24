@@ -15267,8 +15267,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		auto addFerryDemand = [&](const FootClass* pFoot)
 		{
-			if (!pFoot || pFoot->InLimbo || !pFoot->IsAlive || CanFootCrossWaterDirectly(pFoot))
+			if (!pFoot || pFoot->InLimbo || !pFoot->IsAlive || CanFootCrossWaterDirectly(pFoot)
+				|| IsInTransportOp(pHouse, pFoot->UniqueID))
+			{
 				return;
+			}
 
 			auto const pFootType = pFoot->GetTechnoType();
 			if (!pFootType || IsAmphibiousOrAirTransport(pFootType))

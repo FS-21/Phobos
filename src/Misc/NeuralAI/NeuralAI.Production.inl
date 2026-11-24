@@ -5144,6 +5144,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	int bestTankIdx = -1;
 	int bestTankScore = -32000;
 	bool bestUnitRestoresIncome = false;
+	bool bestUnitAnswersFerryDemand = false;
 	// The light complement (LightComplement*): the best scored armed light vehicle.
 	int bestLightIdx = -1;
 	int bestLightScore = -32000;
@@ -5223,6 +5224,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	int ownedTransCountByLimit[16] = { 0 };
 	int ownedTransCapByLimit[16] = { 0 };
 	int ownedIdleEmptyTransByLimit[16] = { 0 };
+	int ownedNonNavalIdleEmptyByLimit[16] = { 0 };
+	int ownedNavalParkedCountByLimit[16] = { 0 };
+	int ownedNavalParkedCapByLimit[16] = { 0 };
 	int ownedNavalOrAmphibCombatUnits = 0;
 	int ownedGroundCombatUnits = 0;
 	// Main battle tanks alive (IsMainBattleTankType), for the tank floor (TankFloor*).
@@ -5404,7 +5408,19 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				}
 
 				if (isParkedEmpty)
+				{
 					ownedIdleEmptyTransByLimit[effLimit]++;
+
+					if (pOwnedType->Naval)
+					{
+						ownedNavalParkedCountByLimit[effLimit]++;
+						ownedNavalParkedCapByLimit[effLimit] += std::max(0, passCap);
+					}
+					else
+					{
+						ownedNonNavalIdleEmptyByLimit[effLimit]++;
+					}
+				}
 
 				if (!pOwnedType->Naval && IsAmphibiousOrAirTransport(pOwnedType))
 				{
@@ -6140,15 +6156,25 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 		int fittingDemandSize = 0;
 		int unfitDemandSize = 0;
+		int maxFittingWaitSize = 1;
 
 		for (int size = 1; size <= 15; ++size)
 		{
 			if (size <= candSizeLimit)
+			{
 				fittingDemandSize += waitingSizeByUnitSize[size];
+
+				if (waitingSizeByUnitSize[size] > 0)
+					maxFittingWaitSize = size;
+			}
 			else
+			{
 				unfitDemandSize += waitingSizeByUnitSize[size];
+			}
 		}
 
+		const bool candIsNavalShip = pCandidate->WhatAmI() == AbstractType::UnitType
+			&& static_cast<const UnitTypeClass*>(pCandidate)->Naval;
 		int ownedForLimit = 0;
 		int ownedCapForLimit = 0;
 		int idleEmptyForLimit = 0;
@@ -6157,7 +6183,15 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		{
 			ownedForLimit += ownedTransCountByLimit[lim];
 			ownedCapForLimit += ownedTransCapByLimit[lim];
-			idleEmptyForLimit += ownedIdleEmptyTransByLimit[lim];
+			idleEmptyForLimit += candIsNavalShip ? ownedIdleEmptyTransByLimit[lim] : ownedNonNavalIdleEmptyByLimit[lim];
+
+			// A sea-bound naval ship parked empty outside every transport operation while cargo waits cannot
+			// reach that cargo's shoreline; never let it block or satisfy amphibious/air transport demand.
+			if (!candIsNavalShip && fittingDemandSize > 0)
+			{
+				ownedForLimit = std::max(0, ownedForLimit - ownedNavalParkedCountByLimit[lim]);
+				ownedCapForLimit = std::max(0, ownedCapForLimit - ownedNavalParkedCapByLimit[lim]);
+			}
 		}
 
 		// A compatible transport already being built in the other factory counts as owned.
@@ -6197,15 +6231,71 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		// What keeps it from spamming is reuse: while a transport of this size sits empty and idle
 		// nothing new is built (below), and the transport controller gives it the waiting cargo. An
 		// island map keeps one at least.
-		const int loadsPerTransport = candPassCap * OpTripsPlanned;
-		const int neededForDemand = (fittingDemandSize + loadsPerTransport - 1) / loadsPerTransport;
+		const int standardLoadsPerTransport = candPassCap * OpTripsPlanned;
+		const int twoTripNeeded = (fittingDemandSize + standardLoadsPerTransport - 1) / standardLoadsPerTransport;
+		const int richLoadsPerTransport = (money >= 18000 && fittingDemandSize >= candPassCap * 4)
+			? std::max(1, (candPassCap * 3 + 1) / 2)
+			: standardLoadsPerTransport;
+		const int neededForDemand = std::min(twoTripNeeded + 10,
+			(fittingDemandSize + richLoadsPerTransport - 1) / richLoadsPerTransport);
 		const int targetFleet = isIslandWar ? std::max(1, neededForDemand)
 			: (neededForDemand > 0 ? neededForDemand : (isIslandMap ? 1 : 0));
 		const bool needsHeavyMcvTransport = candSizeLimit >= 6 && ownedHeavyIslandTransports == 0
 			&& !compatibleHeavyInProgress && (isIslandMap || scores[30] >= 450 || islandOreRunningOut);
-		// The kind of transport by the danger of the crossings waiting for one (user): a ship scores lower
-		// under a sea of warships, a flyer under heavy anti-air, a burrower never.
-		const int crossingPenalty = OpCrossingDangerPenalty(pHouse, pCandidate);
+
+		// Apply crossing danger penalty only when this house can actually build a safer alternative
+		// transport capable of carrying the waiting cargo; never choke off the sole heavy transport.
+		const int rawCrossingPenalty = OpCrossingDangerPenalty(pHouse, pCandidate);
+		int crossingPenalty = 0;
+
+		if (rawCrossingPenalty > 0)
+		{
+			const int reqAltLimit = needsHeavyMcvTransport ? 6 : maxFittingWaitSize;
+			bool saferAltBuildable = false;
+
+			auto checkAlt = [&](TechnoTypeClass* pAlt)
+			{
+				if (!pAlt || pAlt == pCandidate || pAlt->Passengers <= 0 || !CanBuildUnderHumanRules(pHouse, pAlt))
+					return false;
+
+				auto const pAltExt = TechnoTypeExt::Fetch(pAlt);
+				const bool altCarryall = pAlt->WhatAmI() == AbstractType::UnitType && pAltExt && pAltExt->Carryall;
+
+				if (!IsAmphibiousOrAirTransport(pAlt) && !(pAltExt && pAltExt->Carryall))
+					return false;
+
+				const int altLimit = altCarryall ? static_cast<int>(pAlt->SizeLimit) : getTransportEffectiveSizeLimit(pAlt);
+
+				if (altLimit < reqAltLimit)
+					return false;
+
+				return OpCrossingDangerPenalty(pHouse, pAlt) + 150 < rawCrossingPenalty;
+			};
+
+			for (auto const pAltU : UnitTypeClass::Array)
+			{
+				if (checkAlt(pAltU))
+				{
+					saferAltBuildable = true;
+					break;
+				}
+			}
+
+			if (!saferAltBuildable)
+			{
+				for (auto const pAltA : AircraftTypeClass::Array)
+				{
+					if (checkAlt(pAltA))
+					{
+						saferAltBuildable = true;
+						break;
+					}
+				}
+			}
+
+			if (saferAltBuildable)
+				crossingPenalty = rawCrossingPenalty;
+		}
 
 		if (needsHeavyMcvTransport)
 			return scores[28] + 2200 - crossingPenalty;
@@ -6256,11 +6346,19 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		int ferryScore = -900;
 
 		if (ownedForLimit >= targetFleet || (idleEmptyForLimit > 0 && !fleetFarShort))
+		{
 			ferryScore = -1500;
+		}
 		else if (ownedForLimit == 0)
-			ferryScore = std::max(static_cast<int>(scores[28]), 0) + (fittingDemandSize > 0 ? 1100 : 600) - crossingPenalty;
-		else if (fittingDemandSize > ownedCapForLimit * OpTripsPlanned)
-			ferryScore = std::max(static_cast<int>(scores[28]), 0) + 900 - crossingPenalty;
+		{
+			ferryScore = std::max(static_cast<int>(scores[28]), 0) + (fittingDemandSize > 0 ? 1500 : 700) - crossingPenalty;
+		}
+		else
+		{
+			const int unservedSize = std::max(0, fittingDemandSize - ownedCapForLimit);
+			const int backlogBonus = std::min(900, unservedSize * 4);
+			ferryScore = std::max(static_cast<int>(scores[28]), 0) + 1250 + backlogBonus - crossingPenalty;
+		}
 
 		if (fittingDemandSize > 0 && IsAITickWindow(900, 0))
 		{
@@ -6406,7 +6504,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	const int baseTankFloor = std::min(TankFloorMost, std::max(TankFloorMin
 		+ std::clamp(trueRefineries - TankFloorRefineries, 0, TankFloorEconomyMost), ownedGroundCombatUnits / TankFloorShare)
 		+ ownedArtilleryVehicles + ownedEscortedAntiAirVehicles + ownedEscortedSupportVehicles);
-	const int macroBankTankSurge = (money >= 15000 || GetMacroState(pHouse).BankSurplus > 0)
+	const bool homeIslandArmyBacklog = features[21] > 0
+		&& waitingBattalionSizeOnIslands > ownedTransportTotalCapacity + 8;
+	const int macroBankTankSurge = (!homeIslandArmyBacklog && (money >= 15000 || GetMacroState(pHouse).BankSurplus > 0))
 		? std::min(26, std::max(0, money - 12000) / 3500 + std::max(0, pHouse->NumWarFactories - 2) * 2)
 		: 0;
 	const int tankFloor = baseTankFloor + macroBankTankSurge;
@@ -6784,12 +6884,16 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				// A transport the demand rules reject is not a candidate at all: otherwise the
 				// queue keeps building it whenever nothing else scores higher (e.g. no buildable
 				// warship), producing whole fleets of unneeded transports.
-				const int ferryDelta = std::max({ scoreFerryTransport(pUnit), raidTransportBonus(pUnit), crossingNeedBonus(pUnit) });
+				const int ferryDemandScore = scoreFerryTransport(pUnit);
+				const int ferryDelta = std::max({ ferryDemandScore, raidTransportBonus(pUnit), crossingNeedBonus(pUnit) });
 
 				if (ferryDelta <= -900)
 					continue;
 
 				score += ferryDelta;
+
+				if (ferryDemandScore > 0)
+					score += std::min(1200, ownedUnitWithConv * 55);
 
 				// With the sea ours, a transport the ferry demand wants carries the war to the island.
 				if (seaControlAcross && ferryDelta > 0)
@@ -6867,6 +6971,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			// A transport carries two or more, has no weapon or is a Carryall: an armed vehicle with one seat
 			// (the IFV gunner, the Venom and Avatar passenger hacks) scores by its combat role (user: the
 			// transport class, the heaviest of the war factory, went mostly to VENOM, FV and HTK).
+			bool isNeededIslandFerry = false;
 			const bool isTransportClass = (pUnit->Passengers > 0 && !isMainTank && (pUnit->Passengers >= 2 || pWpn == nullptr))
 				|| (TechnoTypeExt::Fetch(pUnit) && TechnoTypeExt::Fetch(pUnit)->Carryall);
 			const int diagPreClass = score;
@@ -6921,12 +7026,21 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				}
 				else
 				{
-					const int ferryDelta = std::max({ scoreFerryTransport(pUnit), raidTransportBonus(pUnit), crossingNeedBonus(pUnit) });
+					const int ferryDemandScore = scoreFerryTransport(pUnit);
+					const int crossingBonusScore = crossingNeedBonus(pUnit);
+					const int ferryDelta = std::max({ ferryDemandScore, raidTransportBonus(pUnit), crossingBonusScore });
 
 					if (ferryDelta <= -900)
 						continue; // Not needed: never built just because nothing else scores higher.
 
 					score += ferryDelta;
+
+					if (ferryDemandScore > 0 || crossingBonusScore > 0)
+					{
+						score += std::min(1200, ownedUnitWithConv * 55);
+						isNeededIslandFerry = waitingBattalionSizeOnIslands > ownedTransportTotalCapacity
+							|| ownedAmphibTransports == 0 || crossingBonusScore > 0;
+					}
 				}
 			}
 			else if (isUnarmedSupportVehicle)
@@ -7097,6 +7211,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 				bestUnitIdx = pUnit->ArrayIndex;
 				bestUnitRestoresIncome = isEconomyUnit || isMCV || isIncomeRecoveryUnit;
+				bestUnitAnswersFerryDemand = isNeededIslandFerry;
 			}
 
 			if (isMainTank && score > bestTankScore)
@@ -7179,11 +7294,12 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			&& (pickedCounter >= 550 || (pExt->NeuralAI_ActiveExpert == 2 && pickedCounter >= 320));
 		const bool airAttackOnly = GetMacroState(pHouse).CounterUnderAttack && !GetMacroState(pHouse).CounterUnderGroundAttack;
 		const bool floorTakes = belowFloor && bestTankIdx >= 0 && bestUnitIdx != bestTankIdx && hasActiveUnitIncome
-			&& !bestUnitRestoresIncome && !airAttackOnly && !counterOverridesFloor;
+			&& !bestUnitRestoresIncome && !bestUnitAnswersFerryDemand && !airAttackOnly && !counterOverridesFloor;
 		const char* floorWhy = !belowFloor ? "" : (floorTakes ? ", the tank goes first"
 			: (bestTankIdx < 0 ? ", kept: no tank to build" : (bestUnitIdx == bestTankIdx ? ", the pick is a tank"
 				: (!hasActiveUnitIncome ? ", kept: no income" : (bestUnitRestoresIncome ? ", kept: the pick restores the income"
-					: (counterOverridesFloor ? ", kept: strong counter pick" : ", kept: under air attack"))))));
+					: (bestUnitAnswersFerryDemand ? ", kept: island ferry demand"
+						: (counterOverridesFloor ? ", kept: strong counter pick" : ", kept: under air attack")))))));
 
 		// TEMP diagnostic: the floor, the tanks alive and what the floor did, with the vehicle pick line.
 		if (logUnitPicks)
@@ -7225,7 +7341,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		const bool newestIsTank = newestTankOrLightUid != 0 && !newestTankOrLightIsLight && !newestTankOrLightIsRepairer;
 		const bool lightTurn = !belowFloor || newestIsTank;
 		const bool lightTakes = belowLight && lightTurn && bestLightIdx >= 0 && bestUnitIdx != bestLightIdx && hasActiveUnitIncome
-			&& !bestUnitRestoresIncome && !airAttackOnly;
+			&& !bestUnitRestoresIncome && !bestUnitAnswersFerryDemand && !airAttackOnly;
 
 		// TEMP diagnostic: the light complement, with the vehicle pick line.
 		if (logUnitPicks && belowLight)
@@ -7239,7 +7355,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					: (!lightTurn ? ", kept: below the tank floor, the newest was a light vehicle"
 					: (bestLightIdx < 0 ? ", kept: no light vehicle to build" : (bestUnitIdx == bestLightIdx ? ", the pick is a light vehicle"
 						: (!hasActiveUnitIncome ? ", kept: no income" : (bestUnitRestoresIncome ? ", kept: the pick restores the income"
-							: ", kept: under air attack"))))));
+							: (bestUnitAnswersFerryDemand ? ", kept: island ferry demand" : ", kept: under air attack")))))));
 		}
 
 		if (lightTakes)
@@ -7259,7 +7375,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			&& (ownedRepairerVehicles + 1) * RepairerPerVehicles <= armedNonRepairers;
 		const bool repairerTurn = belowFloor ? newestIsTank : !newestTankOrLightIsRepairer;
 		const bool repairerTakes = belowRepairers && !lightTakes && repairerTurn && bestRepairerIdx >= 0 && bestUnitIdx != bestRepairerIdx
-			&& hasActiveUnitIncome && !bestUnitRestoresIncome && !airAttackOnly;
+			&& !bestUnitRestoresIncome && !bestUnitAnswersFerryDemand && hasActiveUnitIncome && !airAttackOnly;
 
 		// TEMP diagnostic: the repairer complement, with the vehicle pick line.
 		if (logUnitPicks && belowRepairers)
@@ -7273,7 +7389,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					: (lightTakes ? ", kept: the light vehicle's turn" : (!repairerTurn ? ", kept: not its turn"
 					: (bestRepairerIdx < 0 ? ", kept: no repairer to build" : (bestUnitIdx == bestRepairerIdx ? ", the pick is a repairer"
 						: (!hasActiveUnitIncome ? ", kept: no income" : (bestUnitRestoresIncome ? ", kept: the pick restores the income"
-							: ", kept: under air attack")))))));
+							: (bestUnitAnswersFerryDemand ? ", kept: island ferry demand" : ", kept: under air attack"))))))));
 		}
 
 		if (repairerTakes)
