@@ -1969,6 +1969,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		// is remembered for the pick after the loop.
 		const int airDocksFloor = houseDifficulty >= 2 ? AirDocksFloorEasy : (houseDifficulty == 1 ? AirDocksFloorNormal : AirDocksFloorHard);
 		const bool airDocksBelowFloor = pHouse->AirportDocks < airDocksFloor;
+		const int softAirDockTaperStart = airSpecialist ? 24 : 22;
 		int bestPriorityAirfieldIdx = -1;
 		int bestPriorityAirfieldScore = -32000;
 
@@ -4125,11 +4126,20 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				}
 				else
 				{
-					// The docks below the floor carry no penalty for the airfields already owned.
-					score = scores[8] - (airDocksBelowFloor ? 0 : owned * 750)
-						+ ((expert8NeedsMoreAirpadDocks || airDockWanted || airDocksShort) ? 850 : 0);
+					// Penalize by total AirportDocks (fair across 1-dock helipads and 4-dock airfields) with a
+					// gradual priority taper past 22-24 docks that lowers priority without ever blocking demand.
+					const int curDocks = pHouse->AirportDocks;
+					const int dockPenalty = airDocksBelowFloor
+						? 0
+						: (curDocks <= softAirDockTaperStart
+							? std::max(0, curDocks - airDocksFloor) * 35
+							: std::min(1550, (softAirDockTaperStart - airDocksFloor) * 35 + (curDocks - softAirDockTaperStart) * 65));
+					const int dockDemandBonus = (expert8NeedsMoreAirpadDocks || airDockWanted || airDocksShort)
+						? (1250 + (airSpecialist ? 300 : 0))
+						: 0;
+					score = scores[8] - dockPenalty + dockDemandBonus;
 
-					if (ownedAirpads < maxEnemyAirpads && hasTechCenter && money >= 2000)
+					if (ownedAirpads < maxEnemyAirpads && hasTechCenter && money >= 2000 && curDocks < softAirDockTaperStart)
 						score += 350;
 				}
 
@@ -4649,9 +4659,11 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				awaitedRefineryIdx = pBld->ArrayIndex;
 			}
 
-			// An airfield for the docks every house keeps or for a full set of docks (AirDocksFloor*).
+			// Hard priority override applies below the floor or while docks are full below the 22-24 soft
+			// threshold; beyond 22-24 docks, extra hangars still build by demand via their tapered score.
 			if (pBld->Factory == AbstractType::AircraftType && hasCoreEconomyAndProduction
-				&& (airDocksBelowFloor || (underAirDockCeiling && airDocksFull && pHouse->NumAirpads >= 1))
+				&& (airDocksBelowFloor
+					|| (underAirDockCeiling && airDocksFull && pHouse->NumAirpads >= 1 && pHouse->AirportDocks < softAirDockTaperStart))
 				&& score > bestPriorityAirfieldScore)
 			{
 				bestPriorityAirfieldScore = score;
