@@ -586,6 +586,30 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	// Headless training trajectory step recorder (zero memory and zero work outside -TRAIN_HEADLESS).
 	if (NeuralAI::HeadlessMode && TrajectoryView && pHouse->ArrayIndex >= 0 && pHouse->ArrayIndex < 8)
 	{
+		struct TrajPending
+		{
+			bool Valid { false };
+			uint32_t Frame { 0 };
+			uint8_t Expert { 0 };
+			uint8_t Archetype { 0 };
+			uint16_t PoolMask { 1u };
+			uint8_t BestExpert { 0 };
+			uint8_t RoutingFlags { 0 };
+			std::array<int8_t, 256> Features {};
+		};
+
+		struct TrajWindowAccum
+		{
+			uint8_t WindowTicks { 0 };
+			uint8_t ExpertOffTicks { 0 };
+			uint8_t PickCount { 0 };
+			uint8_t PicksDropped { 0 };
+			std::array<AITrajectoryPick, 8> Picks {};
+		};
+
+		static std::array<TrajPending, 8> pending {};
+		static std::array<TrajWindowAccum, 8> windowAccum {};
+		static std::array<std::vector<DWORD>, 8> prevFactoryObjects {};
 		static std::array<int, 8> lastTrajFrame {};
 		static std::array<int, 8> lastKilledScore {};
 		static std::array<int, 8> lastLostUnits {};
@@ -598,15 +622,17 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		static std::array<int, 8> lastInfiltrations {};
 		static std::array<int, 8> lastExpKept {};
 		static std::array<int, 8> lastExpSwitched {};
-		static std::array<uint32_t, 8> lastAirliftEvents {};
-		static std::array<std::array<uint32_t, 31>, 8> lastGateOpen {};
-		static std::array<std::array<uint32_t, 31>, 8> lastGateClosed {};
 		static int trajTrackSerial = -1;
-
 
 		if (trajTrackSerial != NeuralMatchSerial)
 		{
 			trajTrackSerial = NeuralMatchSerial;
+			pending.fill(TrajPending {});
+			windowAccum.fill(TrajWindowAccum {});
+
+			for (auto& objs : prevFactoryObjects)
+				objs.clear();
+
 			lastTrajFrame.fill(-1000);
 			lastKilledScore.fill(0);
 			lastLostUnits.fill(0);
@@ -619,20 +645,147 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			lastInfiltrations.fill(0);
 			lastExpKept.fill(0);
 			lastExpSwitched.fill(0);
-			lastAirliftEvents.fill(0);
-			lastGateOpen = {};
-			lastGateClosed = {};
 		}
 
 		const int hIdx = pHouse->ArrayIndex;
 		const int nowFrame = Unsorted::CurrentFrame;
+		auto& win = windowAccum[hIdx];
+
+		// Detect production starts since the previous AI tick of this house and attach the evaluation that ordered them.
+		{
+			std::vector<DWORD> currentObjects;
+			auto const& prevObjects = prevFactoryObjects[hIdx];
+
+			for (auto const pFac : FactoryClass::Array)
+			{
+				if (!pFac || pFac->Owner != pHouse || !pFac->Object)
+					continue;
+
+				const DWORD uid = pFac->Object->UniqueID;
+				currentObjects.push_back(uid);
+
+				if (std::find(prevObjects.begin(), prevObjects.end(), uid) != prevObjects.end())
+					continue;
+
+				auto const pObjType = pFac->Object->GetTechnoType();
+
+				if (!pObjType)
+					continue;
+
+				int queue = -1;
+
+				switch (pFac->Object->WhatAmI())
+				{
+				case AbstractType::Building:
+					queue = 0;
+					break;
+				case AbstractType::Infantry:
+					queue = 1;
+					break;
+				case AbstractType::Unit:
+					queue = static_cast<UnitTypeClass*>(pObjType)->Naval ? 3 : 2;
+					break;
+				case AbstractType::Aircraft:
+					queue = 4;
+					break;
+				default:
+					break;
+				}
+
+				if (queue < 0)
+					continue;
+
+				auto const& eval = PickEvals[hIdx][queue];
+
+				if (!eval.Valid)
+					continue;
+
+				const int startedIdx = pObjType->GetArrayIndex();
+				int winner = -1;
+				int best = -1;
+				int bestTotal = INT_MIN;
+
+				for (int c = 0; c < 40; ++c)
+				{
+					if (eval.BestTotal[c] > INT_MIN && eval.BestType[c] == startedIdx)
+						winner = c;
+
+					if (eval.BestTotal[c] > bestTotal)
+					{
+						bestTotal = eval.BestTotal[c];
+						best = c;
+					}
+				}
+
+				if (winner >= 0 && eval.BestTotal[winner] == bestTotal)
+					best = winner;
+
+				AITrajectoryPick pick {};
+				pick.Queue = static_cast<uint8_t>(queue);
+				pick.Expert = eval.Expert;
+				pick.Reserved = 0;
+
+				if (winner < 0)
+				{
+					pick.Flags = TrajPickFlag::NoClass;
+					pick.WinnerSlot = -1;
+					pick.RunnerSlot = -1;
+					pick.Margin = 0;
+				}
+				else
+				{
+					pick.WinnerSlot = static_cast<int8_t>(winner);
+					uint8_t flags = 0;
+
+					if (best != winner)
+						flags |= TrajPickFlag::Overridden;
+
+					int runner = -1;
+					int runnerTotal = INT_MIN;
+
+					for (int c = 0; c < 40; ++c)
+					{
+						if (c != winner && eval.BestTotal[c] > runnerTotal)
+						{
+							runnerTotal = eval.BestTotal[c];
+							runner = c;
+						}
+					}
+
+					if (runner < 0)
+					{
+						flags |= TrajPickFlag::SingleClass;
+						pick.RunnerSlot = -1;
+						pick.Margin = 0;
+					}
+					else
+					{
+						pick.RunnerSlot = static_cast<int8_t>(runner);
+						pick.Margin = static_cast<int16_t>(std::clamp(eval.BestTotal[winner] - runnerTotal, 0, 32767));
+					}
+
+					if (eval.BestFree[winner])
+						flags |= TrajPickFlag::WinnerFree;
+
+					if (runner >= 0 && eval.BestFree[runner])
+						flags |= TrajPickFlag::RunnerFree;
+
+					pick.Flags = flags;
+				}
+
+				if (win.PickCount < 8u)
+					win.Picks[win.PickCount++] = pick;
+				else if (win.PicksDropped < 255u)
+					win.PicksDropped++;
+			}
+
+			prevFactoryObjects[hIdx] = std::move(currentObjects);
+		}
 
 		if (nowFrame - lastTrajFrame[hIdx] >= 240)
 		{
-			lastTrajFrame[hIdx] = nowFrame;
 			auto const& hMacro = GetMacroState(pHouse);
 			auto const& hWave = GetWaveTimingState(pHouse);
-			auto const& hSpecOps = GetSpecOpsState(pHouse);
 			int knownFoeWorth = 0;
 
 			for (auto const& foe : hWave.Enemies)
@@ -648,285 +801,73 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			const int capDelta = std::max(0, hMacro.TrajCaptures - lastCaptures[hIdx]);
 			const int infDelta = std::max(0, hMacro.TrajInfiltrations - lastInfiltrations[hIdx]);
 			const int finDelta = std::max(0, hMacro.TrajFinisherLaunches - lastFinisher[hIdx]) + capDelta + infDelta;
-
-			const uint32_t slotIdx = TrajectoryView->WriteCount % 200u;
-			AITrajectoryStep& step = TrajectoryView->Steps[slotIdx];
-			step.Frame = static_cast<uint32_t>(std::max(0, nowFrame));
-			step.HouseIndex = static_cast<uint8_t>(hIdx);
-			step.PolicySlot = static_cast<uint8_t>(std::clamp(pExt->NeuralAI_PolicySlot, 0, 1));
-			step.ActiveExpert = static_cast<uint8_t>(std::clamp(pExt->NeuralAI_ActiveExpert, 0, 9));
-			step.Archetype = static_cast<uint8_t>(std::clamp(pExt->NeuralAI_Archetype, 0, 7));
-			step.OwnNetWorth = HouseMatchScore(pHouse);
-			step.KnownEnemyWorth = knownFoeWorth;
-			step.KillsDelta = std::max(0, killNow - lastKilledScore[hIdx]);
-			step.LossesDelta = std::max(0, lostNow - lastLostUnits[hIdx]);
-			step.DeploysGoodDelta = static_cast<int16_t>(std::clamp(hMacro.TrajDeploysGood - lastDeploysGood[hIdx], 0, 100));
-			step.DeploysBadDelta = static_cast<int16_t>(std::clamp(hMacro.TrajDeploysBad - lastDeploysBad[hIdx], 0, 100));
-			step.DropsGoodDelta = static_cast<int16_t>(std::clamp(hMacro.TrajDropsGood - lastDropsGood[hIdx], 0, 100));
-			step.DropsBadDelta = static_cast<int16_t>(std::clamp(hMacro.TrajDropsBad - lastDropsBad[hIdx], 0, 100));
-			step.FinisherDelta = static_cast<int16_t>(std::clamp(finDelta, 0, 100));
-			step.CounterScore = scores[25];
-
-			// Tactical micro gates 53..83 (bits 0..30 = opened, bits 32..62 = queried in this window)
-			// plus slot 127 Expert Hysteresis (bit 31 = held, bit 63 = queried).
-			uint64_t gateMask = 0;
-			const uint32_t airliftNow = DecisionCounts[hIdx][static_cast<size_t>(NeuralDecision::AirliftJob)]
-				+ DecisionCounts[hIdx][static_cast<size_t>(NeuralDecision::AirliftDrop)]
-				+ DecisionCounts[hIdx][static_cast<size_t>(NeuralDecision::AirliftRescue)]
-				+ DecisionCounts[hIdx][static_cast<size_t>(NeuralDecision::AirCarrierLost)]
-				+ DecisionCounts[hIdx][static_cast<size_t>(NeuralDecision::DropAbort)];
-
-			for (int bit = 0; bit < 31; ++bit)
-			{
-				const int gSlot = 53 + bit;
-				const uint32_t openNow = GateCounts[hIdx][gSlot][0];
-				const uint32_t closeNow = GateCounts[hIdx][gSlot][1];
-				const uint32_t openD = openNow >= lastGateOpen[hIdx][bit] ? (openNow - lastGateOpen[hIdx][bit]) : 0u;
-				const uint32_t closeD = closeNow >= lastGateClosed[hIdx][bit] ? (closeNow - lastGateClosed[hIdx][bit]) : 0u;
-				lastGateOpen[hIdx][bit] = openNow;
-				lastGateClosed[hIdx][bit] = closeNow;
-
-				bool queried = (openD + closeD) > 0u;
-				bool opened = openD > 0u && openD >= closeD;
-
-				if (bit == 0 && !queried && airliftNow != lastAirliftEvents[hIdx])
-				{
-					queried = true;
-					opened = scores[53] >= 40;
-				}
-
-				if (queried)
-				{
-					gateMask |= (1ULL << (32 + bit));
-
-					if (opened)
-						gateMask |= (1ULL << bit);
-				}
-			}
-
-			lastAirliftEvents[hIdx] = airliftNow;
 			const int keptD = std::max(0, hMacro.ExpertKeptTicks - lastExpKept[hIdx]);
 			const int swD = std::max(0, hMacro.ExpertSwitchedTicks - lastExpSwitched[hIdx]);
-			lastExpKept[hIdx] = hMacro.ExpertKeptTicks;
-			lastExpSwitched[hIdx] = hMacro.ExpertSwitchedTicks;
 
-			if (keptD + swD > 0)
+			if (pending[hIdx].Valid)
 			{
-				gateMask |= (1ULL << 63);
+				const uint32_t slotIdx = TrajectoryView->WriteCount % 200u;
+				AITrajectoryStep& step = TrajectoryView->Steps[slotIdx];
+				step = AITrajectoryStep {};
+				step.Frame = pending[hIdx].Frame;
+				step.HouseIndex = static_cast<uint8_t>(hIdx);
+				step.PolicySlot = static_cast<uint8_t>(std::clamp(pExt->NeuralAI_PolicySlot, 0, 1));
+				step.ActiveExpert = pending[hIdx].Expert;
+				step.Archetype = pending[hIdx].Archetype;
+				step.OwnNetWorth = HouseMatchScore(pHouse);
+				step.KnownEnemyWorth = knownFoeWorth;
+				step.KillsDelta = std::max(0, killNow - lastKilledScore[hIdx]);
+				step.LossesDelta = std::max(0, lostNow - lastLostUnits[hIdx]);
+				step.DeploysGoodDelta = static_cast<int16_t>(std::clamp(hMacro.TrajDeploysGood - lastDeploysGood[hIdx], 0, 100));
+				step.DeploysBadDelta = static_cast<int16_t>(std::clamp(hMacro.TrajDeploysBad - lastDeploysBad[hIdx], 0, 100));
+				step.DropsGoodDelta = static_cast<int16_t>(std::clamp(hMacro.TrajDropsGood - lastDropsGood[hIdx], 0, 100));
+				step.DropsBadDelta = static_cast<int16_t>(std::clamp(hMacro.TrajDropsBad - lastDropsBad[hIdx], 0, 100));
+				step.FinisherDelta = static_cast<int16_t>(std::clamp(finDelta, 0, 100));
+				step.CounterScore = 0;
 
-				if (keptD >= swD)
-					gateMask |= (1ULL << 31);
+				uint64_t gateMask = 0;
+
+				if (keptD + swD > 0)
+				{
+					gateMask |= (1ULL << 63);
+
+					if (keptD >= swD)
+						gateMask |= (1ULL << 31);
+				}
+
+				step.OpenGatesMask = gateMask;
+				std::memcpy(step.Features, pending[hIdx].Features.data(), sizeof(step.Features));
+				std::fill(std::begin(step.TopActionRanks), std::end(step.TopActionRanks), static_cast<int8_t>(-1));
+				step.WindowFrames = static_cast<uint16_t>(std::clamp(nowFrame - static_cast<int>(pending[hIdx].Frame), 0, 65535));
+				step.WindowTicks = win.WindowTicks;
+				step.ExpertOffTicks = win.ExpertOffTicks;
+				step.ExpertPoolMask = pending[hIdx].PoolMask;
+				step.BestExpert = pending[hIdx].BestExpert;
+				step.RoutingFlags = pending[hIdx].RoutingFlags;
+				step.PickCount = win.PickCount;
+				step.PicksDropped = win.PicksDropped;
+				step.Reserved = 0;
+
+				for (uint8_t k = 0; k < win.PickCount; ++k)
+					step.Picks[k] = win.Picks[k];
+
+				auto const& gw = GateWindow[hIdx];
+
+				for (int s = 0; s < 128; ++s)
+				{
+					step.GateDraws[s] = static_cast<uint8_t>(std::min<uint16_t>(255u, gw.Draws[s]));
+					step.GateOpens[s] = static_cast<uint8_t>(std::min<uint16_t>(255u, gw.Opens[s]));
+					step.GateFreeDraws[s] = static_cast<uint8_t>(std::min<uint16_t>(255u, gw.FreeDraws[s]));
+					step.GateScoreFn[s] = gw.FreeDraws[s] > 0u
+						? static_cast<int16_t>(std::clamp<long>(
+							std::lround(static_cast<double>(gw.ScoreFnSum[s]) / static_cast<double>(gw.FreeDraws[s])), -15893L, 15893L))
+						: 0;
+				}
+
+				TrajectoryView->WriteCount++;
 			}
 
-			step.OpenGatesMask = gateMask;
-			std::memcpy(step.Features, features.data(), sizeof(step.Features));
-
-			// TopActionRanks[8]: exact output slot indices (0..127, -1 = none) spanning active
-			// SpecOps, strategic plans (89..126), factory queues, and posture/production bands (0..39).
-			std::fill(std::begin(step.TopActionRanks), std::end(step.TopActionRanks), static_cast<int8_t>(-1));
-			int rankCount = 0;
-
-			auto pushSlot = [&](int s)
-			{
-				if (rankCount >= 8 || s < 0 || s >= 128)
-					return;
-
-				for (int j = 0; j < rankCount; ++j)
-				{
-					if (step.TopActionRanks[j] == static_cast<int8_t>(s))
-						return;
-				}
-
-				step.TopActionRanks[rankCount++] = static_cast<int8_t>(s);
-			};
-
-			auto bestInBand = [&](int lo, int hi, int minScore) -> int
-			{
-				int bestS = -1;
-				int bestVal = minScore;
-
-				for (int s = lo; s <= hi; ++s)
-				{
-					if (static_cast<int>(scores[s]) >= bestVal)
-					{
-						bestVal = static_cast<int>(scores[s]);
-						bestS = s;
-					}
-				}
-
-				return bestS;
-			};
-
-			if (capDelta > 0 || !hSpecOps.Captures.empty() || !hMacro.EngineerCaptureTargets.empty())
-			{
-				pushSlot(36);
-				pushSlot(18);
-			}
-
-			if (infDelta > 0 || !hSpecOps.Spies.empty())
-				pushSlot(19);
-
-			int plansPushed = 0;
-
-			for (int pIdx = 0; pIdx < 38 && plansPushed < 2; ++pIdx)
-			{
-				if (static_cast<size_t>(pIdx) < hMacro.Plans.size() && hMacro.Plans[pIdx].Active)
-				{
-					pushSlot(89 + pIdx);
-					plansPushed++;
-				}
-			}
-
-			int prodBldSlot = -1;
-			int prodInfSlot = -1;
-			int prodVehSlot = -1;
-			int prodAirSlot = -1;
-
-			for (auto const pFac : FactoryClass::Array)
-			{
-				if (!pFac || pFac->Owner != pHouse || !pFac->Object)
-					continue;
-
-				auto const pObjType = pFac->Object->GetTechnoType();
-
-				if (!pObjType)
-					continue;
-
-				switch (pFac->Object->WhatAmI())
-				{
-				case AbstractType::Building:
-				{
-					auto const pBT = static_cast<BuildingTypeClass*>(pObjType);
-
-					if (pBT->SuperWeapon != -1)
-						prodBldSlot = 10;
-					else if (pBT->Refinery)
-						prodBldSlot = 1;
-					else if (pBT->Factory == AbstractType::UnitType && pBT->Naval)
-						prodBldSlot = 7;
-					else if (pBT->Factory == AbstractType::UnitType)
-						prodBldSlot = 3;
-					else if (pBT->Factory == AbstractType::InfantryType)
-						prodBldSlot = 2;
-					else if (pBT->Factory == AbstractType::AircraftType || pBT->Helipad)
-						prodBldSlot = 8;
-					else if (pBT->UnitRepair)
-						prodBldSlot = 9;
-					else if (pBT->Storage > 0)
-						prodBldSlot = 11;
-					else if (pBT->IsBaseDefense)
-						prodBldSlot = (GetCombatValueOfType(pBT, true) > GetCombatValueOfType(pBT, false)) ? 6 : 5;
-					else if (pBT->Radar || pBT->TechLevel >= 5)
-						prodBldSlot = 4;
-					else if (pBT->PowerBonus > pBT->PowerDrain)
-						prodBldSlot = 0;
-
-					break;
-				}
-				case AbstractType::Infantry:
-				{
-					auto const pIT = static_cast<InfantryTypeClass*>(pObjType);
-					auto const pWS = pIT->GetWeapon(0);
-					const bool infAA = pWS && pWS->WeaponType && pWS->WeaponType->Projectile && pWS->WeaponType->Projectile->AA;
-
-					if (IsCaptureInfantryType(pIT))
-						prodInfSlot = 18;
-					else if (IsSpyInfantryType(pIT) || pIT->VehicleThief)
-						prodInfSlot = 19;
-					else if (infAA || pIT->C4)
-						prodInfSlot = 20;
-					else if (pIT->Cost >= 250)
-						prodInfSlot = 17;
-					else
-						prodInfSlot = 16;
-
-					break;
-				}
-				case AbstractType::Unit:
-				{
-					auto const pUT = static_cast<UnitTypeClass*>(pObjType);
-					auto const pWS = pUT->GetWeapon(0);
-					const bool unitAA = pWS && pWS->WeaponType && pWS->WeaponType->Projectile && pWS->WeaponType->Projectile->AA;
-					const bool unitArt = pWS && pWS->WeaponType && pWS->WeaponType->Range >= 8 * Unsorted::LeptonsPerCell;
-
-					if (pUT->Harvester || pUT->ResourceGatherer)
-						prodVehSlot = 31;
-					else if (pUT->DeploysInto && pUT->DeploysInto->ConstructionYard)
-						prodVehSlot = 30;
-					else if (pUT->Naval)
-						prodVehSlot = 29;
-					else if (pUT->Passengers > 0 && !pUT->Gunner)
-						prodVehSlot = 28;
-					else if (unitAA && (!pWS->WeaponType->Projectile->AG || pUT->Cost <= 800))
-						prodVehSlot = 26;
-					else if (unitArt && !IsMainBattleTankType(pUT))
-						prodVehSlot = 27;
-					else if (IsMainBattleTankType(pUT))
-						prodVehSlot = 24;
-					else
-						prodVehSlot = 25;
-
-					break;
-				}
-				case AbstractType::Aircraft:
-					prodAirSlot = (pObjType->Cost >= 1300) ? 33 : 32;
-					break;
-				default:
-					break;
-				}
-			}
-
-			pushSlot(prodBldSlot >= 0 ? prodBldSlot : bestInBand(0, 11, 40));
-			pushSlot(prodInfSlot >= 0 ? prodInfSlot : bestInBand(16, 20, 40));
-			pushSlot(prodVehSlot >= 0 ? prodVehSlot : bestInBand(24, 31, 40));
-
-			if (prodAirSlot >= 0 || pHouse->NumAirpads > 0)
-				pushSlot(prodAirSlot >= 0 ? prodAirSlot : bestInBand(32, 33, 40));
-
-			pushSlot(bestInBand(12, 15, 40));
-
-			const int bestSpecPosture = bestInBand(21, 23, 60);
-			const int bestStratPosture = bestInBand(34, 39, 40);
-
-			if (bestSpecPosture >= 0 && (bestStratPosture < 0 || scores[bestSpecPosture] >= scores[bestStratPosture]))
-				pushSlot(bestSpecPosture);
-			else
-				pushSlot(bestStratPosture);
-
-			while (rankCount < 8)
-			{
-				int bestGlobal = -1;
-				int bestVal = 25;
-
-				for (int s = 0; s < 127; ++s)
-				{
-					if (s >= 40 && s < 89)
-						continue;
-
-					bool taken = false;
-
-					for (int j = 0; j < rankCount; ++j)
-					{
-						if (step.TopActionRanks[j] == static_cast<int8_t>(s))
-						{
-							taken = true;
-							break;
-						}
-					}
-
-					if (!taken && static_cast<int>(scores[s]) > bestVal)
-					{
-						bestVal = static_cast<int>(scores[s]);
-						bestGlobal = s;
-					}
-				}
-
-				if (bestGlobal < 0)
-					break;
-
-				pushSlot(bestGlobal);
-			}
-
+			lastTrajFrame[hIdx] = nowFrame;
 			lastKilledScore[hIdx] = killNow;
 			lastLostUnits[hIdx] = lostNow;
 			lastDeploysGood[hIdx] = hMacro.TrajDeploysGood;
@@ -936,7 +877,30 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			lastFinisher[hIdx] = hMacro.TrajFinisherLaunches;
 			lastCaptures[hIdx] = hMacro.TrajCaptures;
 			lastInfiltrations[hIdx] = hMacro.TrajInfiltrations;
-			TrajectoryView->WriteCount++;
+			lastExpKept[hIdx] = hMacro.ExpertKeptTicks;
+			lastExpSwitched[hIdx] = hMacro.ExpertSwitchedTicks;
+			win = TrajWindowAccum {};
+			GateWindow[hIdx] = GateWindowStats {};
+
+			auto& snap = pending[hIdx];
+			auto const& rRec = LastRoutingRecords[hIdx];
+			snap.Valid = true;
+			snap.Frame = static_cast<uint32_t>(std::max(0, nowFrame));
+			snap.Expert = static_cast<uint8_t>(std::clamp(pExt->NeuralAI_ActiveExpert, 0, 9));
+			snap.Archetype = static_cast<uint8_t>(std::clamp(pExt->NeuralAI_Archetype, 0, 7));
+			snap.PoolMask = rRec.PoolMask;
+			snap.BestExpert = rRec.BestExpert;
+			snap.RoutingFlags = rRec.RoutingFlags;
+			snap.Features = features;
+		}
+
+		if (win.WindowTicks < 255u)
+			win.WindowTicks++;
+
+		if (static_cast<uint8_t>(std::clamp(pExt->NeuralAI_ActiveExpert, 0, 9)) != pending[hIdx].Expert
+			&& win.ExpertOffTicks < win.WindowTicks)
+		{
+			win.ExpertOffTicks++;
 		}
 	}
 
@@ -3654,6 +3618,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			return std::find(buildingsOnTheWay.begin(), buildingsOnTheWay.end(), buildingIdx) != buildingsOnTheWay.end();
 		};
 
+		if (NeuralAI::HeadlessMode)
+			ResetPickEval(pHouse, 0, pExt->NeuralAI_ActiveExpert);
+
 		for (auto const pBld : BuildingTypeClass::Array)
 		{
 			if (!pBld || pBld->Wall || pBld->FirestormWall || pBld->Gate || pBld->LaserFence || pBld->LaserFencePost
@@ -3810,6 +3777,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				techUnlockBonus += MatchTaste(pHouse, pBld->ArrayIndex, 250);
 
 			int score = 0;
+			int candSlot = -1;
+			bool candFree = false;
 			bool candidateFillsAirDeficit = false;
 
 			if (pBld->PowerBonus > pBld->PowerDrain && !pBld->IsBaseDefense)
@@ -3845,6 +3814,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				}
 
 				score = scores[0] + std::min(650, pBld->PowerBonus * 2);
+				candSlot = 0;
+				candFree = true;
 
 				// Avoid spamming new Bio-Reactors from the ConYard when existing owned
 				// Bio-Reactors still have free passenger slots that our Barracks can
@@ -3908,6 +3879,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					continue;
 
 				score = scores[1] - owned * 480;
+				candSlot = 1;
+				candFree = true;
 
 				if (owned == 0)
 				{
@@ -3923,6 +3896,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 						: (std::min(750, std::max(0, ownedRefineries - 4) * 65)
 							+ (money >= 12000 ? std::min(750, (money - 12000) / 40) : 0));
 					score = std::max(static_cast<int>(scores[1]), 300) + std::max(450, 1950 - wealthRefineryTaper);
+					candFree = scores[1] > 300;
 
 					if (GetMacroState(pHouse).IncomeFalling && slotFieldCell != CellStruct::Empty)
 						score += IncomeFallingRefineryBonus;
@@ -3930,12 +3904,14 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				else if (isHarvRecoveryCandidate
 					&& (orphanRefineryZoneNeedsReplacement >= 0 || ownedHarvestersCount < staticRefineriesCount))
 				{
+					candFree = static_cast<int>(scores[1]) > score;
 					score = std::max(score, static_cast<int>(scores[1]))
 						+ 2150; // AdvAI Harvester Recovery via Refinery Sell-and-Replace
 								// (spawns FreeUnit Harvester without tying up War Factory!)
 				}
 				else if (isHarvRecoveryCandidate)
 				{
+					candFree = static_cast<int>(scores[1]) > score;
 					score = std::max(score, static_cast<int>(scores[1]))
 						+ 1150; // Replenish up to 2 Harvesters per Refinery via ConYard
 								// while War Factory builds tanks!
@@ -3980,21 +3956,29 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				{
 					score = std::max(static_cast<int>(scores[2]), 350) + 750
 						+ std::clamp(static_cast<int>(scores[82]), 0, 500);
+					candSlot = 2;
+					candFree = scores[2] > 350;
 				}
 				else if (forwardConYardNeedsBarracks)
 				{
 					// Forward Outpost / Island Beachhead ConYard lacks its own Barracks:
 					// do not penalize by home-island Barracks count!
 					score = std::max(static_cast<int>(scores[2]), 300) + 1450 + (beachheadNeedsFactories ? 1500 : 0);
+					candSlot = 2;
+					candFree = scores[2] > 300;
 				}
 				else if (captureSiteNeedsBarracks)
 				{
 					// A capture site lacks its barracks: the home barracks count does not lower it either.
 					score = std::max(static_cast<int>(scores[2]), 300) + CaptureBarracksBonus;
+					candSlot = 2;
+					candFree = scores[2] > 300;
 				}
 				else
 				{
 					score = scores[2] - owned * (bankSteps > 0 ? 420 : 820) + (bankSteps > 0 ? 250 + 120 * std::min(6, bankSteps) : 0);
+					candSlot = 2;
+					candFree = true;
 
 					if (ownedBarracks < maxEnemyBarracks && hasTechCenter && money > 1500)
 						score += 420;
@@ -4032,16 +4016,22 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				{
 					score = std::max(static_cast<int>(scores[3]), 400) + 850
 						+ std::clamp(static_cast<int>(scores[82]), 0, 550);
+					candSlot = 3;
+					candFree = scores[3] > 400;
 				}
 				else if (forwardConYardNeedsWarFactory)
 				{
 					// Forward Outpost / Island Beachhead ConYard lacks its own War
 					// Factory: do not penalize by home-island War Factory count!
 					score = std::max(static_cast<int>(scores[3]), 400) + 1750 + (beachheadNeedsFactories ? 1500 : 0);
+					candSlot = 3;
+					candFree = scores[3] > 400;
 				}
 				else
 				{
 					score = scores[3] - owned * (bankSteps > 0 ? 300 : 620) + (bankSteps > 0 ? 400 + 150 * std::min(6, bankSteps) : 0);
+					candSlot = 3;
+					candFree = true;
 
 					// The first war factory once a refinery stands (see groundWarFactoryBuildableNow),
 					// after the first shipyard on a naval match (navalFirst).
@@ -4090,6 +4080,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				}
 
 				score = scores[7] - owned * 950;
+				candSlot = 7;
+				candFree = true;
 
 				// The first shipyard of a naval match once a refinery stands (navalFirst).
 				if (navalFirst && ownedRefineries >= 1)
@@ -4123,6 +4115,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				{
 					score = std::max(static_cast<int>(scores[8]), 250) + 550
 						+ std::clamp(static_cast<int>(scores[82]) / 2, 0, 350);
+					candSlot = 8;
+					candFree = scores[8] > 250;
 				}
 				else
 				{
@@ -4138,6 +4132,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 						? (1250 + (airSpecialist ? 300 : 0))
 						: 0;
 					score = scores[8] - dockPenalty + dockDemandBonus;
+					candSlot = 8;
+					candFree = true;
 
 					if (ownedAirpads < maxEnemyAirpads && hasTechCenter && money >= 2000 && curDocks < softAirDockTaperStart)
 						score += 350;
@@ -4161,6 +4157,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					continue;
 
 				score = scores[9] + (wantsForwardRepair ? 500 : 0);
+				candSlot = 9;
+				candFree = true;
 
 				if (wantsForwardRepair && score > bestForwardRepairScore)
 				{
@@ -4176,6 +4174,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					continue;
 
 				score = scores[10] + 450;
+				candSlot = 10;
+				candFree = true;
 
 				if (pHouse->NumConYards >= 2 && SlotGate(scores[82], 60, 82))
 					score += std::clamp(static_cast<int>(scores[82]) / 2, 0, 350);
@@ -4189,6 +4189,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					continue;
 
 				score = scores[11] - std::min(owned, 6) * 150;
+				candSlot = 11;
+				candFree = true;
 			}
 			else if (IsTunnelNetworkBuilding(pBld))
 			{
@@ -4367,6 +4369,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 						? (urgentPureAA ? std::max(static_cast<int>(scores[6]), 320) : static_cast<int>(scores[6]))
 						: std::max(static_cast<int>(scores[5]), 320))
 					+ tierQualityBonus + CounterBonusFor(pHouse, pBld) + defenseBudgetShift;
+				candSlot = isPureAA ? 6 : 5;
+				candFree = isPureAA ? (!urgentPureAA || scores[6] > 320) : (scores[5] > 320);
 
 				// Core ground towers a base wants before anything else in defense.
 				const int desiredCoreGroundDefs = std::clamp(2 + ownedRefineries + (features[65] >= 18 ? 2 : 0), 3, 8);
@@ -4546,6 +4550,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					continue;
 
 				score = scores[1] + 1200 - owned * 480;
+				candSlot = 1;
+				candFree = true;
 			}
 			else
 			{
@@ -4572,6 +4578,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				}
 
 				score = scores[4] + 550 + std::min(600, pBld->Cost / 3) - owned * 700;
+				candSlot = 4;
+				candFree = true;
 
 				if (sensorBuildingReach > 0)
 					score += std::min(DetectionScoreMost, DetectionScorePerCell * sensorBuildingReach);
@@ -4623,7 +4631,13 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				// the house never builds another MCV. For the island expansion it comes before
 				// everything else (Heisenberg repro: an Allied house with 9600 credits put them into
 				// turrets and destroyers and never built the service depot its MCV needs).
+				if (2600 + static_cast<int>(scores[30]) / 4 > score + 900)
+					candFree = false;
+
 				score = std::max(score + 900, 2600 + static_cast<int>(scores[30]) / 4);
+
+				if (GetMacroState(pHouse).IslandExpansionUrgent && score < 5000)
+					candFree = false;
 
 				if (GetMacroState(pHouse).IslandExpansionUrgent)
 					score = std::max(score, 5000);
@@ -4683,6 +4697,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					bestTechStepIdx = pBld->ArrayIndex;
 				}
 			}
+
+			if (NeuralAI::HeadlessMode)
+				NotePickCandidate(pHouse, 0, candSlot, candFree, pBld->ArrayIndex, score);
 
 			if (score > bestBldScore)
 			{
@@ -6559,6 +6576,12 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		&& ((strongestEnemyArmy > 0 && mcvWaveState.OwnArmyValue * 100 < strongestEnemyArmy * ExpansionMcvAdvantageMin)
 			|| Unsorted::CurrentFrame - GetMacroState(pHouse).ConYardLostFrame < ExpansionMcvLossFrames);
 
+	if (NeuralAI::HeadlessMode)
+	{
+		ResetPickEval(pHouse, 2, pExt->NeuralAI_ActiveExpert);
+		ResetPickEval(pHouse, 3, pExt->NeuralAI_ActiveExpert);
+	}
+
 	for (auto const pUnit : UnitTypeClass::Array)
 	{
 		if (!pUnit || !CanBuildUnderHumanRules(pHouse, pUnit))
@@ -6876,6 +6899,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		// Cost and strength, and what its weapon does (VehicleFirepowerScore).
 		const int unitFirepower = VehicleFirepowerScore(pUnit);
 		int score = (pUnit->Cost / 4) + (pUnit->Strength / 3) + unitFirepower;
+		int candSlot = -1;
+		bool candFree = false;
 		score -= std::min(1200, ownedUnitWithConv * 55);
 		if (!hasActiveUnitIncome)
 		{
@@ -6951,6 +6976,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					seaMacro.SeaControlLongRangeShip = true;
 
 				score += scores[29];
+				candSlot = 29;
+				candFree = true;
 
 				// Only enemy ships or submarines are left: sonar (Sensors) to find them and weapons
 				// that hit under water (NavalTargeting) to sink them.
@@ -6991,6 +7018,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			else if (features[72] > 0 && pUnit->Sensors)
 				score += 400;
 
+			if (NeuralAI::HeadlessMode)
+				NotePickCandidate(pHouse, 3, candSlot, candFree, pUnit->ArrayIndex, score);
+
 			if (score > bestNavalScore)
 			{
 				bestNavalScore = score;
@@ -7024,6 +7054,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					? 12000
 					: (scores[30] + (canSafelySaveForExpansionMCV ? 1800 : 0)
 						+ ((wantsArchipelagoExpansion && hasIslandMcvLift) ? 900 : 0) + (fieldsRunningDry ? 2500 : 0));
+				candSlot = 30;
+				candFree = pHouse->NumConYards != 0;
 
 				if (bankWantsYard)
 					bankYardMcvIdx = pUnit->ArrayIndex;
@@ -7036,6 +7068,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				{
 					score += scores[31] - 900; // Keep War Factory queue focused on combat vehicles while
 											// ConYard replenishes Harvester via Refinery replacement!
+					candSlot = 31;
+					candFree = true;
 				}
 				else
 				{
@@ -7047,6 +7081,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 										: ((ownedEconomyUnits < 2)
 													? 1200
 													: (allowExpansionRefineryDeployer ? scores[30] : 0))));
+					candSlot = 31;
+					candFree = true;
 				}
 			}
 			else if (isTransportClass)
@@ -7056,6 +7092,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				if (!isAirOrCarryallVehicle)
 				{
 					score += scores[28] + (features[21] > 0 ? -500 : 0);
+					candSlot = 28;
+					candFree = true;
 				}
 				else
 				{
@@ -7083,6 +7121,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			else if (isAA)
 			{
 				score += scores[26];
+				candSlot = 26;
+				candFree = true;
 
 				// The escort of the tank mass comes before any aircraft shows up.
 				if (ownedAntiAirVehicles < wantedAntiAirEscorts)
@@ -7106,10 +7146,14 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					score += std::max(static_cast<int>(scores[27]), 280)
 						+ std::min(520, static_cast<int>(features[68]) * 18)
 						+ (ownedArtilleryVehicles == 0 ? 260 : 0);
+					candSlot = 27;
+					candFree = scores[27] > 280;
 				}
 				else
 				{
 					score += scores[27];
+					candSlot = 27;
+					candFree = true;
 
 					if (!siegeSpecialist && ownedFrontLineVehicles < 3
 						&& (ownedArtilleryVehicles >= 1 || (ownedFrontLineVehicles < 2 && features[68] < 8)))
@@ -7123,6 +7167,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			else if (!isMainTank && (pUnit->Category != Category::Invalid || pUnit->Strength < 300))
 			{
 				score += scores[25];
+				candSlot = 25;
+				candFree = true;
 
 				// The other front line vehicles of the mass keep a larger share of the type penalty.
 				if (tankMass)
@@ -7131,6 +7177,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			else
 			{
 				score += scores[24];
+				candSlot = 24;
+				candFree = true;
 
 				// A mass is many tanks of one type: the tank mass (or any house with a rich bank) keeps
 				// only a small share of the per-copy diversity penalty and scales MBT priority with cash.
@@ -7237,6 +7285,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				awaitedMcvScore = score;
 				awaitedMcvIdx = pUnit->ArrayIndex;
 			}
+
+			if (NeuralAI::HeadlessMode)
+				NotePickCandidate(pHouse, 2, candSlot, candFree, pUnit->ArrayIndex, score);
 
 			if (score > bestUnitScore)
 			{
@@ -7767,6 +7818,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			ownedFighterInfantry++;
 	}
 
+	if (NeuralAI::HeadlessMode)
+		ResetPickEval(pHouse, 1, pExt->NeuralAI_ActiveExpert);
+
 	for (auto const pInf : InfantryTypeClass::Array)
 	{
 		if (!pInf || !CanBuildUnderHumanRules(pHouse, pInf))
@@ -7795,6 +7849,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			continue;
 
 		int score = (pInf->Cost / 2) + pInf->Strength + (isInfInProgress ? 450 : 0);
+		int candSlot = -1;
+		bool candFree = false;
 
 		// Penalize stacking one infantry type so squads stay mixed (soldiers in garrisons aside)
 		auto const itGarrisoned = std::find_if(garrisonedByType.begin(), garrisonedByType.end(),
@@ -7838,6 +7894,12 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				score -= 300;
 			else
 				score += scores[18] + std::max(techBonus, mechanicBonus);
+
+			if (!(pHouse->OwnedInfantry < 3 && !hasCapturableTechOnMap && mechanicBonus == 0 && scores[36] <= 80))
+			{
+				candSlot = 18;
+				candFree = true;
+			}
 		}
 		else if (IsSpyInfantryType(pInf) || pInf->VehicleThief)
 		{
@@ -7861,20 +7923,28 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			else if (isSpyType && openSpyTargets == 0)
 			{
 				score += scores[19] - 350 - (pInf->Cost / 2);
+				candSlot = 19;
+				candFree = true;
 			}
 			else if (openSpyTargets > 0 && ownedInfiltrators == 0)
 			{
 				score += std::max(static_cast<int>(scores[19]), -60)
 					+ 420 + std::min(280, openSpyTargets * 90) - (pInf->Cost / 5);
+				candSlot = 19;
+				candFree = scores[19] > -60;
 			}
 			else
 			{
 				score += scores[19] - (pInf->Cost / 2);
+				candSlot = 19;
+				candFree = true;
 			}
 		}
 		else if (isAA || pInf->C4)
 		{
 			score += scores[20];
+			candSlot = 20;
+			candFree = true;
 
 			// Soldiers that shoot up, as many as the uncovered air threat asks for within their room.
 			if (isAA)
@@ -7883,10 +7953,14 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		else if (pInf->Cost >= 250)
 		{
 			score += scores[17];
+			candSlot = 17;
+			candFree = true;
 		}
 		else
 		{
 			score += scores[16];
+			candSlot = 16;
+			candFree = true;
 		}
 
 		if (needsCheapInfForBioReactor && !IsCaptureInfantryType(pInf) && !IsSpyInfantryType(pInf) && !IsSuicideInfantryType(pInf)
@@ -7965,6 +8039,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		// Under attack captures and infiltrations wait for the answer to the threat.
 		if (GetMacroState(pHouse).CounterUnderAttack && (IsCaptureInfantryType(pInf) || IsSpyInfantryType(pInf)))
 			score -= ThreatFirstPenalty;
+
+		if (NeuralAI::HeadlessMode)
+			NotePickCandidate(pHouse, 1, candSlot, candFree, pInf->ArrayIndex, score);
 
 		if (score > bestInfScore)
 		{
@@ -8288,6 +8365,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				inProgressAirIdx = pAirFac->Object->GetType()->GetArrayIndex();
 		}
 
+		if (NeuralAI::HeadlessMode)
+			ResetPickEval(pHouse, 4, pExt->NeuralAI_ActiveExpert);
+
 		for (auto const pAir : AircraftTypeClass::Array)
 		{
 			if (!pAir || !CanBuildUnderHumanRules(pHouse, pAir))
@@ -8318,6 +8398,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				continue;
 
 			const int slotScore = (pAir->Strength >= 300 || pAir->Cost >= 1500) ? scores[33] : scores[32];
+			const int candSlot = (pAir->Strength >= 300 || pAir->Cost >= 1500) ? 33 : 32;
+			const bool candFree = true;
 
 			const int crossFactionAirBonus = (SlotGate(scores[82], 60, 82) && ownHouseBit != 0u && !pAir->InOwners(ownHouseBit))
 				? (220 + std::clamp(static_cast<int>(scores[82]) / 3, 0, 200))
@@ -8379,6 +8461,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				bestDockWaitScore = std::max(bestDockWaitScore, score);
 				continue;
 			}
+
+			if (NeuralAI::HeadlessMode)
+				NotePickCandidate(pHouse, 4, candSlot, candFree, pAir->ArrayIndex, score);
 
 			if (score > bestAirScore)
 			{
