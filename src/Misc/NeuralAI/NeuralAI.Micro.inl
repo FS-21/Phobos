@@ -1769,6 +1769,18 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		if (auto const pRepairer = abstract_cast<UnitClass*>(pFoot); pRepairer && IsRepairerUnit(pRepairer))
 			return false;
 
+		// An aircraft or a unit on the move is gone long before a ferry lands the unit by it: a Flak
+		// Trooper sent after a raider flying home got a transport for itself alone, five times in one
+		// match (#18296). The caller's next rule takes the unit instead.
+		if (auto const pTargetFoot = abstract_cast<FootClass*>(pTarget))
+		{
+			if (pTargetFoot->WhatAmI() == AbstractType::Aircraft || pTargetFoot->IsInAir()
+				|| (pTargetFoot->Locomotor && pTargetFoot->Locomotor->Is_Moving()))
+			{
+				return false;
+			}
+		}
+
 		// The transport operations manager takes it across (user: a removal company apart from the
 		// client); the unit's client gives it its order again once it stands on the target's ground.
 		return RequestTransportOperation(pHouse, NeuralOpClient::Economy, pFoot, targetGround);
@@ -11667,6 +11679,17 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		if (IsPathDeadGoal(pHouse, ebc) && pathDeadFerryLanding(ebc) == CellStruct::Empty)
 			bldCandScore -= WavePathDeadGoalPenalty;
 
+		// A place the count of the wave reached and its dispatch did not (WaveShort*) comes after the others.
+		for (auto const& place : GetMacroState(pHouse).ShortWaveTargets)
+		{
+			if (Unsorted::CurrentFrame - place.Frame <= WaveShortMemoryFrames && Unsorted::CurrentFrame >= place.Frame
+				&& place.Cell.DistanceFrom(ebc) <= WaveShortTargetCells)
+			{
+				bldCandScore -= WaveShortTargetPenalty;
+				break;
+			}
+		}
+
 		// The wave under way keeps its target: what stands where the last dispatch went, while that
 		// dispatch is fresh, comes before a target of about the same worth elsewhere.
 		{
@@ -13721,6 +13744,29 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		BuildingClass* const pInsignificantWaveBld = (pVisibleEnemyBld && pVisibleEnemyBld->Type && pVisibleEnemyBld->Type->Insignificant
 			&& pVisibleEnemyBld->GetMapCoords().DistanceFrom(pWaveTargetCell->MapCoords) <= 4.0) ? pVisibleEnemyBld : nullptr;
 
+		// A wave target standing in the water (a naval yard) is fired at from the shore by the units whose
+		// ground touches it (IsBuildingEnterableFromZone, as in the count of the wave). They were sent to its
+		// water cell, asked for a transport to their own ground, got none and stayed home: the last naval
+		// yard of an enemy stood for 26000 frames against 1 to 3 amphibious units at a time while 43 tanks
+		// were counted for the wave (match #18296).
+		BuildingClass* const pWaterWaveBld = (pVisibleEnemyBld && pWaveTargetCell->LandType == LandType::Water
+			&& pVisibleEnemyBld->GetMapCoords().DistanceFrom(pWaveTargetCell->MapCoords) <= 4.0) ? pVisibleEnemyBld : nullptr;
+
+		auto const reachesFromShore = [pWaterWaveBld](const FootClass* pFoot, int zone)
+		{
+			return pWaterWaveBld && zone >= 0 && IsBuildingEnterableFromZone(pWaterWaveBld, zone) && CanFootDamageBuildings(pFoot);
+		};
+
+		auto const fireFromShore = [pWaterWaveBld](FootClass* pFoot)
+		{
+			if (pFoot->Target != pWaterWaveBld || pFoot->CurrentMission != Mission::Attack)
+			{
+				pFoot->ClearMegaMissionData();
+				pFoot->SetTarget(pWaterWaveBld);
+				pFoot->QueueMission(Mission::Attack, true);
+			}
+		};
+
 		for (size_t i = reserveCount; i < idleCombatUnits.size(); ++i)
 		{
 			auto const pU = idleCombatUnits[i];
@@ -13770,6 +13816,16 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			// A unit that cannot drive there asks the transport operations manager to take it across
 			// (user: its mission waits meanwhile); with no operation it waits on its island.
 			const bool goalInWater = (pUnitWaveGoal->LandType == LandType::Water);
+
+			if (!canCrossWaterDirectly && goalInWater && pUnitWaveGoal == pWaveTargetCell && reachesFromShore(pU, uz))
+			{
+				fireFromShore(pU);
+				NoteExpertCommand(pHouse, pU, CreditSourceWave);
+				waveDispatchedUIDs.insert(pU->UniqueID);
+				dispatchedVeh++;
+				continue;
+			}
+
 			if (!canCrossWaterDirectly && (goalInWater || goalZone < 0 || uz < 0 || uz != goalZone))
 			{
 				const bool handed = RequestTransportOperation(pHouse, NeuralOpClient::Wave, pU, pUnitWaveGoal->MapCoords);
@@ -13905,6 +13961,20 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			const int footZone = ObjectZone(pI, pI->Type->MovementZone);
 			const int goalFootZone = MapClass::Instance.GetMovementZoneType(pInfWaveGoal->MapCoords, pI->Type->MovementZone, false);
 
+			if (!canInfCrossWater && infGoalInWater && pInfWaveGoal == pWaveTargetCell && reachesFromShore(pI, iz))
+			{
+				constexpr int waveInfShoreLine = __LINE__;
+
+				if (!MayOrderUnit(pI, pWaterWaveBld->GetMapCoords(), __FILE__, waveInfShoreLine))
+					continue;
+
+				fireFromShore(pI);
+				NoteExpertCommand(pHouse, pI, CreditSourceWave);
+				waveDispatchedUIDs.insert(pI->UniqueID);
+				dispatchedInf++;
+				continue;
+			}
+
 			if (!canInfCrossWater && (infGoalInWater || footZone < 0 || footZone != goalFootZone))
 			{
 				const bool handed = RequestTransportOperation(pHouse, NeuralOpClient::Wave, pI, pInfWaveGoal->MapCoords);
@@ -13949,6 +14019,36 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			NoteExpertCommand(pHouse, pI, CreditSourceWave);
 			waveDispatchedUIDs.insert(pI->UniqueID);
 			dispatchedInf++;
+		}
+
+		// A new wave the count reached and the dispatch did not (WaveShort*): its place comes after the
+		// others for a while, so the next wave takes a target its units do go to.
+		{
+			const size_t counted = waveAbleUnits + waveAbleInf;
+			const size_t sent = dispatchedVeh + dispatchedInf + handedVeh + handedInf;
+			const bool newWave = Unsorted::CurrentFrame - waveMacro.LastWaveDispatchFrame > 900 || waveMacro.LastWaveTargetCell == CellStruct::Empty
+				|| waveMacro.LastWaveTargetCell.DistanceFrom(pWaveTargetCell->MapCoords) > 12.0;
+
+			if (newWave && !endgameRemnantHunt && counted >= static_cast<size_t>(WaveShortCountedLeast)
+				&& sent * 100 <= counted * static_cast<size_t>(WaveShortSentPercent))
+			{
+				auto& shortTargets = waveMacro.ShortWaveTargets;
+				const int now = Unsorted::CurrentFrame;
+				std::erase_if(shortTargets, [now](const NeuralResistedPlace& place)
+					{ return now - place.Frame > WaveShortMemoryFrames || now < place.Frame; });
+				const CellStruct shortCell = pWaveTargetCell->MapCoords;
+				const bool known = std::any_of(shortTargets.begin(), shortTargets.end(),
+					[&shortCell](const NeuralResistedPlace& place) { return place.Cell.DistanceFrom(shortCell) <= WaveShortTargetCells; });
+
+				if (!known)
+				{
+					shortTargets.push_back({ shortCell, -1, static_cast<int>(counted), now });
+
+					Debug::Log("[NeuralAI] Frame %d | House #%d wave short at (%d,%d): %u counted, %u sent (%u handed to transports), the place waits %d frames\n",
+						now, pHouse->ArrayIndex, shortCell.X, shortCell.Y, static_cast<unsigned>(counted),
+						static_cast<unsigned>(sent), static_cast<unsigned>(handedVeh + handedInf), WaveShortMemoryFrames);
+				}
+			}
 		}
 
 		// The units handed to the transport operations go with the wave: they reach it later.

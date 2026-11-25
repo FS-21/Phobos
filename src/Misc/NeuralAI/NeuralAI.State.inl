@@ -1726,6 +1726,8 @@ namespace
 		int WaveFloorWaitSince { -1 };
 		bool WaveFloorWaitLogged { false };
 		std::vector<NeuralResistedPlace> ResistedPlaces {};
+		// Wave targets the count reached and the dispatch did not (WaveShort*); Failures holds the count.
+		std::vector<NeuralResistedPlace> ShortWaveTargets {};
 		unsigned int SiegeOwnersMask { 0u };
 		int SiegeLogFrame { -100000 };
 		// First frame a wave of the tank mass waited for its anti-air escort (-1 when none waits),
@@ -2348,6 +2350,7 @@ namespace
 			this->WaveFloorWaitSince = -1;
 			this->WaveFloorWaitLogged = false;
 			this->ResistedPlaces.clear();
+			this->ShortWaveTargets.clear();
 			this->SiegeOwnersMask = 0u;
 			this->SiegeLogFrame = -100000;
 			this->WaveEscortWaitSince = -1;
@@ -4773,6 +4776,16 @@ namespace
 	// What a wave target costs while the path finder does not reach it: more than any bonus of the
 	// target score adds up to, so it is taken only when there is no other.
 	constexpr int WavePathDeadGoalPenalty = 5000;
+	// A wave target the count of the wave reaches and its dispatch does not (user, 2026-11-25): when
+	// WaveShortCountedLeast units or more were counted and WaveShortSentPercent of them or fewer left
+	// (sent, or handed to a transport operation), the place costs WaveShortTargetPenalty for
+	// WaveShortMemoryFrames within WaveShortTargetCells. 43 tanks counted, 1 to 3 sent, for 26000
+	// frames at one naval yard (match #18296).
+	constexpr int WaveShortCountedLeast = 8;
+	constexpr int WaveShortSentPercent = 25;
+	constexpr int WaveShortTargetPenalty = 1500;
+	constexpr int WaveShortMemoryFrames = 5400;
+	constexpr double WaveShortTargetCells = 4.0;
 	// Airborne Front, when its target falls before the drop: how many times the team takes another
 	// and the time it gets for each.
 	constexpr int AirborneRetargets = 2;
