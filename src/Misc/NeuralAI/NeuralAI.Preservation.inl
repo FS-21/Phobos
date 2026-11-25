@@ -476,10 +476,13 @@ namespace
 		return CellStruct::Empty;
 	}
 
+	bool IsSensorLookoutType(const UnitTypeClass* pType);
+
 	// A repaired unit goes back. Plan members are left to their plan (the plan helpers skip units on
 	// a trip and take this one again on the next tick). Others go to the nearest group of ours
 	// within 25 cells of where they left the fight, or to that place when no enemy was seen there in
-	// the last 300 frames; else they stay.
+	// the last 300 frames; else they stay. A mobile sensor array stays too: the sensor lookouts, which
+	// left it to its repairs, take it where it stands (UpdateSensorLookouts).
 	void ReturnFromRepair(HouseClass* pHouse, FootClass* pFoot, const NeuralRepairTrip& trip)
 	{
 		// Orders of this part lease their units at this priority (order leases).
@@ -488,6 +491,9 @@ namespace
 		auto& macro = GetMacroState(pHouse);
 
 		if (macro.PlanMembers.contains(pFoot->UniqueID) || trip.ReturnCell == CellStruct::Empty)
+			return;
+
+		if (auto const pUnit = abstract_cast<UnitClass*>(pFoot); pUnit && IsSensorLookoutType(pUnit->Type))
 			return;
 
 		auto const pType = pFoot->GetTechnoType();
