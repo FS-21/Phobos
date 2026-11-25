@@ -943,7 +943,7 @@ void NeuralAI::InitTelemetrySharedMemory()
 				std::memset(TrajectoryView, 0, sizeof(AITrajectorySharedBuffer));
 				std::memcpy(TrajectoryView->Magic, "PHOBOSTJ", 8);
 				TrajectoryView->SchemaVersion = 2;
-				TrajectoryView->Capacity = 200;
+				TrajectoryView->Capacity = AITrajectorySharedBuffer::StepCapacity;
 			}
 		}
 	}
@@ -1075,7 +1075,7 @@ void NeuralAI::OnScenarioStart()
 		TrajectoryView->SchemaVersion = 2;
 		TrajectoryView->MatchSerial = static_cast<uint32_t>(NeuralMatchSerial);
 		TrajectoryView->WriteCount = 0;
-		TrajectoryView->Capacity = 200;
+		TrajectoryView->Capacity = AITrajectorySharedBuffer::StepCapacity;
 	}
 
 	WaterZoneCells.clear();

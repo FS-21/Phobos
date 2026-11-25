@@ -172,7 +172,13 @@ struct AITrajectorySharedBuffer
 	uint32_t MatchSerial;
 	uint32_t WriteCount;
 	uint32_t Capacity;
-	AITrajectoryStep Steps[200];
+
+	// A whole match: the trainer reads the buffer once, when the match ends, so a ring shorter than
+	// the match keeps its end only (with 200 steps 19 of 20 recorded matches lost their opening).
+	// At most 90000 frames of 240 per step and eight houses: 3000 steps.
+	static constexpr uint32_t StepCapacity = 4096u;
+
+	AITrajectoryStep Steps[StepCapacity];
 };
 
 #pragma pack(pop)
@@ -183,6 +189,7 @@ static_assert(offsetof(AITrajectoryStep, WindowFrames) == 308);
 static_assert(offsetof(AITrajectoryStep, Picks) == 320);
 static_assert(offsetof(AITrajectoryStep, GateDraws) == 384);
 static_assert(offsetof(AITrajectoryStep, GateScoreFn) == 768);
+static_assert(sizeof(AITrajectorySharedBuffer) == 24 + 4096 * 1024);
 static_assert(sizeof(AIBaseHeader) == 984, "AIBaseHeader must remain exactly 984 bytes");
 static_assert(sizeof(AIBackpackEntry) == 72, "AIBackpackEntry must remain 72 bytes");
 static_assert(sizeof(AIBackpackFile) == 6444 + AIBackpackFile::EntryCapacity * sizeof(AIBackpackEntry),
