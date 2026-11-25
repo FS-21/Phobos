@@ -961,6 +961,8 @@ namespace
 		int IdleSince { -1 };
 		int NoSiteStep { 0 };
 		bool NoSiteLogged { false };
+		// TEMP diagnostic: the unpack order whose answer of the engine was logged.
+		int UnpackLoggedTry { 0 };
 	};
 
 	// The cells a deployer gets to by itself within Radius of Center (DeployerReachCells), row by row,
@@ -3565,7 +3567,14 @@ namespace
 	// gives a new goal for the building, then the base, then where the deployer stands. A deployer with no
 	// site brings nothing for now, so the yard may build that building meanwhile.
 	constexpr int DeployerNoSitePicks = 3;
-	// Escort: a trip with known enemies on the way (DeployerTripRisk: their value near the site and the
+	// Unpack pacing (user, 2026-11-25, «A y B»: 240 of 264 sites refused over 40 matches were "the engine
+	// never unfolded it", most with three unpack orders spent within 150 frames of the pick). A refused
+	// unpack puts the deployer on Guard at once, so the next order came on the next pass. An unpack order
+	// counts as a try only DeployerUnpackGapFrames after the one before, and McvUnfoldRetryFrames while
+	// the deploy space clearing of ExtendedBuildingPlacing retries it by itself (the house's deploying
+	// units, its timer running).
+	constexpr int DeployerUnpackGapFrames = 120;
+	// Escort:a trip with known enemies on the way (DeployerTripRisk: their value near the site and the
 	// midpoint, DeployerTripRiskDefense for a known enemy defense that reaches the site) weighs going now
 	// against following the next wave sent its way, DeployerEscortFollowFrames after it; it waits
 	// DeployerEscortWaitFrames at most. Behind the wave wins when its weight, a quarter of the risk and a
