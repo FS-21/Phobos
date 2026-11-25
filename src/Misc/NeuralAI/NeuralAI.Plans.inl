@@ -3573,7 +3573,7 @@ namespace
 				if (!pType || pFoot->WhatAmI() == AbstractType::Aircraft || pType->Naval || IsAirborneThreatTechno(pFoot)
 					|| (pUnit && (pUnit->Type->Harvester || pUnit->Type->ResourceGatherer
 						|| (pUnit->Type->DeploysInto && !(allowSiegeDeployers && IsDeployableSiegeUnitType(pUnit->Type)))
-						|| IsAmphibiousOrAirTransport(pUnit->Type) || IsRepairerUnit(pUnit)))
+						|| IsAmphibiousOrAirTransport(pUnit->Type) || IsRepairerUnit(pUnit) || IsVehicleRaiderType(pUnit->Type)))
 					|| !isFreeForPlan(pFoot)
 					|| ObjectZone(pFoot, MovementZone::Normal) != homeZone)
 				{
@@ -3582,7 +3582,7 @@ namespace
 
 				if (auto const pInf = abstract_cast<InfantryClass*>(pFoot))
 				{
-					if (pInf->Type->Engineer || IsSpyInfantryType(pInf->Type))
+					if (pInf->Type->Engineer || IsSpyInfantryType(pInf->Type) || IsSuicideInfantryType(pInf->Type))
 						continue;
 				}
 
@@ -4466,14 +4466,14 @@ namespace
 			if (auto const pUnit = abstract_cast<UnitClass*>(pFoot))
 			{
 				if (pUnit->Type->Harvester || pUnit->Type->ResourceGatherer || pUnit->Type->DeploysInto
-					|| IsAmphibiousOrAirTransport(pUnit->Type))
+					|| IsAmphibiousOrAirTransport(pUnit->Type) || IsRepairerUnit(pUnit) || IsVehicleRaiderType(pUnit->Type))
 				{
 					return false;
 				}
 			}
 			else if (auto const pInf = abstract_cast<InfantryClass*>(pFoot))
 			{
-				if (pInf->Type->Engineer || IsSpyInfantryType(pInf->Type))
+				if (pInf->Type->Engineer || IsSpyInfantryType(pInf->Type) || IsSuicideInfantryType(pInf->Type))
 					return false;
 			}
 
@@ -6999,7 +6999,7 @@ namespace
 					}
 					else if (!isFreeForPlan(pFoot))
 						continue;
-					else if (pInf && isArmedGroundFoot(pFoot))
+					else if (pInf && (isArmedGroundFoot(pFoot) || (!pInf->SlaveOwner && IsSuicideInfantryType(pInf->Type))))
 						soldiers.push_back(pFoot);
 					else if (pUnit && IsVehicleRaiderType(pUnit->Type)
 						&& pUnit->GetTechnoType()->Size <= pTransport->GetTechnoType()->SizeLimit)

@@ -225,7 +225,7 @@ namespace
 
 	bool IsGarrisonOccupierType(const InfantryTypeClass* pType)
 	{
-		return pType && pType->Occupier && !pType->Engineer && !IsSpyInfantryType(pType);
+		return pType && pType->Occupier && !pType->Engineer && !IsSpyInfantryType(pType) && !IsSuicideInfantryType(pType);
 	}
 
 	// Firepower of a soldier inside a building: its OccupyWeapon when it has one, else its primary,

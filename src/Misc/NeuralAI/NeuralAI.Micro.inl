@@ -19190,6 +19190,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		const bool isAirForceCraft = IsAirForceCraft(pAir->Type);
 		const bool isWingCraft = IsWingStrikeType(pAir->Type);
 
+		// Advance active outbound wing and solo strikes on every tick while still in flight so
+		// AirportBound jets switch from their safe-lane waypoint to Mission::Attack before reaching
+		// the waypoint cell (where AircraftClass::Mission_Move would otherwise abort back to base).
+		if (hasAirLoad && isAirForceCraft && (ContinueAirStrike(pHouse, pAir) || ContinueSoloAirStrike(pHouse, pAir)))
+			continue;
+
 		// Flying home to its pad: along the safe lane, not over the base it has just struck.
 		if (isAirForceCraft && FlyAircraftHomeSafely(pHouse, pAir))
 			continue;

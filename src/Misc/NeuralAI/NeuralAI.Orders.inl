@@ -231,9 +231,13 @@ namespace
 		if (!pAir || !pTarget)
 			return;
 
+		if (pAir->Target == pTarget && pAir->CurrentMission == Mission::Attack)
+			return;
+
 		if (pAir->ArchiveTarget && AircraftTypeExt::Fetch(pAir->Type)->ExtendedAircraftMissions.Get(RulesExt::Global()->ExtendedAircraftMissions))
 			pAir->SetArchiveTarget(nullptr);
 
+		pAir->SetDestination(nullptr, true);
 		pAir->SetTarget(pTarget);
 		pAir->QueueMission(Mission::Attack, true);
 	}
