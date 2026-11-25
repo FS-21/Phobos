@@ -3599,8 +3599,15 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		for (auto const& build : GetMacroState(pHouse).DeployerBuilds)
 			buildingsOnTheWay.push_back(build.BuildingType);
 
+		// A deployer that found no site for as long as DeployerNoSitePicks searches brings nothing for now:
+		// the yard may build that building meanwhile.
 		for (auto const& [uid, order] : GetMacroState(pHouse).DeployOrders)
+		{
+			if (order.IdleSince >= 0 && Unsorted::CurrentFrame - order.IdleSince >= DeployerNoSitePicks * DeployerSiteRetryFrames)
+				continue;
+
 			buildingsOnTheWay.push_back(order.BuildingType);
+		}
 
 		for (auto const pDeployerType : UnitTypeClass::Array)
 		{

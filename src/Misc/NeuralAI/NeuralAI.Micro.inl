@@ -2060,7 +2060,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	// old post by the factory (ee5434156: 15 such turns of one deployer, 32 cells from its site then 42).
 	// Every site is one it gets to by itself (FillDeployerReach: our buildings may close a pocket the
 	// zones of the engine still join to the rest), and with no new cell for DeployerNoMoveFrames on its
-	// way it is held in: its next site is the nearest valid cell it gets to.
+	// way it is held in: its next site is the nearest valid cell it gets to. It is never idle: with no
+	// site for its goal in DeployerNoSitePicks searches the base expert gives the building a new goal,
+	// then the base takes it, then the cells around the deployer.
 	auto const runBaseDeployer = [&](UnitClass* pUnit)
 	{
 		auto const pType = pUnit->Type;
@@ -2281,7 +2283,6 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				? FindDeployerSiteNear(pHouse, pBld, pUnit, order.Goal, &order.FailedSites, here, DeployerRefusedAvoidCells, &reach)
 				: FindDeployerSiteNear(pHouse, pBld, pUnit, order.Goal, &order.FailedSites, CellStruct::Empty, 6, &reach);
 			order.HeldIn = false;
-			order.SitePicks++;
 			order.Tries = 0;
 			order.NearSince = -1;
 			order.BestDist = INT_MAX;
@@ -2291,6 +2292,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 			if (order.Site == CellStruct::Empty)
 			{
+				++order.EmptyPicks;
+
+				if (order.IdleSince < 0)
+					order.IdleSince = now;
+
 				// TEMP diagnostic: held in a pocket with no room for the building (once a deployer).
 				if (!reach.Open && !order.PocketLogged && deployerLog())
 				{
@@ -2298,6 +2304,47 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					Debug::Log("[NeuralAI] House %d deployer held in: %s %u (%s) at (%d,%d), a pocket of %d cells with no room for it, closed by %s, frame %d.\n",
 						pHouse->ArrayIndex, pType->ID, pUnit->UniqueID, buildingName, here.X, here.Y, reach.Count,
 						DescribeDeployerPocket(reach).c_str(), now);
+				}
+
+				// TEMP diagnostic: no site for this goal (once a goal), and why.
+				if (!order.NoSiteLogged && deployerLog())
+				{
+					order.NoSiteLogged = true;
+					const char* why = "no goal";
+
+					if (order.Goal != CellStruct::Empty)
+					{
+						why = FindDeployerSiteNear(pHouse, pBld, pUnit, order.Goal, &order.FailedSites) != CellStruct::Empty
+							? "valid cells near the goal, none it gets to"
+							: "no valid cell within 28 cells of the goal";
+					}
+
+					Debug::Log("[NeuralAI] House %d deployer no site: %s %u (%s) at (%d,%d), %s goal (%d,%d), step %d, %s, idle %d frames, frame %d.\n",
+						pHouse->ArrayIndex, pType->ID, pUnit->UniqueID, buildingName, here.X, here.Y, PlacementGoalKindName(order.Kind),
+						order.Goal.X, order.Goal.Y, order.NoSiteStep, why, now - order.IdleSince, now);
+				}
+
+				// Never idle: with no site in DeployerNoSitePicks searches in a row, the base expert says where
+				// the building goes now, then the base takes it, then the cells around the deployer.
+				if (order.EmptyPicks >= DeployerNoSitePicks && order.NoSiteStep < 3)
+				{
+					++order.NoSiteStep;
+					order.EmptyPicks = 0;
+					order.NoSiteLogged = false;
+					order.PickFrame = -1;
+
+					if (order.NoSiteStep == 1)
+					{
+						order.Goal = FindDeployerGoal(pHouse, pBld, pType, pUnit, order.Kind);
+					}
+					else
+					{
+						order.Goal = order.NoSiteStep == 2 ? GetHouseHomeCell(pHouse) : here;
+						order.Kind = NeuralPlacementGoalKind::None;
+					}
+
+					if (order.Goal == CellStruct::Empty)
+						order.Goal = here;
 				}
 
 				// No site for now: it deploys where it stands when it can.
@@ -2309,6 +2356,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 				return;
 			}
+
+			order.SitePicks++;
+			order.EmptyPicks = 0;
+			order.IdleSince = -1;
 
 			order.Route.clear();
 			const bool routed = planRoute(true);
