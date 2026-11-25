@@ -4439,17 +4439,35 @@ namespace
 	constexpr int ScoutSweepWeight = 50;
 	constexpr size_t ScoutSweepMostTrips = 4;
 	// Sensor lookouts (user): a mobile sensor array (a vehicle that unfolds into a building with
-	// SensorArray and SensorsSight of SensorLookoutMinSight or more) goes where enemy stealth units
-	// were seen in the last SensorLookoutSightingFrames or, with no enemy in sight, to the place its
-	// sensors would cover the most ground no sensor of ours covers, and unfolds there. Unfolded, it
-	// packs up for a better place after SensorLookoutDwellFrames with no enemy in sight. Production
-	// allows one of them apart from the other unarmed support vehicles while stealth units were seen
-	// lately or the house searches for remnants.
+	// SensorArray and SensorsSight of SensorLookoutMinSight or more) takes a post of the sensor chain
+	// while enemy stealth units were seen in the last SensorLookoutSightingFrames where no sensor of
+	// ours covers; with none, a forward post or the place its sensors would cover the most ground no
+	// sensor of ours covers. It unfolds there and stays: packed it finds nothing, so no lookout packs
+	// it up again (only the reversible pack-up does, when it is about to fall). Its trip is dropped by
+	// the scouts' rule: SensorTripBaseFrames and SensorTripFramesPerCellSpeed a cell over its speed.
 	constexpr int SensorLookoutMinSight = 10;
 	constexpr int SensorLookoutSightingFrames = 5400;
-	constexpr int SensorLookoutDwellFrames = 5400;
-	constexpr int SensorLookoutMinMoveCells = 20;
-	constexpr int SensorLookoutLateFrames = 4500;
+	constexpr int SensorTripBaseFrames = 900;
+	constexpr int SensorTripFramesPerCellSpeed = 400;
+	// Sensor chain (user): while a stealth sighting lies where no sensor of ours covers and no array
+	// of ours reaches, production is asked for one more array, one packed at a time and with no cap
+	// on the unfolded ones (the first one comes for any detection need it answers). It unfolds on the
+	// line from our array nearest the sighting toward it: SensorChainStepPercent of the sensor radius
+	// away at most and one radius at least, nearer when that already puts the sighting half a radius
+	// inside its reach, on a deployable cell within SensorChainSnapCells (tried every
+	// SensorChainTryStepCells back toward the array). So each array adds a link and the reach of them
+	// all adds up, until the sighting is covered. With no array on its land the first one unfolds by
+	// our building nearest the sighting, SensorChainBaseAheadCells toward it. The newest
+	// SensorChainSightingsTried sightings are tried, SensorChainSightingsApartCells apart. A vehicle
+	// the chain has no post for on its land holds the asking for SensorLookoutSightingFrames. Up to
+	// SensorChainLinksMost links are weighed.
+	constexpr int SensorChainLinksMost = 48;
+	constexpr int SensorChainStepPercent = 150;
+	constexpr int SensorChainTryStepCells = 4;
+	constexpr int SensorChainSnapCells = 6;
+	constexpr int SensorChainBaseAheadCells = 6;
+	constexpr size_t SensorChainSightingsTried = 4;
+	constexpr int SensorChainSightingsApartCells = 12;
 	// A wounded soldier (under WoundedIdleHealth) left idle more than WoundedIdleHomeCells from
 	// home walks back to it (user).
 	constexpr double WoundedIdleHealth = 0.55;

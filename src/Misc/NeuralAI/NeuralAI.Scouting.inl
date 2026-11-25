@@ -54,12 +54,24 @@ namespace
 		int Cost { 0 };
 	};
 
-	// A mobile sensor array on its way to a lookout (SensorLookoutMinSight).
+	// A mobile sensor array on its way to a lookout (SensorLookoutMinSight), and the frames its trip
+	// may take (SensorTrip*).
 	struct NeuralSensorTrip
 	{
 		DWORD ID { 0 };
 		CellStruct Target { CellStruct::Empty };
 		int Frame { 0 };
+		int LateFrames { 0 };
+	};
+
+	// A link of the sensor chain (SensorChain*): where a sensor array of ours stands unfolded or is
+	// about to, its land, its sensor radius and its building.
+	struct NeuralSensorLink
+	{
+		CellStruct Cell { CellStruct::Empty };
+		int Zone { -1 };
+		int Radius { 0 };
+		BuildingTypeClass* Type { nullptr };
 	};
 
 	// A known enemy building area for a later remnant search: its cell, owner and the frame it was last known.
@@ -121,11 +133,13 @@ namespace
 		int LastSweepFrame { -100000 };
 		// Whether an enemy object was in our sight at the last update.
 		bool EnemyInSight { true };
-		// Mobile sensor arrays on their way to a lookout, the last frame lookouts were weighed, and
-		// our unfolded sensor arrays with the frame each was first seen standing (UniqueID order).
+		// Mobile sensor arrays on their way to a lookout and the last frame lookouts were weighed.
 		std::vector<NeuralSensorTrip> SensorTrips {};
 		int SensorCheckFrame { -100000 };
-		std::vector<std::pair<DWORD, int>> SensorStands {};
+		// Sensor chain (SensorChain*): whether one more array has a post toward a stealth sighting no
+		// sensor of ours covers (production reads it), and the frame before which none is asked for.
+		bool SensorChainAsks { false };
+		int SensorChainHoldUntil { -100000 };
 	};
 
 	std::array<NeuralScoutState, 32> ScoutStates {};
@@ -1614,6 +1628,92 @@ namespace
 		return best;
 	}
 
+	// One more link of the sensor chain (SensorChain*) toward a stealth sighting, for a sensor array
+	// of this radius that unfolds in `zone`, with `links` the cells where arrays of ours stand or are
+	// about to on that land: a deployable cell on the line from the link nearest the sighting toward
+	// it, far enough from every link to add ground and nearer the sighting than that link. With no
+	// link on that land, by our building there nearest the sighting. Empty when there is none.
+	CellStruct FindSensorChainPost(HouseClass* pHouse, BuildingTypeClass* pSensorBld, int zone, int radius, const CellStruct& sighting,
+		const std::vector<CellStruct>& links, UnitClass* pSelf = nullptr)
+	{
+		if (!pHouse || !pSensorBld || zone < 0 || sighting == CellStruct::Empty)
+			return CellStruct::Empty;
+
+		if (links.empty())
+		{
+			CellStruct base = CellStruct::Empty;
+			int baseDist = 0;
+
+			for (auto const pBld : pHouse->Buildings)
+			{
+				if (!pBld || !pBld->IsAlive || pBld->InLimbo || !pBld->Type || pBld->Type->Wall || !IsTrueBaseStructureTarget(pBld->Type))
+					continue;
+
+				const CellStruct at = pBld->GetMapCoords();
+				const int dist = static_cast<int>(at.DistanceFrom(sighting));
+
+				if ((base == CellStruct::Empty || dist < baseDist)
+					&& MapClass::Instance.GetMovementZoneType(at, MovementZone::Normal, pBld->OnBridge) == zone)
+				{
+					base = at;
+					baseDist = dist;
+				}
+			}
+
+			if (base == CellStruct::Empty)
+				return CellStruct::Empty;
+
+			const int ahead = std::min(SensorChainBaseAheadCells, baseDist);
+			const int len = std::max(1, baseDist);
+			const CellStruct center { static_cast<short>(base.X + (sighting.X - base.X) * ahead / len),
+				static_cast<short>(base.Y + (sighting.Y - base.Y) * ahead / len) };
+
+			return FindDeployableSensorCellNear(pHouse, pSensorBld, center, zone, 10, pSelf);
+		}
+
+		CellStruct anchor = CellStruct::Empty;
+		int anchorDist = 0;
+
+		for (auto const& link : links)
+		{
+			const int dist = static_cast<int>(link.DistanceFrom(sighting));
+
+			if (anchor == CellStruct::Empty || dist < anchorDist)
+			{
+				anchor = link;
+				anchorDist = dist;
+			}
+		}
+
+		// Within the reach of a link: covered, or about to be.
+		if (anchorDist <= radius)
+			return CellStruct::Empty;
+
+		const int farthest = std::clamp(anchorDist - radius / 2, radius, radius * SensorChainStepPercent / 100);
+
+		for (int step = farthest; step >= radius; step -= SensorChainTryStepCells)
+		{
+			const CellStruct onLine { static_cast<short>(anchor.X + (sighting.X - anchor.X) * step / anchorDist),
+				static_cast<short>(anchor.Y + (sighting.Y - anchor.Y) * step / anchorDist) };
+			const CellStruct post = FindDeployableSensorCellNear(pHouse, pSensorBld, onLine, zone, SensorChainSnapCells, pSelf);
+
+			bool addsGround = post != CellStruct::Empty && static_cast<int>(post.DistanceFrom(sighting)) < anchorDist;
+
+			for (auto const& link : links)
+			{
+				if (!addsGround)
+					break;
+
+				addsGround = link.DistanceFrom(post) >= radius - SensorChainSnapCells;
+			}
+
+			if (addsGround)
+				return post;
+		}
+
+		return CellStruct::Empty;
+	}
+
 	// A sensor vehicle's move to its lookout. An attack-move still pending from an earlier order is
 	// dropped first: the engine takes it up again over any mission but Attack and Move, the unfold
 	// order among them, and the vehicle drove back to that old goal instead of unfolding.
@@ -1646,10 +1746,11 @@ namespace
 
 	// Sensor lookouts (SensorLookoutMinSight), every scouting update: a mobile sensor array on its way
 	// unfolds once there (or steps onto the nearest deployable cell free of ore/slopes), and an idle
-	// packed sensor vehicle ALWAYS deploys at a useful forward/lookout spot even while enemies are in
-	// sight elsewhere on the map (whereas already-deployed arrays stay put while enemies are in sight).
-	// The lookouts alone lead a sensor vehicle: the vehicle micro leaves it to them.
-	void UpdateSensorLookouts(HouseClass* pHouse, NeuralScoutState& state, bool enemyInSight)
+	// packed sensor vehicle ALWAYS deploys: at a post of the sensor chain (SensorChain*) while a
+	// stealth sighting lies out of the reach of our sensors, else at a useful forward/lookout spot.
+	// An unfolded array stays where it is. The lookouts alone lead a sensor vehicle: the vehicle micro
+	// leaves it to them. They also tell production whether the chain has a post for one more array.
+	void UpdateSensorLookouts(HouseClass* pHouse, NeuralScoutState& state)
 	{
 		auto& macro = GetMacroState(pHouse);
 		const int now = Unsorted::CurrentFrame;
@@ -1689,7 +1790,7 @@ namespace
 				Debug::Log("[NeuralAI] House %d Sensor: %s unfolds at (%d,%d), frame %d.\n", houseIdx, pUnit->Type->ID,
 					pUnit->GetMapCoords().X, pUnit->GetMapCoords().Y, now);
 			}
-			else if (now - trip.Frame > SensorLookoutLateFrames)
+			else if (now - trip.Frame > trip.LateFrames)
 			{
 				Debug::Log("[NeuralAI] House %d Sensor: %s gave up on (%d,%d), %d cells short, frame %d.\n", houseIdx, pUnit->Type->ID,
 					trip.Target.X, trip.Target.Y, static_cast<int>(dist), now);
@@ -1730,65 +1831,122 @@ namespace
 
 		state.SensorCheckFrame = now;
 
-		// The newest stealth sighting of the last SensorLookoutSightingFrames no sensor of ours covers
-		// (the frame, then the lowest UniqueID: the map's own order is never read).
-		CellStruct stealthCell = CellStruct::Empty;
-		int stealthFrame = -1;
-		DWORD stealthID = 0;
+		const CellStruct home = GetHouseHomeCell(pHouse);
+		// The links of the sensor chain (SensorChainLinksMost at most): our unfolded arrays, then the
+		// goals of the trips. Plain arrays and loops here and below: NeuralAI.cpp stands at the section
+		// limit of the object file format (C1128), and every new template instantiation counts.
+		NeuralSensorLink links[SensorChainLinksMost];
+		int linkCount = 0;
 
-		for (auto const& [uid, seen] : macro.StealthSightings)
+		for (auto const pBld : pHouse->Buildings)
 		{
-			if (now - seen.second > SensorLookoutSightingFrames || seen.first == CellStruct::Empty)
-				continue;
+			if (linkCount >= SensorChainLinksMost)
+				break;
 
-			auto const pCell = MapClass::Instance.TryGetCellAt(seen.first);
-
-			if (!pCell || pCell->Sensors_InclHouse(static_cast<unsigned int>(houseIdx)))
-				continue;
-
-			if (seen.second > stealthFrame || (seen.second == stealthFrame && uid < stealthID))
+			if (!pBld || !pBld->IsAlive || pBld->InLimbo || !pBld->Type || !pBld->Type->UndeploysInto
+				|| !IsSensorLookoutType(pBld->Type->UndeploysInto) || pBld->CurrentMission == Mission::Selling
+				|| pBld->QueuedMission == Mission::Selling)
 			{
-				stealthCell = seen.first;
-				stealthFrame = seen.second;
-				stealthID = uid;
+				continue;
 			}
+
+			const CellStruct here = pBld->GetMapCoords();
+			links[linkCount++] = { here, MapClass::Instance.GetMovementZoneType(here, MovementZone::Normal, pBld->OnBridge),
+				std::max(1, static_cast<int>(pBld->Type->SensorsSight)), pBld->Type };
 		}
 
-		const CellStruct home = GetHouseHomeCell(pHouse);
+		const int unfolded = linkCount;
 		std::vector<CellStruct> taken;
 
 		for (auto const& trip : state.SensorTrips)
-			taken.push_back(trip.Target);
-
-		// Where a sensor array at `from` in `zone` goes next: the stealth sighting (out of known defense
-		// reach), else for an idle packed vehicle a safe forward frontline post or best lookout (for an
-		// already-deployed building, stay put while enemies are in sight unless stealthCell needs cover).
-		auto nextLookout = [&](BuildingTypeClass* pSensorBld, const CellStruct& from, int zone, int radius,
-			bool isPackedVehicle, UnitClass* pSelf, bool& forStealth) -> CellStruct
 		{
-			forStealth = false;
+			taken.push_back(trip.Target);
+			auto const pUnit = abstract_cast<UnitClass*>(FindOwnFootByID(pHouse, trip.ID));
 
-			if (stealthCell != CellStruct::Empty
-				&& std::none_of(taken.begin(), taken.end(), [&stealthCell, radius](const CellStruct& spot) { return spot.DistanceFrom(stealthCell) < radius; }))
+			if (pUnit && linkCount < SensorChainLinksMost)
 			{
-				const CellStruct look = ScoutStandoffCell(pHouse, stealthCell, home == CellStruct::Empty ? from : home);
+				links[linkCount++] = { trip.Target, ObjectZone(pUnit, MovementZone::Normal),
+					std::max(1, static_cast<int>(pUnit->Type->DeploysInto->SensorsSight)), pUnit->Type->DeploysInto };
+			}
+		}
 
-				if (look != CellStruct::Empty)
+		// Whether a link of the chain reaches the cell: covered, or about to be.
+		auto const reached = [&links, &linkCount](const CellStruct& cell)
+		{
+			for (int i = 0; i < linkCount; ++i)
+			{
+				if (links[i].Cell.DistanceFrom(cell) <= links[i].Radius)
+					return true;
+			}
+
+			return false;
+		};
+
+		// The cells of the links on one land.
+		auto const linkCells = [&links, &linkCount](int zone)
+		{
+			std::vector<CellStruct> cells;
+
+			for (int i = 0; i < linkCount; ++i)
+			{
+				if (links[i].Zone == zone)
+					cells.push_back(links[i].Cell);
+			}
+
+			return cells;
+		};
+
+		// The stealth sightings of the last SensorLookoutSightingFrames no sensor of ours covers and no
+		// link reaches, the newest first (the frame, then the lowest UniqueID: the map's own order is
+		// never read): SensorChainSightingsTried of them, SensorChainSightingsApartCells apart.
+		std::vector<CellStruct> sightings;
+
+		while (sightings.size() < SensorChainSightingsTried)
+		{
+			CellStruct newest = CellStruct::Empty;
+			int newestFrame = -1;
+			DWORD newestID = 0;
+
+			for (auto const& [uid, seen] : macro.StealthSightings)
+			{
+				if (now - seen.second > SensorLookoutSightingFrames || seen.first == CellStruct::Empty
+					|| !(seen.second > newestFrame || (seen.second == newestFrame && uid < newestID)) || reached(seen.first))
 				{
-					const CellStruct dep = FindDeployableSensorCellNear(pHouse, pSensorBld, look, zone, 8, pSelf);
+					continue;
+				}
 
-					if (dep != CellStruct::Empty)
+				bool apart = true;
+
+				for (auto const& kept : sightings)
+				{
+					if (kept.DistanceFrom(seen.first) < SensorChainSightingsApartCells)
 					{
-						forStealth = true;
-						return dep;
+						apart = false;
+						break;
 					}
+				}
+
+				auto const pCell = apart ? MapClass::Instance.TryGetCellAt(seen.first) : nullptr;
+
+				if (pCell && !pCell->Sensors_InclHouse(static_cast<unsigned int>(houseIdx)))
+				{
+					newest = seen.first;
+					newestFrame = seen.second;
+					newestID = uid;
 				}
 			}
 
-			if (enemyInSight && !isPackedVehicle)
-				return CellStruct::Empty;
+			if (newest == CellStruct::Empty)
+				break;
 
-			if (isPackedVehicle && macro.FrontlineThreatCoords != CellStruct::Empty)
+			sightings.push_back(newest);
+		}
+
+		// With no post of the chain for a packed vehicle: a safe forward frontline post, else the best
+		// lookout, else the nearest clean cell (it never sits uselessly as a vehicle).
+		auto const lookoutFor = [&](BuildingTypeClass* pSensorBld, const CellStruct& from, int zone, int radius, UnitClass* pSelf) -> CellStruct
+		{
+			if (macro.FrontlineThreatCoords != CellStruct::Empty)
 			{
 				const CellStruct frontLook = ScoutStandoffCell(pHouse, macro.FrontlineThreatCoords, home == CellStruct::Empty ? from : home);
 
@@ -1809,69 +1967,24 @@ namespace
 				}
 			}
 
-			CellStruct best = FindSensorLookout(pHouse, pSensorBld, from, zone, radius, taken);
+			const CellStruct best = FindSensorLookout(pHouse, pSensorBld, from, zone, radius, taken);
 
-			if (best == CellStruct::Empty && isPackedVehicle)
-			{
-				// Never leave a packed LPST sitting uselessly as a vehicle: unfold at the nearest clean cell!
-				best = FindDeployableSensorCellNear(pHouse, pSensorBld, from, zone, 10, pSelf);
-			}
-
-			return best;
+			return best != CellStruct::Empty ? best : FindDeployableSensorCellNear(pHouse, pSensorBld, from, zone, 10, pSelf);
 		};
 
-		// Unfolded ones: the frame each was first seen standing.
-		std::vector<std::pair<DWORD, int>> stands;
+		// Idle packed ones ALWAYS find a deployable post, also with enemies in sight. An unfolded one
+		// is never packed up for another place: packed it finds nothing.
+		int packed = 0;
+		bool strayed = false;
 
-		for (auto const pBld : pHouse->Buildings)
-		{
-			if (!pBld || !pBld->IsAlive || pBld->InLimbo || !pBld->Type || !pBld->Type->UndeploysInto
-				|| !IsSensorLookoutType(pBld->Type->UndeploysInto))
-			{
-				continue;
-			}
-
-			auto const it = std::find_if(state.SensorStands.begin(), state.SensorStands.end(),
-				[pBld](const std::pair<DWORD, int>& stand) { return stand.first == pBld->UniqueID; });
-			const int since = it != state.SensorStands.end() ? it->second : now;
-			stands.emplace_back(pBld->UniqueID, since);
-
-			if (pBld->CurrentMission == Mission::Construction || pBld->CurrentMission == Mission::Selling
-				|| pBld->QueuedMission == Mission::Selling || macro.PlanMembers.contains(pBld->UniqueID))
-			{
-				continue;
-			}
-
-			const CellStruct here = pBld->GetMapCoords();
-			const int zone = MapClass::Instance.GetMovementZoneType(here, MovementZone::Normal, pBld->OnBridge);
-			const int radius = std::max(1, static_cast<int>(pBld->Type->SensorsSight));
-			bool forStealth = false;
-			const CellStruct next = nextLookout(pBld->Type, here, zone, radius, false, nullptr, forStealth);
-
-			if (next == CellStruct::Empty || next.DistanceFrom(here) < SensorLookoutMinMoveCells
-				|| now - since < (forStealth ? 2 * ScoutSweepEveryFrames : SensorLookoutDwellFrames))
-			{
-				continue;
-			}
-
-			if (auto const pNext = MapClass::Instance.TryGetCellAt(next))
-			{
-				pBld->SetArchiveTarget(pNext);
-				pBld->Sell(1);
-				taken.push_back(next);
-				Debug::Log("[NeuralAI] House %d Sensor: %s packs up at (%d,%d) for %s (%d,%d) after %d frames, frame %d.\n", houseIdx,
-					pBld->Type->ID, here.X, here.Y, forStealth ? "a stealth sighting" : "a lookout", next.X, next.Y, now - since, now);
-			}
-		}
-
-		std::sort(stands.begin(), stands.end());
-		state.SensorStands = std::move(stands);
-
-		// Idle mobile ones ALWAYS find a deployable lookout (even when enemyInSight == true!).
 		for (auto const pUnit : UnitClass::Array)
 		{
-			if (!pUnit || pUnit->Owner != pHouse || !pUnit->IsAlive || pUnit->InLimbo || !IsSensorLookoutType(pUnit->Type)
-				|| pUnit->IsDeploying || macro.PlanMembers.contains(pUnit->UniqueID) || IsInTransportOp(pHouse, pUnit->UniqueID)
+			if (!pUnit || pUnit->Owner != pHouse || !pUnit->IsAlive || pUnit->InLimbo || !IsSensorLookoutType(pUnit->Type))
+				continue;
+
+			packed++;
+
+			if (pUnit->IsDeploying || macro.PlanMembers.contains(pUnit->UniqueID) || IsInTransportOp(pHouse, pUnit->UniqueID)
 				|| IsScoutTripUnit(state, pUnit->UniqueID) || pUnit->GetHealthPercentage() < 0.5 || !IsSensorVehicleFree(pUnit))
 			{
 				continue;
@@ -1882,23 +1995,117 @@ namespace
 			if (zone < 0)
 				continue;
 
+			auto const pSensorBld = pUnit->Type->DeploysInto;
 			const CellStruct from = pUnit->GetMapCoords();
-			const int radius = std::max(1, static_cast<int>(pUnit->Type->DeploysInto->SensorsSight));
-			bool forStealth = false;
-			const CellStruct next = nextLookout(pUnit->Type->DeploysInto, from, zone, radius, true, pUnit, forStealth);
+			const int radius = std::max(1, static_cast<int>(pSensorBld->SensorsSight));
+			const std::vector<CellStruct> chain = linkCells(zone);
+			CellStruct next = CellStruct::Empty;
+			CellStruct chainSighting = CellStruct::Empty;
+			bool sightingLeft = false;
+
+			for (auto const& sighting : sightings)
+			{
+				if (reached(sighting))
+					continue;
+
+				sightingLeft = true;
+				next = FindSensorChainPost(pHouse, pSensorBld, zone, radius, sighting, chain, pUnit);
+
+				if (next != CellStruct::Empty)
+				{
+					chainSighting = sighting;
+					break;
+				}
+			}
+
+			const bool forChain = next != CellStruct::Empty;
+
+			if (!forChain)
+			{
+				strayed = strayed || sightingLeft;
+				next = lookoutFor(pSensorBld, from, zone, radius, pUnit);
+			}
+
 			auto const pNext = next != CellStruct::Empty ? MapClass::Instance.TryGetCellAt(next) : nullptr;
 
 			if (!pNext)
 				continue;
 
+			const int cells = static_cast<int>(from.DistanceFrom(next));
 			OrderSensorMove(pUnit, pNext);
-			state.SensorTrips.push_back({ pUnit->UniqueID, next, now });
+			state.SensorTrips.push_back({ pUnit->UniqueID, next, now,
+				SensorTripBaseFrames + cells * SensorTripFramesPerCellSpeed / std::max(1, pUnit->Type->Speed) });
 			macro.PlanMembers.insert(pUnit->UniqueID);
 			taken.push_back(next);
+
+			if (linkCount < SensorChainLinksMost)
+				links[linkCount++] = { next, zone, radius, pSensorBld };
+
 			CountDecision(NeuralDecision::SensorLookout, houseIdx);
-			Debug::Log("[NeuralAI] House %d Sensor: %s to %s (%d,%d), %d cells, frame %d.\n", houseIdx, pUnit->Type->ID,
-				forStealth ? "a stealth sighting" : "a lookout", next.X, next.Y, static_cast<int>(from.DistanceFrom(next)), now);
+
+			if (forChain)
+			{
+				Debug::Log("[NeuralAI] House %d Sensor: %s to a chain post (%d,%d), %d cells, for the stealth sighting (%d,%d) %d cells from "
+					"the post, %d links on its land, frame %d.\n", houseIdx, pUnit->Type->ID, next.X, next.Y, cells, chainSighting.X,
+					chainSighting.Y, static_cast<int>(next.DistanceFrom(chainSighting)), static_cast<int>(chain.size()), now);
+			}
+			else
+			{
+				Debug::Log("[NeuralAI] House %d Sensor: %s to a lookout (%d,%d), %d cells, frame %d.\n", houseIdx, pUnit->Type->ID,
+					next.X, next.Y, cells, now);
+			}
 		}
+
+		// One more array for the chain? Only with a post for it from the link nearest the sighting
+		// (with no link at all it is the first one, by our base).
+		bool wanted = false;
+		CellStruct wantedFor = CellStruct::Empty;
+
+		for (auto const& sighting : sightings)
+		{
+			if (reached(sighting))
+				continue;
+
+			const NeuralSensorLink* pNearest = nullptr;
+			int nearestDist = 0;
+
+			for (int i = 0; i < linkCount; ++i)
+			{
+				const int dist = static_cast<int>(links[i].Cell.DistanceFrom(sighting));
+
+				if (!pNearest || dist < nearestDist)
+				{
+					pNearest = &links[i];
+					nearestDist = dist;
+				}
+			}
+
+			if (!pNearest || FindSensorChainPost(pHouse, pNearest->Type, pNearest->Zone, pNearest->Radius, sighting,
+				linkCells(pNearest->Zone)) != CellStruct::Empty)
+			{
+				wanted = true;
+				wantedFor = sighting;
+				break;
+			}
+		}
+
+		// The chain has a post but a vehicle found none on its own land: one more would stray too.
+		if (wanted && strayed)
+		{
+			state.SensorChainHoldUntil = now + SensorLookoutSightingFrames;
+			Debug::Log("[NeuralAI] House %d Sensor chain: a vehicle found no post on its land for the stealth sighting (%d,%d), no array "
+				"asked for %d frames, frame %d.\n", houseIdx, wantedFor.X, wantedFor.Y, SensorLookoutSightingFrames, now);
+		}
+
+		const bool asks = wanted && packed == 0 && now >= state.SensorChainHoldUntil;
+
+		if (asks && !state.SensorChainAsks)
+		{
+			Debug::Log("[NeuralAI] House %d Sensor chain: one more array asked for the stealth sighting (%d,%d), %d unfolded, frame %d.\n",
+				houseIdx, wantedFor.X, wantedFor.Y, unfolded, now);
+		}
+
+		state.SensorChainAsks = asks;
 	}
 
 	void UpdatePurposefulScouting(HouseClass* pHouse)
@@ -2049,7 +2256,7 @@ namespace
 		}
 
 		state.EnemyInSight = enemyInSight;
-		UpdateSensorLookouts(pHouse, state, enemyInSight);
+		UpdateSensorLookouts(pHouse, state);
 
 		const bool launchWindow = now >= 450 && now - state.LastLaunchFrame >= ScoutLaunchCooldownFrames;
 		// Sweep: with no enemy in sight one more scout every ScoutSweepEveryFrames, the grid of places
