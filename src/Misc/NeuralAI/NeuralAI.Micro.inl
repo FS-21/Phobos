@@ -2063,8 +2063,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	// ha de ser del 100%»): no turning back, no wait for a fight to end. The trip is an operation (order leases: no wave or routine order takes it) and a transport
 	// operation carries it across water. With enemies on the way it may wait for the next wave sent
 	// toward its site and follow it (DeployerTripFollowsWave, learned). On its site it unfolds
-	// (DeployerSiteMostTries unpack orders, McvIdleArriveFrames on or next to it at most); refused, it
-	// takes the valid cell nearest where it stands, past the refused ones (DeployerRefusedAvoidCells),
+	// (DeployerSiteMostTries unpack orders DeployerUnpackGapFrames apart, McvIdleArriveFrames on or next to
+	// it at most); refused, it takes the valid cell nearest where it stands, past the refused ones (DeployerRefusedAvoidCells),
 	// and its goal is never asked again (user, 2026-11-22: the same Nanocore is not sent back and forth
 	// before it deploys). With no cell closer for DeployerStallFrames it unfolds at the nearest valid
 	// cell where it stands. Each cell it is sent to is its post too, as for the members of an operation:
@@ -2166,6 +2166,76 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			return true;
 		};
 
+		// The deploy space clearing of ExtendedBuildingPlacing retries this deployer by itself: the house
+		// lists it among its deploying units while the units on its foundation step aside.
+		auto const clearingDeploySpace = [&]() -> bool
+		{
+			auto const pHouseExt = HouseExt::Fetch(pHouse);
+
+			if (!pHouseExt)
+				return false;
+
+			auto const& deploying = pHouseExt->OwnedDeployingUnits;
+
+			return std::find(deploying.begin(), deploying.end(), pUnit) != deploying.end();
+		};
+
+		// TEMP diagnostic: what UnitClass::TryToDeploy sees of an unpack order: the missions, the deploy
+		// flags, a destination left, the turn to the deploy facing, the deploy space clearing and its timer,
+		// whether the foundation is legal and how many units stand on it.
+		auto const describeUnpack = [&]() -> std::string
+		{
+			const int w = pBld->GetFoundationWidth();
+			const int h = pBld->GetFoundationHeight(false);
+			const CellStruct topLeft = here + ((w > 2 || h > 2) ? CellStruct { -1, -1 } : CellStruct { 0, 0 });
+			int unitsOn = 0;
+			std::vector<FootClass*> cellFoots;
+
+			for (auto pFoundCell = pBld->GetFoundationData(true); *pFoundCell != CellStruct { 0x7FFF, 0x7FFF }; ++pFoundCell)
+			{
+				auto const pFC = MapClass::Instance.TryGetCellAt(topLeft + *pFoundCell);
+
+				if (!pFC)
+					continue;
+
+				cellFoots.clear();
+				CollectCellFoots(pFC, cellFoots);
+
+				for (auto const pFoot : cellFoots)
+				{
+					if (pFoot != pUnit)
+						++unitsOn;
+				}
+			}
+
+			auto const pUnitExt = UnitExt::Fetch(pUnit);
+			char text[384];
+			sprintf_s(text, "mission %d queued %d step %d, deploying %d/%d, destination %d, turning %d facing %d of %d, moving %d, "
+				"clearing %d timer %d, foundation %s with %d units on it",
+				static_cast<int>(pUnit->CurrentMission), static_cast<int>(pUnit->QueuedMission), pUnit->MissionStatus,
+				pUnit->IsDeploying ? 1 : 0, pUnit->Deploying ? 1 : 0, pUnit->Destination ? 1 : 0,
+				pUnit->PrimaryFacing.IsRotating() ? 1 : 0, static_cast<int>(pUnit->PrimaryFacing.Current().GetFacing<256>()),
+				pBld->DeployFacing, pUnit->Locomotor->Is_Moving_Now() ? 1 : 0, clearingDeploySpace() ? 1 : 0,
+				pUnitExt ? pUnitExt->UnitAutoDeployTimer.GetTimeLeft() : -1,
+				UnitExt::CanDeployIntoBuilding(pUnit) ? "legal" : "refused", unitsOn);
+
+			return text;
+		};
+
+		// TEMP diagnostic: an unpack order the engine answered without unfolding (off the unload mission
+		// and not deploying), once an order.
+		if (order.Tries > order.UnpackLoggedTry && !pUnit->IsDeploying && pUnit->CurrentMission != Mission::Unload)
+		{
+			order.UnpackLoggedTry = order.Tries;
+
+			if (deployerLog())
+			{
+				Debug::Log("[NeuralAI] House %d deployer unpack refused: %s %u (%s) at (%d,%d), order %d, %d frames after it, %s, frame %d.\n",
+					pHouse->ArrayIndex, pType->ID, pUnit->UniqueID, buildingName, here.X, here.Y, order.Tries, now - order.TryFrame,
+					describeUnpack().c_str(), now);
+			}
+		}
+
 		auto const failSite = [&](const char* why)
 		{
 			// TEMP diagnostic: what refused each site, and the first time what stands around the deployer.
@@ -2182,6 +2252,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			order.Site = CellStruct::Empty;
 			order.PickFrame = -1;
 			order.Tries = 0;
+			order.UnpackLoggedTry = 0;
 			order.NearSince = -1;
 			CountDecision(NeuralDecision::DeployerSiteFailed, pHouse->ArrayIndex);
 		};
@@ -2296,6 +2367,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				: FindDeployerSiteNear(pHouse, pBld, pUnit, order.Goal, &order.FailedSites, CellStruct::Empty, 6, &reach);
 			order.HeldIn = false;
 			order.Tries = 0;
+			order.UnpackLoggedTry = 0;
 			order.NearSince = -1;
 			order.BestDist = INT_MAX;
 			order.ProgressFrame = now;
@@ -2509,10 +2581,26 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		if ((here == order.Site || (siteDist <= 1.5 && !driving)) && CanDeployerUnpackHere(pHouse, pBld, pUnit))
 		{
+			// The next order once the engine had time to answer the last one: a refusal puts the deployer
+			// on Guard at once, and the deploy space clearing retries it by itself meanwhile.
+			if (order.Tries > 0 && now >= order.TryFrame
+				&& now - order.TryFrame < (clearingDeploySpace() ? McvUnfoldRetryFrames : DeployerUnpackGapFrames))
+			{
+				return;
+			}
+
 			if (order.Tries >= DeployerSiteMostTries)
 			{
 				failSite("the engine never unfolded it");
 				return;
+			}
+
+			// TEMP diagnostic: each unpack order on the site and what the engine will see.
+			if (deployerLog())
+			{
+				Debug::Log("[NeuralAI] House %d deployer unpack order: %s %u (%s) at (%d,%d), order %d, %s, frame %d.\n",
+					pHouse->ArrayIndex, pType->ID, pUnit->UniqueID, buildingName, here.X, here.Y, order.Tries + 1,
+					describeUnpack().c_str(), now);
 			}
 
 			++order.Tries;
