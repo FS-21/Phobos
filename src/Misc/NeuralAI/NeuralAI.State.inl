@@ -955,6 +955,12 @@ namespace
 		bool PocketLogged { false };
 		bool NeighboursLogged { false };
 		int LogLines { 0 };
+		// Searches in a row that found no site, since when it has none, how far the goal was given up
+		// (DeployerNoSitePicks) and whether that goal's empty search was logged.
+		int EmptyPicks { 0 };
+		int IdleSince { -1 };
+		int NoSiteStep { 0 };
+		bool NoSiteLogged { false };
 	};
 
 	// The cells a deployer gets to by itself within Radius of Center (DeployerReachCells), row by row,
@@ -3551,6 +3557,11 @@ namespace
 	// and its next site is looked for around it.
 	constexpr int DeployerReachCells = 24;
 	constexpr int DeployerNoMoveFrames = 450;
+	// Never idle (user, 2026-11-25: Nanocores stood thousands of frames with no site for their goal while
+	// the yard waited for them): after DeployerNoSitePicks searches in a row with no site, the base expert
+	// gives a new goal for the building, then the base, then where the deployer stands. A deployer with no
+	// site brings nothing for now, so the yard may build that building meanwhile.
+	constexpr int DeployerNoSitePicks = 3;
 	// Escort: a trip with known enemies on the way (DeployerTripRisk: their value near the site and the
 	// midpoint, DeployerTripRiskDefense for a known enemy defense that reaches the site) weighs going now
 	// against following the next wave sent its way, DeployerEscortFollowFrames after it; it waits
