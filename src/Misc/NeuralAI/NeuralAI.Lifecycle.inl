@@ -90,6 +90,9 @@ void NeuralAI::Shutdown()
 		NeuralAI::TelemetryShmHandle = NULL;
 	}
 
+	ChallengerSlotBase.Close();
+	OpponentSlotBase.Close();
+
 	if (NeuralAI::BaseMappedView)
 	{
 		UnmapViewOfFile(NeuralAI::BaseMappedView);
@@ -517,6 +520,123 @@ static void LoadContextRoutingTables()
 		OpponentContextRouting.Loaded ? "loaded" : "shared");
 }
 
+static bool LoadSlotBaseFromSharedMemory(const char* pName, SlotBaseMapping& outBase)
+{
+	outBase.Close();
+
+	HANDLE hMapping = OpenFileMappingA(FILE_MAP_READ, FALSE, pName);
+	if (!hMapping)
+		return false;
+
+	constexpr size_t MaxAllowedBaseBytes = 64u * 1024u * 1024u;
+	size_t totalBytes = 0;
+
+	if (auto const pHdrView = static_cast<const uint8_t*>(MapViewOfFile(hMapping, FILE_MAP_READ, 0, 0, sizeof(AIBaseHeader))))
+	{
+		auto const pHdr = reinterpret_cast<const AIBaseHeader*>(pHdrView);
+		if (std::memcmp(pHdr->Magic, "PHOBOSAI", 8) == 0
+			&& pHdr->TotalSizeBytes >= sizeof(AIBaseHeader)
+			&& pHdr->TotalSizeBytes <= MaxAllowedBaseBytes)
+		{
+			totalBytes = static_cast<size_t>(pHdr->TotalSizeBytes);
+		}
+		UnmapViewOfFile(pHdrView);
+	}
+
+	if (totalBytes >= sizeof(AIBaseHeader))
+	{
+		if (auto const pView = static_cast<const uint8_t*>(MapViewOfFile(hMapping, FILE_MAP_READ, 0, 0, totalBytes)))
+		{
+			outBase.MappingHandle = hMapping;
+			outBase.View = pView;
+			outBase.Size = totalBytes;
+			return true;
+		}
+	}
+
+	CloseHandle(hMapping);
+	return false;
+}
+
+static bool LoadSlotBaseFromFile(const char* pPath, SlotBaseMapping& outBase)
+{
+	outBase.Close();
+
+	HANDLE hFile = CreateFileA(
+		pPath, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (hFile == INVALID_HANDLE_VALUE)
+		return false;
+
+	LARGE_INTEGER fileSize {};
+	if (!GetFileSizeEx(hFile, &fileSize)
+		|| fileSize.QuadPart < static_cast<LONGLONG>(sizeof(AIBaseHeader))
+		|| fileSize.QuadPart > static_cast<LONGLONG>(64LL * 1024LL * 1024LL))
+	{
+		CloseHandle(hFile);
+		return false;
+	}
+
+	const size_t mappedBytes = static_cast<size_t>(fileSize.QuadPart);
+	HANDLE hMapping = CreateFileMappingA(hFile, NULL, PAGE_READONLY, 0, 0, NULL);
+	if (!hMapping)
+	{
+		CloseHandle(hFile);
+		return false;
+	}
+
+	auto const pView = static_cast<const uint8_t*>(MapViewOfFile(hMapping, FILE_MAP_READ, 0, 0, mappedBytes));
+	if (!pView)
+	{
+		CloseHandle(hMapping);
+		CloseHandle(hFile);
+		return false;
+	}
+
+	auto const pHdr = reinterpret_cast<const AIBaseHeader*>(pView);
+	if (std::memcmp(pHdr->Magic, "PHOBOSAI", 8) != 0
+		|| pHdr->TotalSizeBytes < sizeof(AIBaseHeader)
+		|| static_cast<size_t>(pHdr->TotalSizeBytes) > mappedBytes)
+	{
+		UnmapViewOfFile(pView);
+		CloseHandle(hMapping);
+		CloseHandle(hFile);
+		return false;
+	}
+
+	outBase.FileHandle = hFile;
+	outBase.MappingHandle = hMapping;
+	outBase.View = pView;
+	outBase.Size = static_cast<size_t>(pHdr->TotalSizeBytes);
+	return true;
+}
+
+static const uint8_t* SelectHouseBaseModel(
+	const HouseClass* pHouse,
+	const uint8_t* pSharedBaseView,
+	size_t sharedBaseSize,
+	size_t& outSize)
+{
+	if (NeuralAI::HeadlessMode && pHouse)
+	{
+		auto const pExt = HouseExt::TryFetch(pHouse);
+		const int policySlot = pExt ? pExt->NeuralAI_PolicySlot : 0;
+
+		if (policySlot == 1 && OpponentSlotBase.View && OpponentSlotBase.Size >= sizeof(AIBaseHeader))
+		{
+			outSize = OpponentSlotBase.Size;
+			return OpponentSlotBase.View;
+		}
+		if (policySlot == 0 && ChallengerSlotBase.View && ChallengerSlotBase.Size >= sizeof(AIBaseHeader))
+		{
+			outSize = ChallengerSlotBase.Size;
+			return ChallengerSlotBase.View;
+		}
+	}
+
+	outSize = sharedBaseSize;
+	return pSharedBaseView;
+}
+
 const AIBackpackFile& NeuralAI::PolicyFor(const HouseClass* pHouse)
 {
 	if (NeuralAI::HeadlessMode && NeuralAI::OpponentLoaded)
@@ -532,6 +652,12 @@ const AIBackpackFile& NeuralAI::PolicyFor(const HouseClass* pHouse)
 
 void NeuralAI::LoadOrResetBackpack()
 {
+	ChallengerSlotBase.Close();
+	OpponentSlotBase.Close();
+	LoggedInvalidV3GateHeader = false;
+	LoggedInvalidV3MlpHeader = false;
+	LoggedExpertOffsetFallback = false;
+
 	NeuralAI::CurrentRulesSignature = NeuralAI::ComputeRulesSignature();
 
 	uint64_t baseModelHash = 0;
@@ -622,12 +748,29 @@ void NeuralAI::LoadOrResetBackpack()
 
 		LoadContextRoutingTables();
 
+		std::snprintf(policyPath, sizeof(policyPath), "Local\\PhobosAIBase_%d", NeuralAI::TrainSlotIndex);
+		if (!LoadSlotBaseFromSharedMemory(policyPath, ChallengerSlotBase))
+		{
+			std::snprintf(policyPath, sizeof(policyPath), "Resources\\AI\\ai_base_slot_%d.bin", NeuralAI::TrainSlotIndex);
+			LoadSlotBaseFromFile(policyPath, ChallengerSlotBase);
+		}
+
+		std::snprintf(policyPath, sizeof(policyPath), "Local\\PhobosAIBaseOpp_%d", NeuralAI::TrainSlotIndex);
+		if (!LoadSlotBaseFromSharedMemory(policyPath, OpponentSlotBase))
+		{
+			std::snprintf(policyPath, sizeof(policyPath), "Resources\\AI\\ai_base_opp_slot_%d.bin", NeuralAI::TrainSlotIndex);
+			LoadSlotBaseFromFile(policyPath, OpponentSlotBase);
+		}
+
 		NeuralAI::AllowBackpackInference = true;
 
 		NeuralAI::BackpackLoaded = true;
 
-		Debug::Log("[NeuralAI] Headless policies: challenger=%s opponent=%s\n", challengerLoaded ? "loaded" : "default",
-			NeuralAI::OpponentLoaded ? "loaded" : "shared");
+		Debug::Log("[NeuralAI] Headless policies: challenger=%s opponent=%s | base_challenger=%s base_opponent=%s\n",
+			challengerLoaded ? "loaded" : "default",
+			NeuralAI::OpponentLoaded ? "loaded" : "shared",
+			ChallengerSlotBase.View ? "slot-override" : "shared",
+			OpponentSlotBase.View ? "slot-override" : "shared");
 
 		return;
 	}
@@ -1058,7 +1201,7 @@ void NeuralAI::OnScenarioStart()
 					/ (matchesPlayed[a] + ArchetypeMemoryPrior);
 				const int memBonus = std::clamp(meanX100 * ArchetypeMemoryWeight / 100, -ArchetypeMemoryCap, ArchetypeMemoryCap);
 				const int tryBonus = NeuralAI::TrainingMode
-					? static_cast<int>(ArchetypeTryBonus / std::sqrt(1.0 + static_cast<double>(matchesPlayed[a])))
+					? ExactInvSqrtScaled(static_cast<int>(ArchetypeTryBonus), static_cast<uint32_t>(std::max(0, matchesPlayed[a])))
 					: 0;
 				const int exploreJitter = ScenarioClass::Instance->Random.RandomRanged(-90, 90);
 				const int archBiasSlot = (a < 5) ? (48 + a) : (86 + (a - 5));

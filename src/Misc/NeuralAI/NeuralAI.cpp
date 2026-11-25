@@ -97,6 +97,66 @@ namespace
 	// Headless training trajectory ring buffer (zero bytes allocated in normal play).
 	HANDLE TrajectoryShmHandle = NULL;
 	AITrajectorySharedBuffer* TrajectoryView = nullptr;
+
+	// Optional per-slot base models handed over by the Trainer during evaluations
+	// (e.g. immutable Gen-0 untrained anchor or frozen previous generation), so each
+	// policy slot evaluates its own ai_base weights instead of sharing BaseMappedView.
+	struct SlotBaseMapping
+	{
+		HANDLE FileHandle = INVALID_HANDLE_VALUE;
+		HANDLE MappingHandle = NULL;
+		const uint8_t* View = nullptr;
+		size_t Size = 0;
+
+		void Close()
+		{
+			if (this->View)
+			{
+				UnmapViewOfFile(this->View);
+				this->View = nullptr;
+			}
+			if (this->MappingHandle)
+			{
+				CloseHandle(this->MappingHandle);
+				this->MappingHandle = NULL;
+			}
+			if (this->FileHandle != INVALID_HANDLE_VALUE)
+			{
+				CloseHandle(this->FileHandle);
+				this->FileHandle = INVALID_HANDLE_VALUE;
+			}
+			this->Size = 0;
+		}
+	};
+
+	SlotBaseMapping ChallengerSlotBase {};
+	SlotBaseMapping OpponentSlotBase {};
+	bool LoggedInvalidV3GateHeader = false;
+	bool LoggedInvalidV3MlpHeader = false;
+	bool LoggedExpertOffsetFallback = false;
+
+	// Exact floor(numerator / sqrt(1 + count)) using pure 64-bit integer arithmetic
+	// (k <= num / sqrt(1 + count) <=> k^2 <= floor(num^2 / (1 + count))), avoiding FPU/SSE ulp drift.
+	int ExactInvSqrtScaled(int numerator, uint32_t count)
+	{
+		if (numerator <= 0)
+			return 0;
+
+		const uint64_t numSq = static_cast<uint64_t>(numerator) * static_cast<uint64_t>(numerator);
+		const uint64_t denom = 1ULL + static_cast<uint64_t>(count);
+		const uint64_t quot = numSq / denom;
+		if (quot == 0)
+			return 0;
+
+		uint64_t x = quot;
+		uint64_t y = (x + 1ULL) >> 1;
+		while (y < x)
+		{
+			x = y;
+			y = (x + quot / x) >> 1;
+		}
+		return static_cast<int>(x);
+	}
 } // namespace
 
 AIBackpackFile NeuralAI::Backpack = {};
