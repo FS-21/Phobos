@@ -1765,6 +1765,18 @@ namespace
 				continue;
 
 			const double dist = pUnit->GetMapCoords().DistanceFrom(trip.Target);
+
+			// Hurt on its way, the repair retreat of the vehicle micro took it: its trip ends here. The
+			// move ordered again below and the repair station called it by turns (first matches with the
+			// sensor chain: a vehicle 65 cells from its post ended 133 cells from it, its goal changed
+			// 28 times, and it gave up three trips). The lookouts take it again after its repairs.
+			if (IsOnRepairTrip(pHouse, trip.ID))
+			{
+				Debug::Log("[NeuralAI] House %d Sensor: %s leaves its trip to (%d,%d) for repairs at %d%% health, %d cells short, frame %d.\n",
+					houseIdx, pUnit->Type->ID, trip.Target.X, trip.Target.Y, static_cast<int>(pUnit->GetHealthPercentage() * 100),
+					static_cast<int>(dist), now);
+				continue;
+			}
 			const bool moving = pUnit->CurrentMission == Mission::Move || pUnit->QueuedMission == Mission::Move;
 
 			if (pUnit->IsDeploying || pUnit->CurrentMission == Mission::Unload || pUnit->QueuedMission == Mission::Unload
@@ -1984,8 +1996,10 @@ namespace
 
 			packed++;
 
+			// One on a repair trip is left to it, whatever its health and its mission by now.
 			if (pUnit->IsDeploying || macro.PlanMembers.contains(pUnit->UniqueID) || IsInTransportOp(pHouse, pUnit->UniqueID)
-				|| IsScoutTripUnit(state, pUnit->UniqueID) || pUnit->GetHealthPercentage() < 0.5 || !IsSensorVehicleFree(pUnit))
+				|| IsScoutTripUnit(state, pUnit->UniqueID) || IsOnRepairTrip(pHouse, pUnit->UniqueID)
+				|| pUnit->GetHealthPercentage() < 0.5 || !IsSensorVehicleFree(pUnit))
 			{
 				continue;
 			}
