@@ -98,7 +98,7 @@ namespace
 		const bool isOneShotSuicide = pWeapon->Suicide || (pWeaponExt && IsAreaWeapon(pWeaponExt->FeedbackWeapon.Get()));
 
 		if (isOneShotSuicide)
-			rate = std::max(1, rate / 8);
+			rate = std::max(1, rate / 3);
 
 		const int armorCount = GetRegisteredArmorCount();
 		int versesSum = 0;
