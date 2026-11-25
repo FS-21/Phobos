@@ -806,7 +806,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 			if (pending[hIdx].Valid)
 			{
-				const uint32_t slotIdx = TrajectoryView->WriteCount % 200u;
+				const uint32_t slotIdx = TrajectoryView->WriteCount % AITrajectorySharedBuffer::StepCapacity;
 				AITrajectoryStep& step = TrajectoryView->Steps[slotIdx];
 				step = AITrajectoryStep {};
 				step.Frame = pending[hIdx].Frame;
@@ -7178,7 +7178,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			{
 				score += scores[24];
 				candSlot = 24;
-				candFree = true;
+
+				// Slot 24 was raised to slot 25 before the production loops (the floor of the main battle
+				// tank above): while they are equal this total does not depend on the tank's own output.
+				candFree = scores[24] > scores[25];
 
 				// A mass is many tanks of one type: the tank mass (or any house with a rich bank) keeps
 				// only a small share of the per-copy diversity penalty and scales MBT priority with cash.
