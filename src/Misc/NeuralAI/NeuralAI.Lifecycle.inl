@@ -1,934 +1,942 @@
-// NeuralAI.Lifecycle.inl: Lifecycle: command line, base model, backpack,
-// scenario start / end, headless frame tick. Part of NeuralAI.cpp (included in
-// order; one translation unit).
+// NeuralAI.Lifecycle.inl: Lifecycle: command line, base model, backpack, scenario start / end, headless frame tick.
+// Part of NeuralAI.cpp (included in order; one translation unit).
 
-void NeuralAI::ParseCommandLineArg(const char *pArg) {
-  if (!pArg)
-    return;
 
-  if (_stricmp(pArg, "-TRAIN_HEADLESS") == 0 ||
-      _stricmp(pArg, "-TrainHeadless") == 0) {
-    NeuralAI::HeadlessMode = true;
+void NeuralAI::ParseCommandLineArg(const char* pArg)
+{
+	if (!pArg)
+		return;
 
-    Debug::Log(
-        "[NeuralAI] Headless Turbo Training Mode enabled (-TRAIN_HEADLESS).\n");
-  } else if (_strnicmp(pArg, "-TrainSlot=", 11) == 0) {
-    NeuralAI::TrainSlotIndex = std::clamp(std::atoi(pArg + 11), 0, 63);
-    NeuralAI::TrainingMode = true;
+	if (_stricmp(pArg, "-TRAIN_HEADLESS") == 0 || _stricmp(pArg, "-TrainHeadless") == 0)
+	{
+		NeuralAI::HeadlessMode = true;
 
-    Debug::Log("[NeuralAI] Training Slot Index set to %d.\n",
-               NeuralAI::TrainSlotIndex);
-  }
+		Debug::Log("[NeuralAI] Headless Turbo Training Mode enabled (-TRAIN_HEADLESS).\n");
+	}
+	else if (_strnicmp(pArg, "-TrainSlot=", 11) == 0)
+	{
+		NeuralAI::TrainSlotIndex = std::clamp(std::atoi(pArg + 11), 0, 63);
+		NeuralAI::TrainingMode = true;
+
+		Debug::Log("[NeuralAI] Training Slot Index set to %d.\n", NeuralAI::TrainSlotIndex);
+	}
 }
 
-void NeuralAI::Initialize() {
-  CreateDirectoryA("AI", NULL);
+void NeuralAI::Initialize()
+{
+	CreateDirectoryA("AI", NULL);
 
-  NeuralAI::EnsureBaseModelLoaded();
+	NeuralAI::EnsureBaseModelLoaded();
 
-  if (NeuralAI::HeadlessMode)
-    NeuralAI::InitTelemetrySharedMemory();
+	if (NeuralAI::HeadlessMode)
+		NeuralAI::InitTelemetrySharedMemory();
 }
 
-void NeuralAI::Shutdown() {
-  if (TelemetryJsonView) {
-    UnmapViewOfFile(TelemetryJsonView);
+void NeuralAI::Shutdown()
+{
+	if (TelemetryJsonView)
+	{
+		UnmapViewOfFile(TelemetryJsonView);
 
-    TelemetryJsonView = nullptr;
-  }
+		TelemetryJsonView = nullptr;
+	}
 
-  if (TelemetryJsonShmHandle) {
-    CloseHandle(TelemetryJsonShmHandle);
+	if (TelemetryJsonShmHandle)
+	{
+		CloseHandle(TelemetryJsonShmHandle);
 
-    TelemetryJsonShmHandle = NULL;
-  }
+		TelemetryJsonShmHandle = NULL;
+	}
 
-  if (TelemetryViewRequest) {
-    UnmapViewOfFile(const_cast<uint32_t *>(TelemetryViewRequest));
+	if (TelemetryViewRequest)
+	{
+		UnmapViewOfFile(const_cast<uint32_t*>(TelemetryViewRequest));
 
-    TelemetryViewRequest = nullptr;
-  }
+		TelemetryViewRequest = nullptr;
+	}
 
-  if (TelemetryViewShmHandle) {
-    CloseHandle(TelemetryViewShmHandle);
+	if (TelemetryViewShmHandle)
+	{
+		CloseHandle(TelemetryViewShmHandle);
 
-    TelemetryViewShmHandle = NULL;
-  }
+		TelemetryViewShmHandle = NULL;
+	}
 
-  if (TrajectoryView) {
-    UnmapViewOfFile(TrajectoryView);
+	if (TrajectoryView)
+	{
+		UnmapViewOfFile(TrajectoryView);
 
-    TrajectoryView = nullptr;
-  }
+		TrajectoryView = nullptr;
+	}
 
-  if (TrajectoryShmHandle) {
-    CloseHandle(TrajectoryShmHandle);
+	if (TrajectoryShmHandle)
+	{
+		CloseHandle(TrajectoryShmHandle);
 
-    TrajectoryShmHandle = NULL;
-  }
+		TrajectoryShmHandle = NULL;
+	}
 
-  if (NeuralAI::TelemetryView) {
-    UnmapViewOfFile(NeuralAI::TelemetryView);
+	if (NeuralAI::TelemetryView)
+	{
+		UnmapViewOfFile(NeuralAI::TelemetryView);
 
-    NeuralAI::TelemetryView = nullptr;
-  }
+		NeuralAI::TelemetryView = nullptr;
+	}
 
-  if (NeuralAI::TelemetryShmHandle) {
-    CloseHandle(NeuralAI::TelemetryShmHandle);
+	if (NeuralAI::TelemetryShmHandle)
+	{
+		CloseHandle(NeuralAI::TelemetryShmHandle);
 
-    NeuralAI::TelemetryShmHandle = NULL;
-  }
+		NeuralAI::TelemetryShmHandle = NULL;
+	}
 
-  ChallengerSlotBase.Close();
-  OpponentSlotBase.Close();
+	ChallengerSlotBase.Close();
+	OpponentSlotBase.Close();
 
-  if (NeuralAI::BaseMappedView) {
-    UnmapViewOfFile(NeuralAI::BaseMappedView);
+	if (NeuralAI::BaseMappedView)
+	{
+		UnmapViewOfFile(NeuralAI::BaseMappedView);
 
-    NeuralAI::BaseMappedView = nullptr;
-  }
+		NeuralAI::BaseMappedView = nullptr;
+	}
 
-  if (NeuralAI::BaseMappingHandle) {
-    CloseHandle(NeuralAI::BaseMappingHandle);
+	if (NeuralAI::BaseMappingHandle)
+	{
+		CloseHandle(NeuralAI::BaseMappingHandle);
 
-    NeuralAI::BaseMappingHandle = NULL;
-  }
+		NeuralAI::BaseMappingHandle = NULL;
+	}
 
-  if (NeuralAI::BaseFileHandle != INVALID_HANDLE_VALUE) {
-    CloseHandle(NeuralAI::BaseFileHandle);
+	if (NeuralAI::BaseFileHandle != INVALID_HANDLE_VALUE)
+	{
+		CloseHandle(NeuralAI::BaseFileHandle);
 
-    NeuralAI::BaseFileHandle = INVALID_HANDLE_VALUE;
-  }
+		NeuralAI::BaseFileHandle = INVALID_HANDLE_VALUE;
+	}
 }
 
-bool NeuralAI::IsEnabledForHouse(const HouseClass *pHouse) {
-  if (!pHouse || pHouse->IsControlledByHuman() || pHouse->IsNeutral() ||
-      pHouse->IsObserver() || pHouse->Defeated)
-    return false;
+bool NeuralAI::IsEnabledForHouse(const HouseClass* pHouse)
+{
+	if (!pHouse || pHouse->IsControlledByHuman() || pHouse->IsNeutral() || pHouse->IsObserver() || pHouse->Defeated)
+		return false;
 
-  if (pHouse->Type && pHouse->Type->MultiplayPassive)
-    return false;
+	if (pHouse->Type && pHouse->Type->MultiplayPassive)
+		return false;
 
-  if (auto const pRulesExt = RulesExt::Global()) {
-    if (!pRulesExt->NeuralAI_Enabled)
-      return false;
-  }
+	if (auto const pRulesExt = RulesExt::Global())
+	{
+		if (!pRulesExt->NeuralAI_Enabled)
+			return false;
+	}
 
-  return true;
+	return true;
 }
 
-bool NeuralAI::IsCampaignRestricted(const HouseClass *pHouse) {
-  if (!SessionClass::IsCampaign())
-    return false;
+bool NeuralAI::IsCampaignRestricted(const HouseClass* pHouse)
+{
+	if (!SessionClass::IsCampaign())
+		return false;
 
-  if (!pHouse)
-    return true;
+	if (!pHouse)
+		return true;
 
-  if (pHouse->AutoBaseBuilding)
-    return false;
+	if (pHouse->AutoBaseBuilding)
+		return false;
 
-  if (auto const pHouseExt = HouseExt::TryFetch(pHouse)) {
-    if (pHouseExt->NeuralAI_Campaign)
-      return false;
-  }
+	if (auto const pHouseExt = HouseExt::TryFetch(pHouse))
+	{
+		if (pHouseExt->NeuralAI_Campaign)
+			return false;
+	}
 
-  return true;
+	return true;
 }
 
-uint64_t NeuralAI::ComputeRulesSignature() {
-  uint64_t hash = FnvOffsetBasis;
+uint64_t NeuralAI::ComputeRulesSignature()
+{
+	uint64_t hash = FnvOffsetBasis;
 
-  auto const pRules = RulesClass::Instance;
+	auto const pRules = RulesClass::Instance;
 
-  if (!pRules)
-    return hash;
+	if (!pRules)
+		return hash;
 
-  hash = HashValueFNV1a(pRules->HarvestersPerRefinery[0], hash);
+	hash = HashValueFNV1a(pRules->HarvestersPerRefinery[0], hash);
 
-  hash = HashValueFNV1a(pRules->AISlaveMinerNumber[0], hash);
+	hash = HashValueFNV1a(pRules->AISlaveMinerNumber[0], hash);
 
-  hash = HashValueFNV1a(pRules->PowerSurplus, hash);
+	hash = HashValueFNV1a(pRules->PowerSurplus, hash);
 
-  for (auto const pBld : BuildingTypeClass::Array) {
-    if (!pBld)
-      continue;
+	for (auto const pBld : BuildingTypeClass::Array)
+	{
+		if (!pBld)
+			continue;
 
-    hash = HashValueFNV1a(pBld->Cost, hash);
+		hash = HashValueFNV1a(pBld->Cost, hash);
 
-    hash = HashValueFNV1a(pBld->Strength, hash);
+		hash = HashValueFNV1a(pBld->Strength, hash);
 
-    hash = HashValueFNV1a(pBld->TechLevel, hash);
+		hash = HashValueFNV1a(pBld->TechLevel, hash);
 
-    hash = HashValueFNV1a(pBld->PowerBonus, hash);
+		hash = HashValueFNV1a(pBld->PowerBonus, hash);
 
-    hash = HashValueFNV1a(pBld->PowerDrain, hash);
+		hash = HashValueFNV1a(pBld->PowerDrain, hash);
 
-    hash = HashValueFNV1a(pBld->GetOwners(), hash);
-  }
+		hash = HashValueFNV1a(pBld->GetOwners(), hash);
+	}
 
-  for (auto const pUnit : UnitTypeClass::Array) {
-    if (!pUnit)
-      continue;
+	for (auto const pUnit : UnitTypeClass::Array)
+	{
+		if (!pUnit)
+			continue;
 
-    hash = HashValueFNV1a(pUnit->Cost, hash);
+		hash = HashValueFNV1a(pUnit->Cost, hash);
 
-    hash = HashValueFNV1a(pUnit->Strength, hash);
+		hash = HashValueFNV1a(pUnit->Strength, hash);
 
-    hash = HashValueFNV1a(pUnit->Speed, hash);
+		hash = HashValueFNV1a(pUnit->Speed, hash);
 
-    hash = HashValueFNV1a(pUnit->TechLevel, hash);
+		hash = HashValueFNV1a(pUnit->TechLevel, hash);
 
-    hash = HashValueFNV1a(pUnit->GetOwners(), hash);
-  }
+		hash = HashValueFNV1a(pUnit->GetOwners(), hash);
+	}
 
-  for (auto const pInf : InfantryTypeClass::Array) {
-    if (!pInf)
-      continue;
+	for (auto const pInf : InfantryTypeClass::Array)
+	{
+		if (!pInf)
+			continue;
 
-    hash = HashValueFNV1a(pInf->Cost, hash);
+		hash = HashValueFNV1a(pInf->Cost, hash);
 
-    hash = HashValueFNV1a(pInf->Strength, hash);
+		hash = HashValueFNV1a(pInf->Strength, hash);
 
-    hash = HashValueFNV1a(pInf->TechLevel, hash);
+		hash = HashValueFNV1a(pInf->TechLevel, hash);
 
-    hash = HashValueFNV1a(pInf->GetOwners(), hash);
-  }
+		hash = HashValueFNV1a(pInf->GetOwners(), hash);
+	}
 
-  for (auto const pAir : AircraftTypeClass::Array) {
-    if (!pAir)
-      continue;
+	for (auto const pAir : AircraftTypeClass::Array)
+	{
+		if (!pAir)
+			continue;
 
-    hash = HashValueFNV1a(pAir->Cost, hash);
+		hash = HashValueFNV1a(pAir->Cost, hash);
 
-    hash = HashValueFNV1a(pAir->Strength, hash);
+		hash = HashValueFNV1a(pAir->Strength, hash);
 
-    hash = HashValueFNV1a(pAir->TechLevel, hash);
+		hash = HashValueFNV1a(pAir->TechLevel, hash);
 
-    hash = HashValueFNV1a(pAir->GetOwners(), hash);
-  }
+		hash = HashValueFNV1a(pAir->GetOwners(), hash);
+	}
 
-  return hash;
+	return hash;
 }
 
-void NeuralAI::EnsureBaseModelLoaded() {
-  if (NeuralAI::BaseMappedView)
-    return;
+void NeuralAI::EnsureBaseModelLoaded()
+{
+	if (NeuralAI::BaseMappedView)
+		return;
 
-  CreateDirectoryA("AI", NULL);
+	CreateDirectoryA("AI", NULL);
 
-  CreateDirectoryA("Resources\\AI", NULL);
+	CreateDirectoryA("Resources\\AI", NULL);
 
-  const char *basePath = (GetFileAttributesA("Resources\\AI\\ai_base.bin") !=
-                          INVALID_FILE_ATTRIBUTES)
-                             ? "Resources\\AI\\ai_base.bin"
-                             : "AI\\ai_base.bin";
+	const char* basePath = (GetFileAttributesA("Resources\\AI\\ai_base.bin") != INVALID_FILE_ATTRIBUTES)
+		? "Resources\\AI\\ai_base.bin"
+		: "AI\\ai_base.bin";
 
-  DWORD attrs = GetFileAttributesA(basePath);
+	DWORD attrs = GetFileAttributesA(basePath);
 
-  if (attrs == INVALID_FILE_ATTRIBUTES) {
-    // Bootstrap a deterministic compact INT8 MoE base brain if none exists yet.
-    // Phobos_AI_Trainer can expand or replace this with the full 250 MB league
-    // brain.
-    constexpr uint32_t expertBlockSize =
-        NeuralAI::InputVectorSize * NeuralAI::OutputVectorSize;
+	if (attrs == INVALID_FILE_ATTRIBUTES)
+	{
+		// Bootstrap a deterministic compact INT8 MoE base brain if none exists yet.
+		// Phobos_AI_Trainer can expand or replace this with the full 250 MB league
+		// brain.
+		constexpr uint32_t expertBlockSize = NeuralAI::InputVectorSize * NeuralAI::OutputVectorSize;
 
-    constexpr uint32_t totalBootstrapSize =
-        sizeof(AIBaseHeader) + (expertBlockSize * NeuralAI::NumSpecialists);
+		constexpr uint32_t totalBootstrapSize = sizeof(AIBaseHeader) + (expertBlockSize * NeuralAI::NumSpecialists);
 
-    std::vector<uint8_t> buffer(totalBootstrapSize, 0);
+		std::vector<uint8_t> buffer(totalBootstrapSize, 0);
 
-    auto const pHdr = reinterpret_cast<AIBaseHeader *>(buffer.data());
+		auto const pHdr = reinterpret_cast<AIBaseHeader*>(buffer.data());
 
-    std::memcpy(pHdr->Magic, "PHOBOSAI", 8);
+		std::memcpy(pHdr->Magic, "PHOBOSAI", 8);
 
-    pHdr->SchemaVersion = 1;
+		pHdr->SchemaVersion = 1;
 
-    pHdr->TotalSizeBytes = totalBootstrapSize;
+		pHdr->TotalSizeBytes = totalBootstrapSize;
 
-    pHdr->NumExperts = NeuralAI::NumSpecialists;
+		pHdr->NumExperts = NeuralAI::NumSpecialists;
 
-    pHdr->NumArchetypes = NeuralAI::NumArchetypes;
+		pHdr->NumArchetypes = NeuralAI::NumArchetypes;
 
-    pHdr->InputDim = 192;
+		pHdr->InputDim = 192;
 
-    pHdr->ReservedInputDim = 64;
+		pHdr->ReservedInputDim = 64;
 
-    pHdr->HiddenDim1 = 256;
+		pHdr->HiddenDim1 = 256;
 
-    pHdr->HiddenDim2 = 128;
+		pHdr->HiddenDim2 = 128;
 
-    pHdr->OutputDim = 64;
+		pHdr->OutputDim = 64;
 
-    pHdr->ReservedOutputDim = 64;
+		pHdr->ReservedOutputDim = 64;
 
-    for (int i = 0; i < 256; ++i) {
-      const int x = i - 128;
-      const double norm = static_cast<double>(x) / 32.0;
-      // Only + - * / here: the CRT picks CPU-specific exp/tanh code paths (e.g.
-      // FMA3) at runtime, and one ulp of difference could flip a truncated LUT
-      // entry between two multiplayer clients that bootstrap the base brain
-      // locally, causing a desync.
-      const double expNeg = DeterministicExp(-norm);
-      const double sig = 1.0 / (1.0 + expNeg);
-      const double exp2 = DeterministicExp(2.0 * norm);
-      const double tnh = (exp2 - 1.0) / (exp2 + 1.0);
+		for (int i = 0; i < 256; ++i)
+		{
+			const int x = i - 128;
+			const double norm = static_cast<double>(x) / 32.0;
+			// Only + - * / here: the CRT picks CPU-specific exp/tanh code paths (e.g. FMA3) at
+			// runtime, and one ulp of difference could flip a truncated LUT entry between two
+			// multiplayer clients that bootstrap the base brain locally, causing a desync.
+			const double expNeg = DeterministicExp(-norm);
+			const double sig = 1.0 / (1.0 + expNeg);
+			const double exp2 = DeterministicExp(2.0 * norm);
+			const double tnh = (exp2 - 1.0) / (exp2 + 1.0);
 
-      pHdr->SigmoidLUT[i] = ClampInt8(static_cast<int>(sig * 127.0));
+			pHdr->SigmoidLUT[i] = ClampInt8(static_cast<int>(sig * 127.0));
 
-      pHdr->TanhLUT[i] = ClampInt8(static_cast<int>(tnh * 127.0));
-    }
+			pHdr->TanhLUT[i] = ClampInt8(static_cast<int>(tnh * 127.0));
+		}
 
-    uint32_t offset = sizeof(AIBaseHeader);
+		uint32_t offset = sizeof(AIBaseHeader);
 
-    uint64_t seed = 0x50484F424F534149ULL;
+		uint64_t seed = 0x50484F424F534149ULL;
 
-    for (int e = 0; e < NeuralAI::NumSpecialists; ++e) {
-      if (e < 8)
-        pHdr->ExpertWeightsOffset[e] = offset;
-      else
-        pHdr->ExtraExpertWeightsOffset[e - 8] = offset;
+		for (int e = 0; e < NeuralAI::NumSpecialists; ++e)
+		{
+			if (e < 8)
+				pHdr->ExpertWeightsOffset[e] = offset;
+			else
+				pHdr->ExtraExpertWeightsOffset[e - 8] = offset;
 
-      int8_t *w = reinterpret_cast<int8_t *>(buffer.data() + offset);
+			int8_t* w = reinterpret_cast<int8_t*>(buffer.data() + offset);
 
-      for (uint32_t idx = 0; idx < expertBlockSize; ++idx) {
-        seed ^= seed >> 12;
+			for (uint32_t idx = 0; idx < expertBlockSize; ++idx)
+			{
+				seed ^= seed >> 12;
 
-        seed ^= seed << 25;
+				seed ^= seed << 25;
 
-        seed ^= seed >> 27;
+				seed ^= seed >> 27;
 
-        const int32_t val =
-            static_cast<int32_t>((seed * 0x2545F4914F6CDD1DULL) >> 58) - 32;
+				const int32_t val = static_cast<int32_t>((seed * 0x2545F4914F6CDD1DULL) >> 58) - 32;
 
-        w[idx] = ClampInt8(val);
-      }
+				w[idx] = ClampInt8(val);
+			}
 
-      offset += expertBlockSize;
-    }
+			offset += expertBlockSize;
+		}
 
-    pHdr->BaseModelHash =
-        HashBytesFNV1a(buffer.data() + sizeof(AIBaseHeader),
-                       totalBootstrapSize - sizeof(AIBaseHeader));
+		pHdr->BaseModelHash
+			= HashBytesFNV1a(buffer.data() + sizeof(AIBaseHeader), totalBootstrapSize - sizeof(AIBaseHeader));
 
-    HANDLE hOut = CreateFileA(basePath, GENERIC_WRITE, FILE_SHARE_READ, NULL,
-                              CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
+		HANDLE hOut
+			= CreateFileA(basePath, GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
 
-    if (hOut != INVALID_HANDLE_VALUE) {
-      DWORD written = 0;
+		if (hOut != INVALID_HANDLE_VALUE)
+		{
+			DWORD written = 0;
 
-      WriteFile(hOut, buffer.data(), totalBootstrapSize, &written, NULL);
+			WriteFile(hOut, buffer.data(), totalBootstrapSize, &written, NULL);
 
-      CloseHandle(hOut);
-    }
-  }
+			CloseHandle(hOut);
+		}
+	}
 
-  NeuralAI::BaseFileHandle =
-      CreateFileA(basePath, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
-                  NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	NeuralAI::BaseFileHandle = CreateFileA(
+		basePath, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
 
-  if (NeuralAI::BaseFileHandle == INVALID_HANDLE_VALUE)
-    return;
+	if (NeuralAI::BaseFileHandle == INVALID_HANDLE_VALUE)
+		return;
 
-  LARGE_INTEGER fileSize = {};
+	LARGE_INTEGER fileSize = {};
 
-  if (!GetFileSizeEx(NeuralAI::BaseFileHandle, &fileSize) ||
-      fileSize.QuadPart < static_cast<LONGLONG>(sizeof(AIBaseHeader))) {
-    CloseHandle(NeuralAI::BaseFileHandle);
+	if (!GetFileSizeEx(NeuralAI::BaseFileHandle, &fileSize)
+		|| fileSize.QuadPart < static_cast<LONGLONG>(sizeof(AIBaseHeader)))
+	{
+		CloseHandle(NeuralAI::BaseFileHandle);
 
-    NeuralAI::BaseFileHandle = INVALID_HANDLE_VALUE;
+		NeuralAI::BaseFileHandle = INVALID_HANDLE_VALUE;
 
-    return;
-  }
+		return;
+	}
 
-  NeuralAI::BaseMappedSize = static_cast<size_t>(fileSize.QuadPart);
+	NeuralAI::BaseMappedSize = static_cast<size_t>(fileSize.QuadPart);
 
-  NeuralAI::BaseMappingHandle =
-      CreateFileMappingA(NeuralAI::BaseFileHandle, NULL, PAGE_READONLY, 0, 0,
-                         "Local\\PhobosAIBaseSharedMapping");
+	NeuralAI::BaseMappingHandle
+		= CreateFileMappingA(NeuralAI::BaseFileHandle, NULL, PAGE_READONLY, 0, 0, "Local\\PhobosAIBaseSharedMapping");
 
-  if (!NeuralAI::BaseMappingHandle)
-    NeuralAI::BaseMappingHandle = CreateFileMappingA(
-        NeuralAI::BaseFileHandle, NULL, PAGE_READONLY, 0, 0, NULL);
+	if (!NeuralAI::BaseMappingHandle)
+		NeuralAI::BaseMappingHandle = CreateFileMappingA(NeuralAI::BaseFileHandle, NULL, PAGE_READONLY, 0, 0, NULL);
 
-  if (NeuralAI::BaseMappingHandle) {
-    NeuralAI::BaseMappedView = static_cast<const uint8_t *>(
-        MapViewOfFile(NeuralAI::BaseMappingHandle, FILE_MAP_READ, 0, 0, 0));
-  }
+	if (NeuralAI::BaseMappingHandle)
+	{
+		NeuralAI::BaseMappedView
+			= static_cast<const uint8_t*>(MapViewOfFile(NeuralAI::BaseMappingHandle, FILE_MAP_READ, 0, 0, 0));
+	}
 }
 
-bool NeuralAI::LoadBackpackFile(const char *pPath, AIBackpackFile &outBackpack,
-                                bool requireSignature) {
-  HANDLE hFile =
-      CreateFileA(pPath, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
-                  OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+bool NeuralAI::LoadBackpackFile(const char* pPath, AIBackpackFile& outBackpack, bool requireSignature)
+{
+	HANDLE hFile = CreateFileA(
+		pPath, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
 
-  if (hFile == INVALID_HANDLE_VALUE)
-    return false;
+	if (hFile == INVALID_HANDLE_VALUE)
+		return false;
 
-  LARGE_INTEGER fileSize{};
-  if (!GetFileSizeEx(hFile, &fileSize)) {
-    CloseHandle(hFile);
-    return false;
-  }
+	LARGE_INTEGER fileSize {};
+	if (!GetFileSizeEx(hFile, &fileSize))
+	{
+		CloseHandle(hFile);
+		return false;
+	}
 
-  constexpr size_t HeaderBytes = offsetof(AIBackpackFile, Entries);
-  constexpr size_t LegacyTotalBytes =
-      HeaderBytes +
-      AIBackpackFile::LegacyEntryCapacity * sizeof(AIBackpackEntry);
-  constexpr size_t FullTotalBytes = sizeof(AIBackpackFile);
+	constexpr size_t HeaderBytes = offsetof(AIBackpackFile, Entries);
+	constexpr size_t LegacyTotalBytes = HeaderBytes + AIBackpackFile::LegacyEntryCapacity * sizeof(AIBackpackEntry);
+	constexpr size_t FullTotalBytes = sizeof(AIBackpackFile);
 
-  AIBackpackFile loaded = {};
-  DWORD bytesRead = 0;
-  bool valid = false;
+	AIBackpackFile loaded = {};
+	DWORD bytesRead = 0;
+	bool valid = false;
 
-  if (static_cast<size_t>(fileSize.QuadPart) == FullTotalBytes) {
-    valid = ReadFile(hFile, &loaded, static_cast<DWORD>(FullTotalBytes),
-                     &bytesRead, NULL) &&
-            bytesRead == FullTotalBytes &&
-            std::memcmp(loaded.Magic, "PHOBOSBP", 8) == 0 &&
-            (loaded.SchemaVersion == 4 || loaded.SchemaVersion == 3);
-    if (valid)
-      loaded.SchemaVersion = 4;
-  } else if (static_cast<size_t>(fileSize.QuadPart) == LegacyTotalBytes) {
-    valid = ReadFile(hFile, &loaded, static_cast<DWORD>(LegacyTotalBytes),
-                     &bytesRead, NULL) &&
-            bytesRead == LegacyTotalBytes &&
-            std::memcmp(loaded.Magic, "PHOBOSBP", 8) == 0 &&
-            loaded.SchemaVersion == 3;
-    if (valid)
-      loaded.SchemaVersion = 4;
-  }
+	if (static_cast<size_t>(fileSize.QuadPart) == FullTotalBytes)
+	{
+		valid = ReadFile(hFile, &loaded, static_cast<DWORD>(FullTotalBytes), &bytesRead, NULL)
+			&& bytesRead == FullTotalBytes
+			&& std::memcmp(loaded.Magic, "PHOBOSBP", 8) == 0
+			&& (loaded.SchemaVersion == 4 || loaded.SchemaVersion == 3);
+		if (valid)
+			loaded.SchemaVersion = 4;
+	}
+	else if (static_cast<size_t>(fileSize.QuadPart) == LegacyTotalBytes)
+	{
+		valid = ReadFile(hFile, &loaded, static_cast<DWORD>(LegacyTotalBytes), &bytesRead, NULL)
+			&& bytesRead == LegacyTotalBytes
+			&& std::memcmp(loaded.Magic, "PHOBOSBP", 8) == 0
+			&& loaded.SchemaVersion == 3;
+		if (valid)
+			loaded.SchemaVersion = 4;
+	}
 
-  CloseHandle(hFile);
+	CloseHandle(hFile);
 
-  if (valid) {
-    if (requireSignature &&
-        loaded.BaseSignature != NeuralAI::CurrentBaseSignature)
-      loaded.BaseSignature = NeuralAI::CurrentBaseSignature;
+	if (valid)
+	{
+		if (requireSignature && loaded.BaseSignature != NeuralAI::CurrentBaseSignature)
+			loaded.BaseSignature = NeuralAI::CurrentBaseSignature;
 
-    outBackpack = loaded;
-  }
+		outBackpack = loaded;
+	}
 
-  return valid;
+	return valid;
 }
 
-// Reads a training policy handed over by the AI Trainer through a named
-// page-file mapping (RAM only), so per-match policies never touch the SSD.
-static bool LoadBackpackFromSharedMemory(const char *pName,
-                                         AIBackpackFile &outBackpack) {
-  HANDLE hMapping = OpenFileMappingA(FILE_MAP_READ, FALSE, pName);
+// Reads a training policy handed over by the AI Trainer through a named page-file
+// mapping (RAM only), so per-match policies never touch the SSD.
+static bool LoadBackpackFromSharedMemory(const char* pName, AIBackpackFile& outBackpack)
+{
+	HANDLE hMapping = OpenFileMappingA(FILE_MAP_READ, FALSE, pName);
 
-  if (!hMapping)
-    return false;
+	if (!hMapping)
+		return false;
 
-  constexpr size_t HeaderBytes = offsetof(AIBackpackFile, Entries);
-  constexpr size_t LegacyTotalBytes =
-      HeaderBytes +
-      AIBackpackFile::LegacyEntryCapacity * sizeof(AIBackpackEntry);
-  bool valid = false;
+	constexpr size_t HeaderBytes = offsetof(AIBackpackFile, Entries);
+	constexpr size_t LegacyTotalBytes = HeaderBytes + AIBackpackFile::LegacyEntryCapacity * sizeof(AIBackpackEntry);
+	bool valid = false;
 
-  if (auto const pHdrView = static_cast<const uint8_t *>(
-          MapViewOfFile(hMapping, FILE_MAP_READ, 0, 0, HeaderBytes))) {
-    uint32_t schema = 0;
-    bool magicOk = (std::memcmp(pHdrView, "PHOBOSBP", 8) == 0);
-    std::memcpy(&schema, pHdrView + 8, sizeof(uint32_t));
-    UnmapViewOfFile(pHdrView);
+	if (auto const pHdrView = static_cast<const uint8_t*>(MapViewOfFile(hMapping, FILE_MAP_READ, 0, 0, HeaderBytes)))
+	{
+		uint32_t schema = 0;
+		bool magicOk = (std::memcmp(pHdrView, "PHOBOSBP", 8) == 0);
+		std::memcpy(&schema, pHdrView + 8, sizeof(uint32_t));
+		UnmapViewOfFile(pHdrView);
 
-    if (magicOk && schema == 4) {
-      if (auto const pView = static_cast<const uint8_t *>(MapViewOfFile(
-              hMapping, FILE_MAP_READ, 0, 0, sizeof(AIBackpackFile)))) {
-        std::memcpy(&outBackpack, pView, sizeof(AIBackpackFile));
-        UnmapViewOfFile(pView);
-        valid = true;
-      }
-    } else if (magicOk && schema == 3) {
-      if (auto const pView = static_cast<const uint8_t *>(
-              MapViewOfFile(hMapping, FILE_MAP_READ, 0, 0, LegacyTotalBytes))) {
-        std::memset(&outBackpack, 0, sizeof(AIBackpackFile));
-        std::memcpy(&outBackpack, pView, LegacyTotalBytes);
-        outBackpack.SchemaVersion = 4;
-        UnmapViewOfFile(pView);
-        valid = true;
-      }
-    }
-  }
+		if (magicOk && schema == 4)
+		{
+			if (auto const pView = static_cast<const uint8_t*>(MapViewOfFile(hMapping, FILE_MAP_READ, 0, 0, sizeof(AIBackpackFile))))
+			{
+				std::memcpy(&outBackpack, pView, sizeof(AIBackpackFile));
+				UnmapViewOfFile(pView);
+				valid = true;
+			}
+		}
+		else if (magicOk && schema == 3)
+		{
+			if (auto const pView = static_cast<const uint8_t*>(MapViewOfFile(hMapping, FILE_MAP_READ, 0, 0, LegacyTotalBytes)))
+			{
+				std::memset(&outBackpack, 0, sizeof(AIBackpackFile));
+				std::memcpy(&outBackpack, pView, LegacyTotalBytes);
+				outBackpack.SchemaVersion = 4;
+				UnmapViewOfFile(pView);
+				valid = true;
+			}
+		}
+	}
 
-  CloseHandle(hMapping);
+	CloseHandle(hMapping);
 
-  return valid;
+	return valid;
 }
 
-// Context routing tables (see NeuralContextRouting). Headless training: the
-// challenger's and the opponent's from the trainer's RAM handoff, slot files as
-// fallback; the opponent shares the challenger's when it has none. Otherwise
-// Resources\AI\ai_context.dat (or AI\ai_context.dat).
-static void LoadContextRoutingTables() {
-  ContextRouting = NeuralContextRouting{};
-  OpponentContextRouting = NeuralContextRouting{};
+// Context routing tables (see NeuralContextRouting). Headless training: the challenger's and the
+// opponent's from the trainer's RAM handoff, slot files as fallback; the opponent shares the
+// challenger's when it has none. Otherwise Resources\AI\ai_context.dat (or AI\ai_context.dat).
+static void LoadContextRoutingTables()
+{
+	ContextRouting = NeuralContextRouting {};
+	OpponentContextRouting = NeuralContextRouting {};
 
-  char path[MAX_PATH];
+	char path[MAX_PATH];
 
-  if (NeuralAI::HeadlessMode) {
-    std::snprintf(path, sizeof(path), "Local\\PhobosAIContext_%d",
-                  NeuralAI::TrainSlotIndex);
+	if (NeuralAI::HeadlessMode)
+	{
+		std::snprintf(path, sizeof(path), "Local\\PhobosAIContext_%d", NeuralAI::TrainSlotIndex);
 
-    if (!LoadContextRoutingFromSharedMemory(path, ContextRouting)) {
-      std::snprintf(path, sizeof(path), "Resources\\AI\\ai_context_slot_%d.dat",
-                    NeuralAI::TrainSlotIndex);
-      LoadContextRoutingFile(path, ContextRouting);
-    }
+		if (!LoadContextRoutingFromSharedMemory(path, ContextRouting))
+		{
+			std::snprintf(path, sizeof(path), "Resources\\AI\\ai_context_slot_%d.dat", NeuralAI::TrainSlotIndex);
+			LoadContextRoutingFile(path, ContextRouting);
+		}
 
-    std::snprintf(path, sizeof(path), "Local\\PhobosAIContextOpp_%d",
-                  NeuralAI::TrainSlotIndex);
+		std::snprintf(path, sizeof(path), "Local\\PhobosAIContextOpp_%d", NeuralAI::TrainSlotIndex);
 
-    if (!LoadContextRoutingFromSharedMemory(path, OpponentContextRouting)) {
-      std::snprintf(path, sizeof(path),
-                    "Resources\\AI\\ai_context_opp_slot_%d.dat",
-                    NeuralAI::TrainSlotIndex);
-      LoadContextRoutingFile(path, OpponentContextRouting);
-    }
-  } else {
-    for (const char *pPath :
-         {"Resources\\AI\\ai_context.dat", "AI\\ai_context.dat"}) {
-      if (LoadContextRoutingFile(pPath, ContextRouting))
-        break;
-    }
-  }
+		if (!LoadContextRoutingFromSharedMemory(path, OpponentContextRouting))
+		{
+			std::snprintf(path, sizeof(path), "Resources\\AI\\ai_context_opp_slot_%d.dat", NeuralAI::TrainSlotIndex);
+			LoadContextRoutingFile(path, OpponentContextRouting);
+		}
+	}
+	else
+	{
+		for (const char* pPath : { "Resources\\AI\\ai_context.dat", "AI\\ai_context.dat" })
+		{
+			if (LoadContextRoutingFile(pPath, ContextRouting))
+				break;
+		}
+	}
 
-  Debug::Log("[NeuralAI] Context routing: %s, opponent %s.\n",
-             ContextRouting.Loaded ? "loaded" : "none",
-             OpponentContextRouting.Loaded ? "loaded" : "shared");
+	Debug::Log("[NeuralAI] Context routing: %s, opponent %s.\n", ContextRouting.Loaded ? "loaded" : "none",
+		OpponentContextRouting.Loaded ? "loaded" : "shared");
 }
 
-static bool LoadSlotBaseFromSharedMemory(const char *pName,
-                                         SlotBaseMapping &outBase) {
-  outBase.Close();
+static bool LoadSlotBaseFromSharedMemory(const char* pName, SlotBaseMapping& outBase)
+{
+	outBase.Close();
 
-  HANDLE hMapping = OpenFileMappingA(FILE_MAP_READ, FALSE, pName);
-  if (!hMapping)
-    return false;
+	HANDLE hMapping = OpenFileMappingA(FILE_MAP_READ, FALSE, pName);
+	if (!hMapping)
+		return false;
 
-  constexpr size_t MaxAllowedBaseBytes = 64u * 1024u * 1024u;
-  size_t totalBytes = 0;
+	constexpr size_t MaxAllowedBaseBytes = 64u * 1024u * 1024u;
+	size_t totalBytes = 0;
 
-  if (auto const pHdrView = static_cast<const uint8_t *>(
-          MapViewOfFile(hMapping, FILE_MAP_READ, 0, 0, sizeof(AIBaseHeader)))) {
-    auto const pHdr = reinterpret_cast<const AIBaseHeader *>(pHdrView);
-    if (std::memcmp(pHdr->Magic, "PHOBOSAI", 8) == 0 &&
-        pHdr->TotalSizeBytes >= sizeof(AIBaseHeader) &&
-        pHdr->TotalSizeBytes <= MaxAllowedBaseBytes) {
-      totalBytes = static_cast<size_t>(pHdr->TotalSizeBytes);
-    }
-    UnmapViewOfFile(pHdrView);
-  }
+	if (auto const pHdrView = static_cast<const uint8_t*>(MapViewOfFile(hMapping, FILE_MAP_READ, 0, 0, sizeof(AIBaseHeader))))
+	{
+		auto const pHdr = reinterpret_cast<const AIBaseHeader*>(pHdrView);
+		if (std::memcmp(pHdr->Magic, "PHOBOSAI", 8) == 0
+			&& pHdr->TotalSizeBytes >= sizeof(AIBaseHeader)
+			&& pHdr->TotalSizeBytes <= MaxAllowedBaseBytes)
+		{
+			totalBytes = static_cast<size_t>(pHdr->TotalSizeBytes);
+		}
+		UnmapViewOfFile(pHdrView);
+	}
 
-  if (totalBytes >= sizeof(AIBaseHeader)) {
-    if (auto const pView = static_cast<const uint8_t *>(
-            MapViewOfFile(hMapping, FILE_MAP_READ, 0, 0, totalBytes))) {
-      outBase.MappingHandle = hMapping;
-      outBase.View = pView;
-      outBase.Size = totalBytes;
-      return true;
-    }
-  }
+	if (totalBytes >= sizeof(AIBaseHeader))
+	{
+		if (auto const pView = static_cast<const uint8_t*>(MapViewOfFile(hMapping, FILE_MAP_READ, 0, 0, totalBytes)))
+		{
+			outBase.MappingHandle = hMapping;
+			outBase.View = pView;
+			outBase.Size = totalBytes;
+			return true;
+		}
+	}
 
-  CloseHandle(hMapping);
-  return false;
+	CloseHandle(hMapping);
+	return false;
 }
 
-static bool LoadSlotBaseFromFile(const char *pPath, SlotBaseMapping &outBase) {
-  outBase.Close();
+static bool LoadSlotBaseFromFile(const char* pPath, SlotBaseMapping& outBase)
+{
+	outBase.Close();
 
-  HANDLE hFile =
-      CreateFileA(pPath, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
-                  OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-  if (hFile == INVALID_HANDLE_VALUE)
-    return false;
+	HANDLE hFile = CreateFileA(
+		pPath, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (hFile == INVALID_HANDLE_VALUE)
+		return false;
 
-  LARGE_INTEGER fileSize{};
-  if (!GetFileSizeEx(hFile, &fileSize) ||
-      fileSize.QuadPart < static_cast<LONGLONG>(sizeof(AIBaseHeader)) ||
-      fileSize.QuadPart > static_cast<LONGLONG>(64LL * 1024LL * 1024LL)) {
-    CloseHandle(hFile);
-    return false;
-  }
+	LARGE_INTEGER fileSize {};
+	if (!GetFileSizeEx(hFile, &fileSize)
+		|| fileSize.QuadPart < static_cast<LONGLONG>(sizeof(AIBaseHeader))
+		|| fileSize.QuadPart > static_cast<LONGLONG>(64LL * 1024LL * 1024LL))
+	{
+		CloseHandle(hFile);
+		return false;
+	}
 
-  const size_t mappedBytes = static_cast<size_t>(fileSize.QuadPart);
-  HANDLE hMapping = CreateFileMappingA(hFile, NULL, PAGE_READONLY, 0, 0, NULL);
-  if (!hMapping) {
-    CloseHandle(hFile);
-    return false;
-  }
+	const size_t mappedBytes = static_cast<size_t>(fileSize.QuadPart);
+	HANDLE hMapping = CreateFileMappingA(hFile, NULL, PAGE_READONLY, 0, 0, NULL);
+	if (!hMapping)
+	{
+		CloseHandle(hFile);
+		return false;
+	}
 
-  auto const pView = static_cast<const uint8_t *>(
-      MapViewOfFile(hMapping, FILE_MAP_READ, 0, 0, mappedBytes));
-  if (!pView) {
-    CloseHandle(hMapping);
-    CloseHandle(hFile);
-    return false;
-  }
+	auto const pView = static_cast<const uint8_t*>(MapViewOfFile(hMapping, FILE_MAP_READ, 0, 0, mappedBytes));
+	if (!pView)
+	{
+		CloseHandle(hMapping);
+		CloseHandle(hFile);
+		return false;
+	}
 
-  auto const pHdr = reinterpret_cast<const AIBaseHeader *>(pView);
-  if (std::memcmp(pHdr->Magic, "PHOBOSAI", 8) != 0 ||
-      pHdr->TotalSizeBytes < sizeof(AIBaseHeader) ||
-      static_cast<size_t>(pHdr->TotalSizeBytes) > mappedBytes) {
-    UnmapViewOfFile(pView);
-    CloseHandle(hMapping);
-    CloseHandle(hFile);
-    return false;
-  }
+	auto const pHdr = reinterpret_cast<const AIBaseHeader*>(pView);
+	if (std::memcmp(pHdr->Magic, "PHOBOSAI", 8) != 0
+		|| pHdr->TotalSizeBytes < sizeof(AIBaseHeader)
+		|| static_cast<size_t>(pHdr->TotalSizeBytes) > mappedBytes)
+	{
+		UnmapViewOfFile(pView);
+		CloseHandle(hMapping);
+		CloseHandle(hFile);
+		return false;
+	}
 
-  outBase.FileHandle = hFile;
-  outBase.MappingHandle = hMapping;
-  outBase.View = pView;
-  outBase.Size = static_cast<size_t>(pHdr->TotalSizeBytes);
-  return true;
+	outBase.FileHandle = hFile;
+	outBase.MappingHandle = hMapping;
+	outBase.View = pView;
+	outBase.Size = static_cast<size_t>(pHdr->TotalSizeBytes);
+	return true;
 }
 
-static const uint8_t *SelectHouseBaseModel(const HouseClass *pHouse,
-                                           const uint8_t *pSharedBaseView,
-                                           size_t sharedBaseSize,
-                                           size_t &outSize) {
-  if (NeuralAI::HeadlessMode && pHouse) {
-    auto const pExt = HouseExt::TryFetch(pHouse);
-    const int policySlot = pExt ? pExt->NeuralAI_PolicySlot : 0;
+static const uint8_t* SelectHouseBaseModel(
+	const HouseClass* pHouse,
+	const uint8_t* pSharedBaseView,
+	size_t sharedBaseSize,
+	size_t& outSize)
+{
+	if (NeuralAI::HeadlessMode && pHouse)
+	{
+		auto const pExt = HouseExt::TryFetch(pHouse);
+		const int policySlot = pExt ? pExt->NeuralAI_PolicySlot : 0;
 
-    if (policySlot == 1 && OpponentSlotBase.View &&
-        OpponentSlotBase.Size >= sizeof(AIBaseHeader)) {
-      outSize = OpponentSlotBase.Size;
-      return OpponentSlotBase.View;
-    }
-    if (policySlot == 0 && ChallengerSlotBase.View &&
-        ChallengerSlotBase.Size >= sizeof(AIBaseHeader)) {
-      outSize = ChallengerSlotBase.Size;
-      return ChallengerSlotBase.View;
-    }
-  }
+		if (policySlot == 1 && OpponentSlotBase.View && OpponentSlotBase.Size >= sizeof(AIBaseHeader))
+		{
+			outSize = OpponentSlotBase.Size;
+			return OpponentSlotBase.View;
+		}
+		if (policySlot == 0 && ChallengerSlotBase.View && ChallengerSlotBase.Size >= sizeof(AIBaseHeader))
+		{
+			outSize = ChallengerSlotBase.Size;
+			return ChallengerSlotBase.View;
+		}
+	}
 
-  outSize = sharedBaseSize;
-  return pSharedBaseView;
+	outSize = sharedBaseSize;
+	return pSharedBaseView;
 }
 
-const AIBackpackFile &NeuralAI::PolicyFor(const HouseClass *pHouse) {
-  if (NeuralAI::HeadlessMode && NeuralAI::OpponentLoaded) {
-    auto const pExt = HouseExt::TryFetch(pHouse);
+const AIBackpackFile& NeuralAI::PolicyFor(const HouseClass* pHouse)
+{
+	if (NeuralAI::HeadlessMode && NeuralAI::OpponentLoaded)
+	{
+		auto const pExt = HouseExt::TryFetch(pHouse);
 
-    if (pExt && pExt->NeuralAI_PolicySlot == 1)
-      return NeuralAI::OpponentBackpack;
-  }
+		if (pExt && pExt->NeuralAI_PolicySlot == 1)
+			return NeuralAI::OpponentBackpack;
+	}
 
-  return NeuralAI::Backpack;
+	return NeuralAI::Backpack;
 }
 
-void NeuralAI::LoadOrResetBackpack() {
-  ChallengerSlotBase.Close();
-  OpponentSlotBase.Close();
-  LoggedInvalidV3GateHeader = false;
-  LoggedInvalidV3MlpHeader = false;
-  LoggedExpertOffsetFallback = false;
+void NeuralAI::LoadOrResetBackpack()
+{
+	ChallengerSlotBase.Close();
+	OpponentSlotBase.Close();
+	LoggedInvalidV3GateHeader = false;
+	LoggedInvalidV3MlpHeader = false;
+	LoggedExpertOffsetFallback = false;
 
-  NeuralAI::CurrentRulesSignature = NeuralAI::ComputeRulesSignature();
+	NeuralAI::CurrentRulesSignature = NeuralAI::ComputeRulesSignature();
 
-  uint64_t baseModelHash = 0;
+	uint64_t baseModelHash = 0;
 
-  if (NeuralAI::BaseMappedView &&
-      NeuralAI::BaseMappedSize >= sizeof(AIBaseHeader)) {
-    auto const pHdr =
-        reinterpret_cast<const AIBaseHeader *>(NeuralAI::BaseMappedView);
+	if (NeuralAI::BaseMappedView && NeuralAI::BaseMappedSize >= sizeof(AIBaseHeader))
+	{
+		auto const pHdr = reinterpret_cast<const AIBaseHeader*>(NeuralAI::BaseMappedView);
 
-    baseModelHash = pHdr->BaseModelHash;
-  }
+		baseModelHash = pHdr->BaseModelHash;
+	}
 
-  NeuralAI::CurrentBaseSignature =
-      HashValueFNV1a(baseModelHash, NeuralAI::CurrentRulesSignature);
+	NeuralAI::CurrentBaseSignature = HashValueFNV1a(baseModelHash, NeuralAI::CurrentRulesSignature);
 
-  // No context routing unless this match loads it below (campaign and human
-  // multiplayer never do).
-  ContextRouting = NeuralContextRouting{};
-  OpponentContextRouting = NeuralContextRouting{};
+	// No context routing unless this match loads it below (campaign and human multiplayer never do).
+	ContextRouting = NeuralContextRouting {};
+	OpponentContextRouting = NeuralContextRouting {};
 
-  // Campaign and standard Multiplayer use only the shared deterministic base
-  // brain.
-  if (SessionClass::IsCampaign()) {
-    NeuralAI::AllowBackpackInference = false;
+	// Campaign and standard Multiplayer use only the shared deterministic base
+	// brain.
+	if (SessionClass::IsCampaign())
+	{
+		NeuralAI::AllowBackpackInference = false;
 
-    return;
-  }
+		return;
+	}
 
-  if (SessionClass::IsMultiplayer() && !NeuralAI::HeadlessMode) {
-    int humanCount = 0;
-    for (auto const pH : HouseClass::Array) {
-      if (pH && (pH->IsControlledByHuman() || pH->IsObserver()))
-        humanCount++;
-    }
+	if (SessionClass::IsMultiplayer() && !NeuralAI::HeadlessMode)
+	{
+		int humanCount = 0;
+		for (auto const pH : HouseClass::Array)
+		{
+			if (pH && (pH->IsControlledByHuman() || pH->IsObserver()))
+				humanCount++;
+		}
 
-    if (humanCount > 1) {
-      NeuralAI::AllowBackpackInference = false;
-      return;
-    }
-  }
+		if (humanCount > 1)
+		{
+			NeuralAI::AllowBackpackInference = false;
+			return;
+		}
+	}
 
-  // In headless training the trainer owns both policy files: they are loaded
-  // verbatim and never written back
-  if (NeuralAI::HeadlessMode) {
-    char policyPath[MAX_PATH];
+	// In headless training the trainer owns both policy files: they are loaded
+	// verbatim and never written back
+	if (NeuralAI::HeadlessMode)
+	{
+		char policyPath[MAX_PATH];
 
-    std::memset(&NeuralAI::Backpack, 0, sizeof(AIBackpackFile));
+		std::memset(&NeuralAI::Backpack, 0, sizeof(AIBackpackFile));
 
-    std::memcpy(NeuralAI::Backpack.Magic, "PHOBOSBP", 8);
+		std::memcpy(NeuralAI::Backpack.Magic, "PHOBOSBP", 8);
 
-    NeuralAI::Backpack.SchemaVersion = 4;
+		NeuralAI::Backpack.SchemaVersion = 4;
 
-    NeuralAI::Backpack.BaseSignature = NeuralAI::CurrentBaseSignature;
+		NeuralAI::Backpack.BaseSignature = NeuralAI::CurrentBaseSignature;
 
-    NeuralAI::Backpack.EstimatedELO = 1200;
+		NeuralAI::Backpack.EstimatedELO = 1200;
 
-    // Prefer the trainer's RAM handoff; policy files are the legacy fallback.
-    std::snprintf(policyPath, sizeof(policyPath), "Local\\PhobosAIPolicy_%d",
-                  NeuralAI::TrainSlotIndex);
+		// Prefer the trainer's RAM handoff; policy files are the legacy fallback.
+		std::snprintf(policyPath, sizeof(policyPath), "Local\\PhobosAIPolicy_%d", NeuralAI::TrainSlotIndex);
 
-    bool challengerLoaded =
-        LoadBackpackFromSharedMemory(policyPath, NeuralAI::Backpack);
-    const bool challengerFromShm = challengerLoaded;
+		bool challengerLoaded = LoadBackpackFromSharedMemory(policyPath, NeuralAI::Backpack);
+		const bool challengerFromShm = challengerLoaded;
 
-    if (!challengerLoaded) {
-      std::snprintf(policyPath, sizeof(policyPath),
-                    "Resources\\AI\\ai_backpack_slot_%d.dat",
-                    NeuralAI::TrainSlotIndex);
+		if (!challengerLoaded)
+		{
+			std::snprintf(
+				policyPath, sizeof(policyPath), "Resources\\AI\\ai_backpack_slot_%d.dat", NeuralAI::TrainSlotIndex);
 
-      challengerLoaded =
-          NeuralAI::LoadBackpackFile(policyPath, NeuralAI::Backpack, false);
-    }
+			challengerLoaded = NeuralAI::LoadBackpackFile(policyPath, NeuralAI::Backpack, false);
+		}
 
-    std::memcpy(&NeuralAI::OpponentBackpack, &NeuralAI::Backpack,
-                sizeof(AIBackpackFile));
+		std::memcpy(&NeuralAI::OpponentBackpack, &NeuralAI::Backpack, sizeof(AIBackpackFile));
 
-    std::snprintf(policyPath, sizeof(policyPath), "Local\\PhobosAIPolicyOpp_%d",
-                  NeuralAI::TrainSlotIndex);
+		std::snprintf(policyPath, sizeof(policyPath), "Local\\PhobosAIPolicyOpp_%d", NeuralAI::TrainSlotIndex);
 
-    NeuralAI::OpponentLoaded =
-        LoadBackpackFromSharedMemory(policyPath, NeuralAI::OpponentBackpack);
+		NeuralAI::OpponentLoaded = LoadBackpackFromSharedMemory(policyPath, NeuralAI::OpponentBackpack);
 
-    if (!NeuralAI::OpponentLoaded) {
-      std::snprintf(policyPath, sizeof(policyPath),
-                    "Resources\\AI\\ai_backpack_opp_slot_%d.dat",
-                    NeuralAI::TrainSlotIndex);
+		if (!NeuralAI::OpponentLoaded)
+		{
+			std::snprintf(
+				policyPath, sizeof(policyPath), "Resources\\AI\\ai_backpack_opp_slot_%d.dat", NeuralAI::TrainSlotIndex);
 
-      NeuralAI::OpponentLoaded = NeuralAI::LoadBackpackFile(
-          policyPath, NeuralAI::OpponentBackpack, false);
-    }
+			NeuralAI::OpponentLoaded = NeuralAI::LoadBackpackFile(policyPath, NeuralAI::OpponentBackpack, false);
+		}
 
-    Debug::Log("[NeuralAI] Headless policy source: %s\n",
-               challengerFromShm ? "shared memory" : "files");
+		Debug::Log("[NeuralAI] Headless policy source: %s\n", challengerFromShm ? "shared memory" : "files");
 
-    LoadContextRoutingTables();
+		LoadContextRoutingTables();
 
-    std::snprintf(policyPath, sizeof(policyPath), "Local\\PhobosAIBase_%d",
-                  NeuralAI::TrainSlotIndex);
-    if (!LoadSlotBaseFromSharedMemory(policyPath, ChallengerSlotBase)) {
-      std::snprintf(policyPath, sizeof(policyPath),
-                    "Resources\\AI\\ai_base_slot_%d.bin",
-                    NeuralAI::TrainSlotIndex);
-      LoadSlotBaseFromFile(policyPath, ChallengerSlotBase);
-    }
+		std::snprintf(policyPath, sizeof(policyPath), "Local\\PhobosAIBase_%d", NeuralAI::TrainSlotIndex);
+		if (!LoadSlotBaseFromSharedMemory(policyPath, ChallengerSlotBase))
+		{
+			std::snprintf(policyPath, sizeof(policyPath), "Resources\\AI\\ai_base_slot_%d.bin", NeuralAI::TrainSlotIndex);
+			LoadSlotBaseFromFile(policyPath, ChallengerSlotBase);
+		}
 
-    std::snprintf(policyPath, sizeof(policyPath), "Local\\PhobosAIBaseOpp_%d",
-                  NeuralAI::TrainSlotIndex);
-    if (!LoadSlotBaseFromSharedMemory(policyPath, OpponentSlotBase)) {
-      std::snprintf(policyPath, sizeof(policyPath),
-                    "Resources\\AI\\ai_base_opp_slot_%d.bin",
-                    NeuralAI::TrainSlotIndex);
-      LoadSlotBaseFromFile(policyPath, OpponentSlotBase);
-    }
+		std::snprintf(policyPath, sizeof(policyPath), "Local\\PhobosAIBaseOpp_%d", NeuralAI::TrainSlotIndex);
+		if (!LoadSlotBaseFromSharedMemory(policyPath, OpponentSlotBase))
+		{
+			std::snprintf(policyPath, sizeof(policyPath), "Resources\\AI\\ai_base_opp_slot_%d.bin", NeuralAI::TrainSlotIndex);
+			LoadSlotBaseFromFile(policyPath, OpponentSlotBase);
+		}
 
-    NeuralAI::AllowBackpackInference = true;
+		NeuralAI::AllowBackpackInference = true;
 
-    NeuralAI::BackpackLoaded = true;
+		NeuralAI::BackpackLoaded = true;
 
-    Debug::Log("[NeuralAI] Headless policies: challenger=%s opponent=%s | "
-               "base_challenger=%s base_opponent=%s\n",
-               challengerLoaded ? "loaded" : "default",
-               NeuralAI::OpponentLoaded ? "loaded" : "shared",
-               ChallengerSlotBase.View ? "slot-override" : "shared",
-               OpponentSlotBase.View ? "slot-override" : "shared");
+		Debug::Log("[NeuralAI] Headless policies: challenger=%s opponent=%s | base_challenger=%s base_opponent=%s\n",
+			challengerLoaded ? "loaded" : "default",
+			NeuralAI::OpponentLoaded ? "loaded" : "shared",
+			ChallengerSlotBase.View ? "slot-override" : "shared",
+			OpponentSlotBase.View ? "slot-override" : "shared");
 
-    return;
-  }
+		return;
+	}
 
-  NeuralAI::AllowBackpackInference = true;
+	NeuralAI::AllowBackpackInference = true;
 
-  const char *bpPath = (GetFileAttributesA("Resources\\AI\\ai_backpack.dat") !=
-                        INVALID_FILE_ATTRIBUTES)
-                           ? "Resources\\AI\\ai_backpack.dat"
-                           : "AI\\ai_backpack.dat";
+	const char* bpPath = (GetFileAttributesA("Resources\\AI\\ai_backpack.dat") != INVALID_FILE_ATTRIBUTES)
+		? "Resources\\AI\\ai_backpack.dat"
+		: "AI\\ai_backpack.dat";
 
-  const bool valid =
-      NeuralAI::LoadBackpackFile(bpPath, NeuralAI::Backpack, true);
+	const bool valid = NeuralAI::LoadBackpackFile(bpPath, NeuralAI::Backpack, true);
 
-  MapClassLoaded = false;
+	MapClassLoaded = false;
 
-  for (const char *mcPath :
-       {"Resources\\AI\\ai_mapclass.dat", "AI\\ai_mapclass.dat"}) {
-    HANDLE hMc =
-        CreateFileA(mcPath, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
-                    NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	for (const char* mcPath : { "Resources\\AI\\ai_mapclass.dat", "AI\\ai_mapclass.dat" })
+	{
+		HANDLE hMc = CreateFileA(mcPath, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
 
-    if (hMc == INVALID_HANDLE_VALUE)
-      continue;
+		if (hMc == INVALID_HANDLE_VALUE)
+			continue;
 
-    struct {
-      char Magic[8];
-      uint32_t Version;
-      uint32_t Classes;
-    } mcHeader{};
+		struct
+		{
+			char Magic[8];
+			uint32_t Version;
+			uint32_t Classes;
+		} mcHeader {};
 
-    DWORD read = 0;
+		DWORD read = 0;
 
-    if (ReadFile(hMc, &mcHeader, sizeof(mcHeader), &read, NULL) &&
-        read == sizeof(mcHeader) &&
-        std::memcmp(mcHeader.Magic, "PHOBOSMC", 8) == 0 &&
-        mcHeader.Version == 1 && mcHeader.Classes == NumMapClasses) {
-      MapClassLoaded = ReadFile(hMc, MapClassDeltas.data(),
-                                sizeof(MapClassDeltas), &read, NULL) &&
-                       read == sizeof(MapClassDeltas);
-    }
+		if (ReadFile(hMc, &mcHeader, sizeof(mcHeader), &read, NULL) && read == sizeof(mcHeader)
+			&& std::memcmp(mcHeader.Magic, "PHOBOSMC", 8) == 0 && mcHeader.Version == 1 && mcHeader.Classes == NumMapClasses)
+		{
+			MapClassLoaded = ReadFile(hMc, MapClassDeltas.data(), sizeof(MapClassDeltas), &read, NULL) && read == sizeof(MapClassDeltas);
+		}
 
-    CloseHandle(hMc);
+		CloseHandle(hMc);
 
-    if (MapClassLoaded)
-      break;
-  }
+		if (MapClassLoaded)
+			break;
+	}
 
-  LoadContextRoutingTables();
+	LoadContextRoutingTables();
 
-  if (!valid) {
-    std::memset(&NeuralAI::Backpack, 0, sizeof(AIBackpackFile));
+	if (!valid)
+	{
+		std::memset(&NeuralAI::Backpack, 0, sizeof(AIBackpackFile));
 
-    std::memcpy(NeuralAI::Backpack.Magic, "PHOBOSBP", 8);
+		std::memcpy(NeuralAI::Backpack.Magic, "PHOBOSBP", 8);
 
-    NeuralAI::Backpack.SchemaVersion = 4;
+		NeuralAI::Backpack.SchemaVersion = 4;
 
-    NeuralAI::Backpack.BaseSignature = NeuralAI::CurrentBaseSignature;
+		NeuralAI::Backpack.BaseSignature = NeuralAI::CurrentBaseSignature;
 
-    NeuralAI::Backpack.EstimatedELO = 1200;
+		NeuralAI::Backpack.EstimatedELO = 1200;
 
-    NeuralAI::Backpack.BackpackHash = HashBytesFNV1a(
-        &NeuralAI::Backpack.LoRA_A[0], sizeof(NeuralAI::Backpack.LoRA_A));
+		NeuralAI::Backpack.BackpackHash
+			= HashBytesFNV1a(&NeuralAI::Backpack.LoRA_A[0], sizeof(NeuralAI::Backpack.LoRA_A));
 
-    NeuralAI::SaveBackpack();
+		NeuralAI::SaveBackpack();
 
-    Debug::Log(
-        "[NeuralAI] Backpack initialized/reset for BaseSignature %llX.\n",
-        NeuralAI::CurrentBaseSignature);
-  }
+		Debug::Log("[NeuralAI] Backpack initialized/reset for BaseSignature %llX.\n", NeuralAI::CurrentBaseSignature);
+	}
 
-  NeuralAI::BackpackLoaded = true;
+	NeuralAI::BackpackLoaded = true;
 }
 
-void NeuralAI::SaveBackpack() {
-  if (SessionClass::IsCampaign() || !NeuralAI::AllowBackpackInference)
-    return;
+void NeuralAI::SaveBackpack()
+{
+	if (SessionClass::IsCampaign() || !NeuralAI::AllowBackpackInference)
+		return;
 
-  CreateDirectoryA("AI", NULL);
+	CreateDirectoryA("AI", NULL);
 
-  CreateDirectoryA("Resources\\AI", NULL);
+	CreateDirectoryA("Resources\\AI", NULL);
 
-  NeuralAI::Backpack.BackpackHash = HashBytesFNV1a(
-      &NeuralAI::Backpack.LoRA_A[0],
-      sizeof(NeuralAI::Backpack.LoRA_A) + sizeof(NeuralAI::Backpack.LoRA_B));
+	NeuralAI::Backpack.BackpackHash = HashBytesFNV1a(
+		&NeuralAI::Backpack.LoRA_A[0], sizeof(NeuralAI::Backpack.LoRA_A) + sizeof(NeuralAI::Backpack.LoRA_B));
 
-  char bpPath[MAX_PATH];
+	char bpPath[MAX_PATH];
 
-  if (NeuralAI::HeadlessMode && NeuralAI::TrainSlotIndex > 0)
-    std::snprintf(bpPath, sizeof(bpPath),
-                  "Resources\\AI\\ai_backpack_slot_%d.dat",
-                  NeuralAI::TrainSlotIndex);
-  else
-    std::snprintf(bpPath, sizeof(bpPath), "Resources\\AI\\ai_backpack.dat");
+	if (NeuralAI::HeadlessMode && NeuralAI::TrainSlotIndex > 0)
+		std::snprintf(bpPath, sizeof(bpPath), "Resources\\AI\\ai_backpack_slot_%d.dat", NeuralAI::TrainSlotIndex);
+	else
+		std::snprintf(bpPath, sizeof(bpPath), "Resources\\AI\\ai_backpack.dat");
 
-  HANDLE hFile = CreateFileA(bpPath, GENERIC_WRITE, FILE_SHARE_READ, NULL,
-                             CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+	HANDLE hFile
+		= CreateFileA(bpPath, GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
 
-  if (hFile != INVALID_HANDLE_VALUE) {
-    DWORD written = 0;
+	if (hFile != INVALID_HANDLE_VALUE)
+	{
+		DWORD written = 0;
 
-    WriteFile(hFile, &NeuralAI::Backpack, sizeof(AIBackpackFile), &written,
-              NULL);
+		WriteFile(hFile, &NeuralAI::Backpack, sizeof(AIBackpackFile), &written, NULL);
 
-    CloseHandle(hFile);
-  }
+		CloseHandle(hFile);
+	}
 
-  if (!NeuralAI::HeadlessMode || NeuralAI::TrainSlotIndex == 0) {
-    HANDLE hFileAlt =
-        CreateFileA("AI\\ai_backpack.dat", GENERIC_WRITE, FILE_SHARE_READ, NULL,
-                    CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (!NeuralAI::HeadlessMode || NeuralAI::TrainSlotIndex == 0)
+	{
+		HANDLE hFileAlt = CreateFileA(
+			"AI\\ai_backpack.dat", GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
 
-    if (hFileAlt != INVALID_HANDLE_VALUE) {
-      DWORD written = 0;
+		if (hFileAlt != INVALID_HANDLE_VALUE)
+		{
+			DWORD written = 0;
 
-      WriteFile(hFileAlt, &NeuralAI::Backpack, sizeof(AIBackpackFile), &written,
-                NULL);
+			WriteFile(hFileAlt, &NeuralAI::Backpack, sizeof(AIBackpackFile), &written, NULL);
 
-      CloseHandle(hFileAlt);
-    }
-  }
+			CloseHandle(hFileAlt);
+		}
+	}
 }
 
-void NeuralAI::InitTelemetrySharedMemory() {
-  if (!TelemetryJsonView) {
-    char jsonShmName[128];
+void NeuralAI::InitTelemetrySharedMemory()
+{
+	if (!TelemetryJsonView)
+	{
+		char jsonShmName[128];
 
-    std::snprintf(jsonShmName, sizeof(jsonShmName),
-                  "Local\\PhobosAITrainerJsonShm_%d", NeuralAI::TrainSlotIndex);
+		std::snprintf(jsonShmName, sizeof(jsonShmName), "Local\\PhobosAITrainerJsonShm_%d", NeuralAI::TrainSlotIndex);
 
-    TelemetryJsonShmHandle =
-        CreateFileMappingA(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0,
-                           TelemetryJsonShmCapacity, jsonShmName);
+		TelemetryJsonShmHandle
+			= CreateFileMappingA(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, TelemetryJsonShmCapacity, jsonShmName);
 
-    TelemetryJsonShmFromTrainer =
-        TelemetryJsonShmHandle && GetLastError() == ERROR_ALREADY_EXISTS;
+		TelemetryJsonShmFromTrainer = TelemetryJsonShmHandle && GetLastError() == ERROR_ALREADY_EXISTS;
 
-    if (TelemetryJsonShmHandle) {
-      TelemetryJsonView = static_cast<uint8_t *>(
-          MapViewOfFile(TelemetryJsonShmHandle, FILE_MAP_ALL_ACCESS, 0, 0,
-                        TelemetryJsonShmCapacity));
+		if (TelemetryJsonShmHandle)
+		{
+			TelemetryJsonView = static_cast<uint8_t*>(
+				MapViewOfFile(TelemetryJsonShmHandle, FILE_MAP_ALL_ACCESS, 0, 0, TelemetryJsonShmCapacity));
 
-      if (TelemetryJsonView)
-        std::memset(TelemetryJsonView, 0, 16);
-    }
-  }
+			if (TelemetryJsonView)
+				std::memset(TelemetryJsonView, 0, 16);
+		}
+	}
 
-  if (!TelemetryViewRequest) {
-    char viewShmName[128];
+	if (!TelemetryViewRequest)
+	{
+		char viewShmName[128];
 
-    std::snprintf(viewShmName, sizeof(viewShmName),
-                  "Local\\PhobosAITrainerViewShm_%d", NeuralAI::TrainSlotIndex);
+		std::snprintf(viewShmName, sizeof(viewShmName), "Local\\PhobosAITrainerViewShm_%d", NeuralAI::TrainSlotIndex);
 
-    // Opens the trainer's block when it already holds one for this slot, so a
-    // view chosen before the match started is kept.
-    TelemetryViewShmHandle =
-        CreateFileMappingA(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0,
-                           TelemetryViewShmCapacity, viewShmName);
+		// Opens the trainer's block when it already holds one for this slot, so a view chosen
+		// before the match started is kept.
+		TelemetryViewShmHandle
+			= CreateFileMappingA(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, TelemetryViewShmCapacity, viewShmName);
 
-    if (TelemetryViewShmHandle) {
-      TelemetryViewRequest = static_cast<const volatile uint32_t *>(
-          MapViewOfFile(TelemetryViewShmHandle, FILE_MAP_READ, 0, 0,
-                        TelemetryViewShmCapacity));
-    }
-  }
+		if (TelemetryViewShmHandle)
+		{
+			TelemetryViewRequest = static_cast<const volatile uint32_t*>(
+				MapViewOfFile(TelemetryViewShmHandle, FILE_MAP_READ, 0, 0, TelemetryViewShmCapacity));
+		}
+	}
 
-  if (NeuralAI::HeadlessMode && !TrajectoryView) {
-    char trajShmName[128];
-    std::snprintf(trajShmName, sizeof(trajShmName), "Local\\PhobosAITrajShm_%d",
-                  NeuralAI::TrainSlotIndex);
-    TrajectoryShmHandle =
-        CreateFileMappingA(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0,
-                           sizeof(AITrajectorySharedBuffer), trajShmName);
+	if (NeuralAI::HeadlessMode && !TrajectoryView)
+	{
+		char trajShmName[128];
+		std::snprintf(trajShmName, sizeof(trajShmName), "Local\\PhobosAITrajShm_%d", NeuralAI::TrainSlotIndex);
+		TrajectoryShmHandle = CreateFileMappingA(
+			INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, sizeof(AITrajectorySharedBuffer), trajShmName);
 
-    if (TrajectoryShmHandle) {
-      TrajectoryView = static_cast<AITrajectorySharedBuffer *>(
-          MapViewOfFile(TrajectoryShmHandle, FILE_MAP_ALL_ACCESS, 0, 0,
-                        sizeof(AITrajectorySharedBuffer)));
+		if (TrajectoryShmHandle)
+		{
+			TrajectoryView = static_cast<AITrajectorySharedBuffer*>(
+				MapViewOfFile(TrajectoryShmHandle, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(AITrajectorySharedBuffer)));
 
 			if (TrajectoryView)
 			{
@@ -940,72 +948,73 @@ void NeuralAI::InitTelemetrySharedMemory() {
 		}
 	}
 
-  if (NeuralAI::TelemetryView)
-    return;
+	if (NeuralAI::TelemetryView)
+		return;
 
-  char shmName[128];
+	char shmName[128];
 
-  std::snprintf(shmName, sizeof(shmName), "Local\\PhobosAITrainerShm_%d",
-                NeuralAI::TrainSlotIndex);
+	std::snprintf(shmName, sizeof(shmName), "Local\\PhobosAITrainerShm_%d", NeuralAI::TrainSlotIndex);
 
-  NeuralAI::TelemetryShmHandle =
-      CreateFileMappingA(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0,
-                         sizeof(AITrainerSharedTelemetry), shmName);
+	NeuralAI::TelemetryShmHandle
+		= CreateFileMappingA(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, sizeof(AITrainerSharedTelemetry), shmName);
 
-  if (NeuralAI::TelemetryShmHandle) {
-    NeuralAI::TelemetryView = static_cast<AITrainerSharedTelemetry *>(
-        MapViewOfFile(NeuralAI::TelemetryShmHandle, FILE_MAP_ALL_ACCESS, 0, 0,
-                      sizeof(AITrainerSharedTelemetry)));
+	if (NeuralAI::TelemetryShmHandle)
+	{
+		NeuralAI::TelemetryView = static_cast<AITrainerSharedTelemetry*>(
+			MapViewOfFile(NeuralAI::TelemetryShmHandle, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(AITrainerSharedTelemetry)));
 
-    if (NeuralAI::TelemetryView) {
-      std::memset(NeuralAI::TelemetryView, 0, sizeof(AITrainerSharedTelemetry));
+		if (NeuralAI::TelemetryView)
+		{
+			std::memset(NeuralAI::TelemetryView, 0, sizeof(AITrainerSharedTelemetry));
 
-      std::memcpy(NeuralAI::TelemetryView->Magic, "PHOBOSTM", 8);
+			std::memcpy(NeuralAI::TelemetryView->Magic, "PHOBOSTM", 8);
 
-      NeuralAI::TelemetryView->SchemaVersion = 1;
+			NeuralAI::TelemetryView->SchemaVersion = 1;
 
-      NeuralAI::TelemetryView->SlotIndex =
-          static_cast<uint32_t>(NeuralAI::TrainSlotIndex);
+			NeuralAI::TelemetryView->SlotIndex = static_cast<uint32_t>(NeuralAI::TrainSlotIndex);
 
-      NeuralAI::TelemetryView->ProcessId = GetCurrentProcessId();
-    }
-  }
+			NeuralAI::TelemetryView->ProcessId = GetCurrentProcessId();
+		}
+	}
 }
 
-void NeuralAI::OnScenarioStart() {
-  NeuralAI::Initialize();
+void NeuralAI::OnScenarioStart()
+{
+	NeuralAI::Initialize();
 
-  NeuralAI::LoadOrResetBackpack();
+	NeuralAI::LoadOrResetBackpack();
 
-  for (auto &ms : MacroStates)
-    ms.Reset();
+	for (auto& ms : MacroStates)
+		ms.Reset();
 
-  for (auto &routeHeat : RouteHeatStates)
-    routeHeat.Reset();
+	for (auto& routeHeat : RouteHeatStates)
+		routeHeat.Reset();
 
-  WaveTimingStates.fill(NeuralWaveTimingState{});
-  ResetTeamBoards();
+	WaveTimingStates.fill(NeuralWaveTimingState {});
+	ResetTeamBoards();
 
-  FerryTrips.fill(NeuralFerryTripRecord{});
-  ResetBridgePlanner();
-  AirRoutes.clear();
-  AirPickups.clear();
-  TelemetryGroundRoutes.clear();
-  AirliftJobs.clear();
-  AirliftRefusedUntil.clear();
-  AirliftCargoHolds.clear();
-  AirliftRefusalLogCount.fill(0);
-  HouseStyleSalt.fill(0);
-  AirDropAborts.clear();
+	FerryTrips.fill(NeuralFerryTripRecord {});
+	ResetBridgePlanner();
+	AirRoutes.clear();
+	AirPickups.clear();
+	TelemetryGroundRoutes.clear();
+	AirliftJobs.clear();
+	AirliftRefusedUntil.clear();
+	AirliftCargoHolds.clear();
+	AirliftRefusalLogCount.fill(0);
+	HouseStyleSalt.fill(0);
+	AirDropAborts.clear();
 
-  for (auto &counts : DecisionCounts)
-    counts.fill(0);
+	for (auto& counts : DecisionCounts)
+		counts.fill(0);
 
-  for (auto &houseGates : GateCounts) {
-    for (auto &slotGates : houseGates)
-      slotGates.fill(0);
-  }
+	for (auto& houseGates : GateCounts)
+	{
+		for (auto& slotGates : houseGates)
+			slotGates.fill(0);
+	}
 
+	// Trajectory statistics of the match (headless training only).
 	if (NeuralAI::HeadlessMode)
 	{
 		GateWindow.fill(GateWindowStats {});
@@ -1019,44 +1028,46 @@ void NeuralAI::OnScenarioStart() {
 			houseEvals.fill(PickEval {});
 	}
 
-  TickCosts.fill(NeuralTickCost{});
+	TickCosts.fill(NeuralTickCost {});
 
-  for (auto &sections : SectionTotalMs)
-    sections.fill(0.0);
+	for (auto& sections : SectionTotalMs)
+		sections.fill(0.0);
 
-  for (auto &sections : SectionMaxMs)
-    sections.fill(0.0);
+	for (auto& sections : SectionMaxMs)
+		sections.fill(0.0);
 
-  for (auto &peaks : TickPeaks)
-    peaks.clear();
+	for (auto& peaks : TickPeaks)
+		peaks.clear();
 
-  for (auto &ticks : ExpertTicks)
-    ticks.fill(0);
+	for (auto& ticks : ExpertTicks)
+		ticks.fill(0);
 
-  for (auto &gains : ExpertGain)
-    gains.fill(0);
+	for (auto& gains : ExpertGain)
+		gains.fill(0);
 
-  for (auto &phases : ExpertTicksByPhase) {
-    for (auto &ticks : phases)
-      ticks.fill(0);
-  }
+	for (auto& phases : ExpertTicksByPhase)
+	{
+		for (auto& ticks : phases)
+			ticks.fill(0);
+	}
 
-  for (auto &phases : ExpertGainByPhase) {
-    for (auto &gains : phases)
-      gains.fill(0);
-  }
+	for (auto& phases : ExpertGainByPhase)
+	{
+		for (auto& gains : phases)
+			gains.fill(0);
+	}
 
-  LastHouseAdvantage.fill(0);
-  HasLastHouseAdvantage.fill(false);
-  ResetExpertCredit();
+	LastHouseAdvantage.fill(0);
+	HasLastHouseAdvantage.fill(false);
+	ResetExpertCredit();
 
-  TerritoryStats.fill(NeuralTerritoryStat{});
-  TerritoryLastFrame = -1;
-  BankStats.fill(NeuralBankStat{});
-  MapClassApplied = false;
-  OreFieldCache.clear();
-  OreFieldCacheFrame = -100000;
-  NeuralMatchSerial++;
+	TerritoryStats.fill(NeuralTerritoryStat {});
+	TerritoryLastFrame = -1;
+	BankStats.fill(NeuralBankStat {});
+	MapClassApplied = false;
+	OreFieldCache.clear();
+	OreFieldCacheFrame = -100000;
+	NeuralMatchSerial++;
 
 	if (NeuralAI::HeadlessMode && TrajectoryView)
 	{
@@ -1067,901 +1078,892 @@ void NeuralAI::OnScenarioStart() {
 		TrajectoryView->Capacity = 200;
 	}
 
-  WaterZoneCells.clear();
-  LargestWaterZoneCells = -1;
-  MapInfo = NeuralMapInfo{};
-
-  for (auto &housePlans : PlanStats) {
-    for (auto &outcome : housePlans)
-      outcome.fill(0);
-  }
-
-  NeuralAI::LastCombatFrame = 0;
-
-  NeuralAI::LastTotalKillsAndCaptures = 0;
-
-  NeuralAI::LastFPSCheckTick = GetTickCount();
-
-  NeuralAI::FramesSinceLastFPSCheck = 0;
-
-  static const wchar_t *const ArchetypeNamesW[8] = {
-      L"Tank Mass & Joint Assault", L"SpecOps & Infiltration",
-      L"Tech & Fortress Turtle",    L"Blitzkrieg Rush",
-      L"TechBoom & Heavy Armor",    L"Harasser & Guerrilla Raider",
-      L"Air & Naval Dominator",     L"Siege, Urban & Coalition"};
-
-  int activeAIHouses = 0;
-  HouseClass *pFirstAI = nullptr;
-
-  DrawFocusArchetypeSlot();
-
-  for (auto const pHouse : HouseClass::Array) {
-    if (!NeuralAI::IsEnabledForHouse(pHouse))
-      continue;
-
-    activeAIHouses++;
-
-    auto const pExt = HouseExt::Fetch(pHouse);
-
-    if (!NeuralAI::IsCampaignRestricted(pHouse)) {
-      pHouse->Production = true;
-
-      pHouse->AIState_1E4 = 0;
-    }
-
-    if (!NeuralAI::HeadlessMode) {
-      pExt->NeuralAI_PolicySlot = 0;
-    } else if (!pFirstAI) {
-      pFirstAI = pHouse;
-
-      pExt->NeuralAI_PolicySlot = 0;
-    } else if (pHouse->IsAlliedWith(pFirstAI)) {
-      pExt->NeuralAI_PolicySlot = 0;
-    } else {
-      bool hasAlliedSlot0 = false;
-      bool hasAlliedSlot1 = false;
-
-      for (auto const pPrev : HouseClass::Array) {
-        if (!pPrev || pPrev == pHouse || !NeuralAI::IsEnabledForHouse(pPrev))
-          continue;
-
-        if (pPrev->ArrayIndex >= pHouse->ArrayIndex)
-          break;
-
-        if (pHouse->IsAlliedWith(pPrev)) {
-          const int prevSlot = HouseExt::Fetch(pPrev)->NeuralAI_PolicySlot;
-
-          if (prevSlot == 0)
-            hasAlliedSlot0 = true;
-          else
-            hasAlliedSlot1 = true;
-        }
-      }
-
-      if (hasAlliedSlot0)
-        pExt->NeuralAI_PolicySlot = 0;
-      else if (hasAlliedSlot1)
-        pExt->NeuralAI_PolicySlot = 1;
-      else
-        pExt->NeuralAI_PolicySlot = (activeAIHouses - 1) % 2;
-    }
-
-    // Strategic archetype: the learned bias (slots 48..52, 86..88), what the
-    // faction memory says of the archetype per match it played and, in training
-    // matches, a bonus for archetypes this side has seldom tried. The memory
-    // used to count as a sum: a win adds 12 and a loss takes 6, so the sum of
-    // an archetype grows with every match it plays at more than a third of
-    // wins, and the first archetype a side played stayed its only one (each
-    // side had one archetype with 130 to 270 visits and +500 to +1100,
-    // archetypes 0 and 2 were never drawn in 40 matches). A per-match mean
-    // compares archetypes whatever their number of matches; one with few
-    // matches is pulled toward the side's mean.
-    int bestArch = ScenarioClass::Instance->Random.RandomRanged(
-        0, NeuralAI::NumArchetypes - 1);
-
-    if (NeuralAI::AllowBackpackInference && NeuralAI::BackpackLoaded) {
-      const AIBackpackFile &policy = NeuralAI::PolicyFor(pHouse);
-
-      std::array<int, NeuralAI::NumArchetypes> deltaSum{};
-      std::array<int, NeuralAI::NumArchetypes> matchesPlayed{};
-      int sideDeltaSum = 0;
-      int sideMatches = 0;
+	WaterZoneCells.clear();
+	LargestWaterZoneCells = -1;
+	MapInfo = NeuralMapInfo {};
+
+	for (auto& housePlans : PlanStats)
+	{
+		for (auto& outcome : housePlans)
+			outcome.fill(0);
+	}
+
+	NeuralAI::LastCombatFrame = 0;
+
+	NeuralAI::LastTotalKillsAndCaptures = 0;
+
+	NeuralAI::LastFPSCheckTick = GetTickCount();
+
+	NeuralAI::FramesSinceLastFPSCheck = 0;
+
+	static const wchar_t* const ArchetypeNamesW[8] = { L"Tank Mass & Joint Assault", L"SpecOps & Infiltration",
+		L"Tech & Fortress Turtle", L"Blitzkrieg Rush", L"TechBoom & Heavy Armor", L"Harasser & Guerrilla Raider",
+		L"Air & Naval Dominator", L"Siege, Urban & Coalition" };
+
+	int activeAIHouses = 0;
+	HouseClass* pFirstAI = nullptr;
+
+	DrawFocusArchetypeSlot();
+
+	for (auto const pHouse : HouseClass::Array)
+	{
+		if (!NeuralAI::IsEnabledForHouse(pHouse))
+			continue;
+
+		activeAIHouses++;
+
+		auto const pExt = HouseExt::Fetch(pHouse);
+
+		if (!NeuralAI::IsCampaignRestricted(pHouse))
+		{
+			pHouse->Production = true;
+
+			pHouse->AIState_1E4 = 0;
+		}
+
+		if (!NeuralAI::HeadlessMode)
+		{
+			pExt->NeuralAI_PolicySlot = 0;
+		}
+		else if (!pFirstAI)
+		{
+			pFirstAI = pHouse;
+
+			pExt->NeuralAI_PolicySlot = 0;
+		}
+		else if (pHouse->IsAlliedWith(pFirstAI))
+		{
+			pExt->NeuralAI_PolicySlot = 0;
+		}
+		else
+		{
+			bool hasAlliedSlot0 = false;
+			bool hasAlliedSlot1 = false;
+
+			for (auto const pPrev : HouseClass::Array)
+			{
+				if (!pPrev || pPrev == pHouse || !NeuralAI::IsEnabledForHouse(pPrev))
+					continue;
+
+				if (pPrev->ArrayIndex >= pHouse->ArrayIndex)
+					break;
+
+				if (pHouse->IsAlliedWith(pPrev))
+				{
+					const int prevSlot = HouseExt::Fetch(pPrev)->NeuralAI_PolicySlot;
+
+					if (prevSlot == 0)
+						hasAlliedSlot0 = true;
+					else
+						hasAlliedSlot1 = true;
+				}
+			}
+
+			if (hasAlliedSlot0)
+				pExt->NeuralAI_PolicySlot = 0;
+			else if (hasAlliedSlot1)
+				pExt->NeuralAI_PolicySlot = 1;
+			else
+				pExt->NeuralAI_PolicySlot = (activeAIHouses - 1) % 2;
+		}
+
+		// Strategic archetype: the learned bias (slots 48..52, 86..88), what the faction memory says
+		// of the archetype per match it played and, in training matches, a bonus for archetypes this
+		// side has seldom tried. The memory used to count as a sum: a win adds 12 and a loss takes 6,
+		// so the sum of an archetype grows with every match it plays at more than a third of wins,
+		// and the first archetype a side played stayed its only one (each side had one archetype
+		// with 130 to 270 visits and +500 to +1100, archetypes 0 and 2 were never drawn in 40
+		// matches). A per-match mean compares archetypes whatever their number of matches; one with
+		// few matches is pulled toward the side's mean.
+		int bestArch = ScenarioClass::Instance->Random.RandomRanged(0, NeuralAI::NumArchetypes - 1);
 
-      for (int a = 0; a < NeuralAI::NumArchetypes; ++a) {
-        // The result of a match goes into the entry of the expert that ran
-        // most, and every expert above a twentieth of the choices counts a
-        // visit: the most visited entry is about the number of matches this
-        // archetype played for this side.
-        for (int e = 0; e < NeuralAI::NumSpecialists; ++e) {
-          auto const &entry =
-              policy.Entries[NeuralBackpackEntryIndex(pHouse->SideIndex, a, e)];
+		if (NeuralAI::AllowBackpackInference && NeuralAI::BackpackLoaded)
+		{
+			const AIBackpackFile& policy = NeuralAI::PolicyFor(pHouse);
 
-          if (entry.VisitCount > 0) {
-            deltaSum[a] += entry.ArchetypeScoreDelta[a];
-            matchesPlayed[a] =
-                std::max(matchesPlayed[a],
-                         static_cast<int>(std::min(entry.VisitCount, 100000u)));
-          }
-        }
+			std::array<int, NeuralAI::NumArchetypes> deltaSum {};
+			std::array<int, NeuralAI::NumArchetypes> matchesPlayed {};
+			int sideDeltaSum = 0;
+			int sideMatches = 0;
 
-        sideDeltaSum += deltaSum[a];
-        sideMatches += matchesPlayed[a];
-      }
+			for (int a = 0; a < NeuralAI::NumArchetypes; ++a)
+			{
+				// The result of a match goes into the entry of the expert that ran most, and every
+				// expert above a twentieth of the choices counts a visit: the most visited entry is
+				// about the number of matches this archetype played for this side.
+				for (int e = 0; e < NeuralAI::NumSpecialists; ++e)
+				{
+					auto const& entry = policy.Entries[NeuralBackpackEntryIndex(pHouse->SideIndex, a, e)];
 
-      const int sideMeanX100 =
-          sideMatches > 0 ? sideDeltaSum * 100 / sideMatches : 0;
-      int bestArchScore = -999999;
-
-      for (int a = 0; a < NeuralAI::NumArchetypes; ++a) {
-        const int meanX100 =
-            (deltaSum[a] * 100 + sideMeanX100 * ArchetypeMemoryPrior) /
-            (matchesPlayed[a] + ArchetypeMemoryPrior);
-        const int memBonus =
-            std::clamp(meanX100 * ArchetypeMemoryWeight / 100,
-                       -ArchetypeMemoryCap, ArchetypeMemoryCap);
-        const int tryBonus =
-            NeuralAI::TrainingMode
-                ? ExactInvSqrtScaled(
-                      static_cast<int>(ArchetypeTryBonus),
-                      static_cast<uint32_t>(std::max(0, matchesPlayed[a])))
-                : 0;
-        const int exploreJitter =
-            ScenarioClass::Instance->Random.RandomRanged(-90, 90);
-        const int archBiasSlot = (a < 5) ? (48 + a) : (86 + (a - 5));
-        const int aScore = static_cast<int>(policy.OutputBias[archBiasSlot]) +
-                           memBonus + tryBonus + exploreJitter;
-
-        if (aScore > bestArchScore) {
-          bestArchScore = aScore;
-
-          bestArch = a;
-        }
-      }
-    }
-
-    pExt->NeuralAI_Archetype =
-        FocusedArchetype(bestArch, pExt->NeuralAI_PolicySlot);
-
-    std::array<int, 5> openingTrained{};
-
-    if (NeuralAI::AllowBackpackInference && NeuralAI::BackpackLoaded) {
-      for (size_t o = 0; o < openingTrained.size(); ++o) {
-        if (OpeningKeySlots[o] >= 0)
-          openingTrained[o] =
-              NeuralAI::PolicyFor(pHouse).OutputBias[OpeningKeySlots[o]] / 3;
-      }
-    }
-
-    DrawMatchStyle(pHouse, openingTrained);
-
-    pExt->NeuralAI_ActiveExpert = 0;
-
-    pExt->NeuralAI_LastInferenceFrame = -1000;
-
-    pExt->NeuralAI_NextBuildingTarget = -1;
-
-    pExt->NeuralAI_NextUnitTarget = -1;
-
-    pExt->NeuralAI_NextNavalTarget = -1;
-
-    pExt->NeuralAI_NextInfantryTarget = -1;
-
-    pExt->NeuralAI_NextAircraftTarget = -1;
-
-    pExt->NeuralAI_PlannedBuildCell = CellStruct::Empty;
-
-    pExt->NeuralAI_ScoutTargetCell = CellStruct::Empty;
-
-    pExt->NeuralAI_AttackTargetCell = CellStruct::Empty;
-
-    pExt->NeuralAI_InfiltratedEnemyMask = 0;
-
-    pExt->NeuralAI_ScoutedEnemyMask = 0;
-
-    pExt->NeuralAI_EstimatedEnemyThreat.fill(0);
-
-    const char *countryId =
-        (pHouse->Type && pHouse->Type->ID[0]) ? pHouse->Type->ID : "AIHouse";
-
-    const int archIdx =
-        std::clamp(pExt->NeuralAI_Archetype, 0, NeuralAI::NumArchetypes - 1);
-
-    Debug::Log("[NeuralAI] Activated for House #%d (%s, Diff=%d) -> "
-               "Archetype=%d (%ls)\n",
-               pHouse->ArrayIndex, countryId, pHouse->GetAIDifficultyIndex(),
-               archIdx, ArchetypeNamesW[archIdx]);
-
-    if (!NeuralAI::HeadlessMode) {
-      wchar_t msgBuf[256];
-
-      std::swprintf(msgBuf, 256, L"[Neural AI] House #%d (%hs) -> Style: %ls",
-                    pHouse->ArrayIndex, countryId, ArchetypeNamesW[archIdx]);
-
-      MessageListClass::Instance.PrintMessage(
-          msgBuf, RulesClass::Instance->MessageDelay,
-          HouseClass::CurrentPlayer
-              ? HouseClass::CurrentPlayer->ColorSchemeIndex
-              : 0,
-          true);
-    }
-  }
-
-  if (activeAIHouses > 0) {
-    Debug::Log("[NeuralAI] ScenarioStart: %d AI Houses controlled by NeuralAI "
-               "(aimd.ini bypassed) | BaseSignature=%016llX | ELO=%d\n",
-               activeAIHouses, NeuralAI::CurrentBaseSignature,
-               NeuralAI::Backpack.EstimatedELO);
-
-    // What AIBuildThis=no keeps from the Neural AI in this match (user,
-    // 2026-11-20): the buildings of a tech level a house of ours could reach
-    // and of a country it can build for. The modder changes the tag where that
-    // is not wanted.
-    int highestTechLevel = -1;
-    DWORD ownerFlags = 0u;
-
-    for (auto const pHouse : HouseClass::Array) {
-      if (pHouse && pHouse->Type && NeuralAI::IsEnabledForHouse(pHouse)) {
-        highestTechLevel = std::max(highestTechLevel, pHouse->TechLevel);
-
-        if (pHouse->Type->ArrayIndex >= 0 && pHouse->Type->ArrayIndex < 32)
-          ownerFlags |= 1u << pHouse->Type->ArrayIndex;
-      }
-    }
-
-    int keptCount = 0;
-
-    for (auto const pType : BuildingTypeClass::Array) {
-      auto const &written = BuildingTypeExt::Fetch(pType)->AIBuildThis_Written;
-
-      if (!written.isset() || written.Get() || pType->TechLevel < 0 ||
-          pType->TechLevel > highestTechLevel ||
-          !(pType->OwnerFlags & ownerFlags)) {
-        continue;
-      }
-
-      if (keptCount++ == 0)
-        Debug::Log("[NeuralAI] WARNING: these buildings have AIBuildThis=no "
-                   "and the Neural AI never builds them:\n");
-
-      Debug::Log("[NeuralAI]   %s (%ls), tech level %d\n", pType->ID,
-                 pType->UIName ? pType->UIName : L"", pType->TechLevel);
-    }
-
-    if (keptCount > 0)
-      Debug::Log("[NeuralAI] WARNING: %d buildings kept from the Neural AI by "
-                 "AIBuildThis=no.\n",
-                 keptCount);
-
-    if (!NeuralAI::HeadlessMode) {
-      wchar_t bannerBuf[256];
-
-      std::swprintf(
-          bannerBuf, 256,
-          L"[Phobos Neural AI] ACTIVE (%d AI Houses | Brain Sig:%08X | ELO:%d "
-
-          L"| aimd.ini bypassed)",
-          activeAIHouses,
-          static_cast<uint32_t>(NeuralAI::CurrentBaseSignature & 0xFFFFFFFFULL),
-          NeuralAI::Backpack.EstimatedELO);
-
-      MessageListClass::Instance.PrintMessage(
-          bannerBuf, RulesClass::Instance->MessageDelay,
-          HouseClass::CurrentPlayer
-              ? HouseClass::CurrentPlayer->ColorSchemeIndex
-              : 0,
-          true);
-    }
-  }
-
-  if (NeuralAI::HeadlessMode) {
-    reinterpret_cast<void(__fastcall *)()>(0x407020)();
-
-    if (Game::hWnd && !IsIconic(Game::hWnd)) {
-      ReleaseCapture();
-
-      ShowWindow(Game::hWnd, SW_SHOWMINNOACTIVE);
-    }
-
-    NeuralAI::UpdateTelemetrySnapshot(false, -1, false);
-  } else if (auto const pCur = HouseClass::CurrentPlayer) {
-    const bool isObs = HouseClass::IsCurrentPlayerObserver() ||
-                       Game::ObserverMode || pCur->IsInitiallyObserver() ||
-                       (pCur->Type && !_stricmp(pCur->Type->ID, "Observer"));
-    if (isObs) {
-      // 0x6879ED runs BEFORE 0x6879FF (MapClass::Read_INI). Do NOT set
-      // Visionary = 1 here, because MapClass::Reveal (0x577E09) and
-      // MapClass::RevealTheMap (0x577F9F) early-return if Visionary != 0! Reset
-      // Visionary = 0 so Frame 1 reveals all newly loaded cells.
-      pCur->Visionary = 0;
-    }
-  }
+					if (entry.VisitCount > 0)
+					{
+						deltaSum[a] += entry.ArchetypeScoreDelta[a];
+						matchesPlayed[a] = std::max(matchesPlayed[a], static_cast<int>(std::min(entry.VisitCount, 100000u)));
+					}
+				}
+
+				sideDeltaSum += deltaSum[a];
+				sideMatches += matchesPlayed[a];
+			}
+
+			const int sideMeanX100 = sideMatches > 0 ? sideDeltaSum * 100 / sideMatches : 0;
+			int bestArchScore = -999999;
+
+			for (int a = 0; a < NeuralAI::NumArchetypes; ++a)
+			{
+				const int meanX100 = (deltaSum[a] * 100 + sideMeanX100 * ArchetypeMemoryPrior)
+					/ (matchesPlayed[a] + ArchetypeMemoryPrior);
+				const int memBonus = std::clamp(meanX100 * ArchetypeMemoryWeight / 100, -ArchetypeMemoryCap, ArchetypeMemoryCap);
+				const int tryBonus = NeuralAI::TrainingMode
+					? ExactInvSqrtScaled(static_cast<int>(ArchetypeTryBonus), static_cast<uint32_t>(std::max(0, matchesPlayed[a])))
+					: 0;
+				const int exploreJitter = ScenarioClass::Instance->Random.RandomRanged(-90, 90);
+				const int archBiasSlot = (a < 5) ? (48 + a) : (86 + (a - 5));
+				const int aScore = static_cast<int>(policy.OutputBias[archBiasSlot]) + memBonus + tryBonus + exploreJitter;
+
+				if (aScore > bestArchScore)
+				{
+					bestArchScore = aScore;
+
+					bestArch = a;
+				}
+			}
+		}
+
+		pExt->NeuralAI_Archetype = FocusedArchetype(bestArch, pExt->NeuralAI_PolicySlot);
+
+		std::array<int, 5> openingTrained {};
+
+		if (NeuralAI::AllowBackpackInference && NeuralAI::BackpackLoaded)
+		{
+			for (size_t o = 0; o < openingTrained.size(); ++o)
+			{
+				if (OpeningKeySlots[o] >= 0)
+					openingTrained[o] = NeuralAI::PolicyFor(pHouse).OutputBias[OpeningKeySlots[o]] / 3;
+			}
+		}
+
+		DrawMatchStyle(pHouse, openingTrained);
+
+		pExt->NeuralAI_ActiveExpert = 0;
+
+		pExt->NeuralAI_LastInferenceFrame = -1000;
+
+		pExt->NeuralAI_NextBuildingTarget = -1;
+
+		pExt->NeuralAI_NextUnitTarget = -1;
+
+		pExt->NeuralAI_NextNavalTarget = -1;
+
+		pExt->NeuralAI_NextInfantryTarget = -1;
+
+		pExt->NeuralAI_NextAircraftTarget = -1;
+
+		pExt->NeuralAI_PlannedBuildCell = CellStruct::Empty;
+
+		pExt->NeuralAI_ScoutTargetCell = CellStruct::Empty;
+
+		pExt->NeuralAI_AttackTargetCell = CellStruct::Empty;
+
+		pExt->NeuralAI_InfiltratedEnemyMask = 0;
+
+		pExt->NeuralAI_ScoutedEnemyMask = 0;
+
+		pExt->NeuralAI_EstimatedEnemyThreat.fill(0);
+
+		const char* countryId = (pHouse->Type && pHouse->Type->ID[0]) ? pHouse->Type->ID : "AIHouse";
+
+		const int archIdx = std::clamp(pExt->NeuralAI_Archetype, 0, NeuralAI::NumArchetypes - 1);
+
+		Debug::Log("[NeuralAI] Activated for House #%d (%s, Diff=%d) -> "
+				"Archetype=%d (%ls)\n",
+			pHouse->ArrayIndex, countryId, pHouse->GetAIDifficultyIndex(), archIdx, ArchetypeNamesW[archIdx]);
+
+		if (!NeuralAI::HeadlessMode)
+		{
+			wchar_t msgBuf[256];
+
+			std::swprintf(msgBuf, 256, L"[Neural AI] House #%d (%hs) -> Style: %ls", pHouse->ArrayIndex, countryId,
+				ArchetypeNamesW[archIdx]);
+
+			MessageListClass::Instance.PrintMessage(msgBuf, RulesClass::Instance->MessageDelay,
+				HouseClass::CurrentPlayer ? HouseClass::CurrentPlayer->ColorSchemeIndex : 0, true);
+		}
+	}
+
+	if (activeAIHouses > 0)
+	{
+		Debug::Log("[NeuralAI] ScenarioStart: %d AI Houses controlled by NeuralAI "
+				"(aimd.ini bypassed) | BaseSignature=%016llX | ELO=%d\n",
+			activeAIHouses, NeuralAI::CurrentBaseSignature, NeuralAI::Backpack.EstimatedELO);
+
+		// What AIBuildThis=no keeps from the Neural AI in this match (user, 2026-11-20): the buildings
+		// of a tech level a house of ours could reach and of a country it can build for. The modder
+		// changes the tag where that is not wanted.
+		int highestTechLevel = -1;
+		DWORD ownerFlags = 0u;
+
+		for (auto const pHouse : HouseClass::Array)
+		{
+			if (pHouse && pHouse->Type && NeuralAI::IsEnabledForHouse(pHouse))
+			{
+				highestTechLevel = std::max(highestTechLevel, pHouse->TechLevel);
+
+				if (pHouse->Type->ArrayIndex >= 0 && pHouse->Type->ArrayIndex < 32)
+					ownerFlags |= 1u << pHouse->Type->ArrayIndex;
+			}
+		}
+
+		int keptCount = 0;
+
+		for (auto const pType : BuildingTypeClass::Array)
+		{
+			auto const& written = BuildingTypeExt::Fetch(pType)->AIBuildThis_Written;
+
+			if (!written.isset() || written.Get() || pType->TechLevel < 0 || pType->TechLevel > highestTechLevel
+				|| !(pType->OwnerFlags & ownerFlags))
+			{
+				continue;
+			}
+
+			if (keptCount++ == 0)
+				Debug::Log("[NeuralAI] WARNING: these buildings have AIBuildThis=no and the Neural AI never builds them:\n");
+
+			Debug::Log("[NeuralAI]   %s (%ls), tech level %d\n", pType->ID, pType->UIName ? pType->UIName : L"", pType->TechLevel);
+		}
+
+		if (keptCount > 0)
+			Debug::Log("[NeuralAI] WARNING: %d buildings kept from the Neural AI by AIBuildThis=no.\n", keptCount);
+
+		if (!NeuralAI::HeadlessMode)
+		{
+			wchar_t bannerBuf[256];
+
+			std::swprintf(bannerBuf, 256,
+				L"[Phobos Neural AI] ACTIVE (%d AI Houses | Brain Sig:%08X | ELO:%d "
+
+				L"| aimd.ini bypassed)",
+				activeAIHouses, static_cast<uint32_t>(NeuralAI::CurrentBaseSignature & 0xFFFFFFFFULL),
+				NeuralAI::Backpack.EstimatedELO);
+
+			MessageListClass::Instance.PrintMessage(bannerBuf, RulesClass::Instance->MessageDelay,
+				HouseClass::CurrentPlayer ? HouseClass::CurrentPlayer->ColorSchemeIndex : 0, true);
+		}
+	}
+
+	if (NeuralAI::HeadlessMode)
+	{
+		reinterpret_cast<void(__fastcall*)()>(0x407020)();
+
+		if (Game::hWnd && !IsIconic(Game::hWnd))
+		{
+			ReleaseCapture();
+
+			ShowWindow(Game::hWnd, SW_SHOWMINNOACTIVE);
+		}
+
+		NeuralAI::UpdateTelemetrySnapshot(false, -1, false);
+	}
+	else if (auto const pCur = HouseClass::CurrentPlayer)
+	{
+		const bool isObs = HouseClass::IsCurrentPlayerObserver() || Game::ObserverMode || pCur->IsInitiallyObserver()
+			|| (pCur->Type && !_stricmp(pCur->Type->ID, "Observer"));
+		if (isObs)
+		{
+			// 0x6879ED runs BEFORE 0x6879FF (MapClass::Read_INI). Do NOT set Visionary = 1 here,
+			// because MapClass::Reveal (0x577E09) and MapClass::RevealTheMap (0x577F9F) early-return
+			// if Visionary != 0! Reset Visionary = 0 so Frame 1 reveals all newly loaded cells.
+			pCur->Visionary = 0;
+		}
+	}
 }
 
-void NeuralAI::OnScenarioEnd(bool playerWon) {
-  if (SessionClass::IsCampaign())
-    return;
+void NeuralAI::OnScenarioEnd(bool playerWon)
+{
+	if (SessionClass::IsCampaign())
+		return;
 
-  int bestHouseIdx = -1;
-  int bestScore = -1;
+	int bestHouseIdx = -1;
+	int bestScore = -1;
 
-  SampleTerritory(true);
+	SampleTerritory(true);
 
-  for (auto const pHouse : HouseClass::Array) {
-    if (!pHouse || pHouse->IsNeutral() || pHouse->IsObserver())
-      continue;
+	for (auto const pHouse : HouseClass::Array)
+	{
+		if (!pHouse || pHouse->IsNeutral() || pHouse->IsObserver())
+			continue;
 
-    const int score = HouseMatchScore(pHouse);
+		const int score = HouseMatchScore(pHouse);
 
-    if (pHouse->IsWinner || (!pHouse->Defeated && score > bestScore)) {
-      bestScore = score;
+		if (pHouse->IsWinner || (!pHouse->Defeated && score > bestScore))
+		{
+			bestScore = score;
 
-      bestHouseIdx = pHouse->ArrayIndex;
-    }
-  }
+			bestHouseIdx = pHouse->ArrayIndex;
+		}
+	}
 
-  if (NeuralAI::AllowBackpackInference && NeuralAI::BackpackLoaded &&
-      !NeuralAI::HeadlessMode) {
-    NeuralAI::Backpack.GamesPlayed++;
+	if (NeuralAI::AllowBackpackInference && NeuralAI::BackpackLoaded && !NeuralAI::HeadlessMode)
+	{
+		NeuralAI::Backpack.GamesPlayed++;
 
-    for (auto const pHouse : HouseClass::Array) {
-      if (!NeuralAI::IsEnabledForHouse(pHouse))
-        continue;
+		for (auto const pHouse : HouseClass::Array)
+		{
+			if (!NeuralAI::IsEnabledForHouse(pHouse))
+				continue;
 
-      auto const pExt = HouseExt::Fetch(pHouse);
-      const bool won = (pHouse->ArrayIndex == bestHouseIdx) || pHouse->IsWinner;
+			auto const pExt = HouseExt::Fetch(pHouse);
+			const bool won = (pHouse->ArrayIndex == bestHouseIdx) || pHouse->IsWinner;
 
-      if (won) {
-        NeuralAI::Backpack.WinsCount++;
+			if (won)
+			{
+				NeuralAI::Backpack.WinsCount++;
 
-        NeuralAI::Backpack.EstimatedELO =
-            std::min(3500, NeuralAI::Backpack.EstimatedELO + 8);
-      } else {
-        NeuralAI::Backpack.EstimatedELO =
-            std::max(800, NeuralAI::Backpack.EstimatedELO - 4);
-      }
+				NeuralAI::Backpack.EstimatedELO = std::min(3500, NeuralAI::Backpack.EstimatedELO + 8);
+			}
+			else
+			{
+				NeuralAI::Backpack.EstimatedELO = std::max(800, NeuralAI::Backpack.EstimatedELO - 4);
+			}
 
-      const int arch = std::clamp(pExt->NeuralAI_Archetype, 0, 7);
-      // Fair credit: the result is shared by every expert that ran for at least
-      // 5% of this house's expert choices, in proportion (twice its share, up
-      // to the full delta), not given whole to the expert in charge when the
-      // match ended. The most used one carries the archetype memory and the
-      // LoRA step.
-      std::array<int, NeuralAI::NumSpecialists> ticks{};
-      int totalTicks = 0;
+			const int arch = std::clamp(pExt->NeuralAI_Archetype, 0, 7);
+			// Fair credit: the result is shared by every expert that ran for at least 5% of this
+			// house's expert choices, in proportion (twice its share, up to the full delta), not
+			// given whole to the expert in charge when the match ended. The most used one carries
+			// the archetype memory and the LoRA step.
+			std::array<int, NeuralAI::NumSpecialists> ticks {};
+			int totalTicks = 0;
 
-      if (pHouse->ArrayIndex >= 0 && pHouse->ArrayIndex < 32)
-        ticks = ExpertTicks[pHouse->ArrayIndex];
+			if (pHouse->ArrayIndex >= 0 && pHouse->ArrayIndex < 32)
+				ticks = ExpertTicks[pHouse->ArrayIndex];
 
-      for (const int t : ticks)
-        totalTicks += t;
+			for (const int t : ticks)
+				totalTicks += t;
 
-      if (totalTicks <= 0) {
-        ticks.fill(0);
-        ticks[std::clamp(pExt->NeuralAI_ActiveExpert, 0,
-                         NeuralAI::NumSpecialists - 1)] = 1;
-        totalTicks = 1;
-      }
+			if (totalTicks <= 0)
+			{
+				ticks.fill(0);
+				ticks[std::clamp(pExt->NeuralAI_ActiveExpert, 0, NeuralAI::NumSpecialists - 1)] = 1;
+				totalTicks = 1;
+			}
 
-      int exp = 0;
+			int exp = 0;
 
-      for (int e = 1; e < NeuralAI::NumSpecialists; ++e) {
-        if (ticks[e] > ticks[exp])
-          exp = e;
-      }
+			for (int e = 1; e < NeuralAI::NumSpecialists; ++e)
+			{
+				if (ticks[e] > ticks[exp])
+					exp = e;
+			}
 
-      const int fastBonus =
-          (!NeuralAI::MatchEndStalemate && won && Unsorted::CurrentFrame > 0 &&
-           Unsorted::CurrentFrame <= 18000)
-              ? 4
-              : 0;
+			const int fastBonus
+				= (!NeuralAI::MatchEndStalemate && won && Unsorted::CurrentFrame > 0 && Unsorted::CurrentFrame <= 18000)
+				? 4
+				: 0;
 
-      // Stalemates are zero-sum and small (+3 ahead on score / -3 behind), so
-      // experts that play long games (expansion, crawl, siege) are not
-      // penalized for ending on the timer.
-      const int delta = NeuralAI::MatchEndStalemate
-                            ? (won ? 3 : -3)
-                            : (won ? (12 + fastBonus) : -6);
+			// Stalemates are zero-sum and small (+3 ahead on score / -3 behind), so experts that
+			// play long games (expansion, crawl, siege) are not penalized for ending on the timer.
+			const int delta = NeuralAI::MatchEndStalemate ? (won ? 3 : -3) : (won ? (12 + fastBonus) : -6);
 
-      for (int e = 0; e < NeuralAI::NumSpecialists; ++e) {
-        if (ticks[e] * 20 < totalTicks)
-          continue;
+			for (int e = 0; e < NeuralAI::NumSpecialists; ++e)
+			{
+				if (ticks[e] * 20 < totalTicks)
+					continue;
 
-        const int expertDelta =
-            std::clamp((delta * 2 * ticks[e] +
-                        (delta >= 0 ? totalTicks / 2 : -totalTicks / 2)) /
-                           totalTicks,
-                       -std::abs(delta), std::abs(delta));
-        const uint32_t entryIdx =
-            NeuralBackpackEntryIndex(pHouse->SideIndex, arch, e);
+				const int expertDelta = std::clamp((delta * 2 * ticks[e] + (delta >= 0 ? totalTicks / 2 : -totalTicks / 2)) / totalTicks,
+					-std::abs(delta), std::abs(delta));
+				const uint32_t entryIdx = NeuralBackpackEntryIndex(pHouse->SideIndex, arch, e);
 
-        if (NeuralAI::Backpack.NumEntries < AIBackpackFile::EntryCapacity)
-          NeuralAI::Backpack.NumEntries =
-              std::max(NeuralAI::Backpack.NumEntries, entryIdx + 1);
+				if (NeuralAI::Backpack.NumEntries < AIBackpackFile::EntryCapacity)
+					NeuralAI::Backpack.NumEntries = std::max(NeuralAI::Backpack.NumEntries, entryIdx + 1);
 
-        auto &entry = NeuralAI::Backpack.Entries[entryIdx];
+				auto& entry = NeuralAI::Backpack.Entries[entryIdx];
 
-        entry.StateClusterHash =
-            (static_cast<uint32_t>(pHouse->SideIndex) << 16) |
-            static_cast<uint32_t>(arch << 8) | static_cast<uint32_t>(e);
+				entry.StateClusterHash = (static_cast<uint32_t>(pHouse->SideIndex) << 16) | static_cast<uint32_t>(arch << 8)
+					| static_cast<uint32_t>(e);
 
-        if (e == exp)
-          entry.ArchetypeScoreDelta[arch] =
-              ClampInt16(entry.ArchetypeScoreDelta[arch] + delta);
+				if (e == exp)
+					entry.ArchetypeScoreDelta[arch] = ClampInt16(entry.ArchetypeScoreDelta[arch] + delta);
 
-        if (e < 8)
-          entry.ExpertScoreDelta[e] =
-              ClampInt16(entry.ExpertScoreDelta[e] + expertDelta);
-        else
-          entry.BuildCategoryDelta[14 + (e - 8)] =
-              ClampInt16(entry.BuildCategoryDelta[14 + (e - 8)] + expertDelta);
+				if (e < 8)
+					entry.ExpertScoreDelta[e] = ClampInt16(entry.ExpertScoreDelta[e] + expertDelta);
+				else
+					entry.BuildCategoryDelta[14 + (e - 8)] = ClampInt16(entry.BuildCategoryDelta[14 + (e - 8)] + expertDelta);
 
-        entry.VisitCount++;
-      }
+				entry.VisitCount++;
+			}
 
-      // Update LoRA rank-16 adapter weights deterministically
-      const int loraIdx = (arch * 64 + exp * 8) % (256 * 16);
+			// Update LoRA rank-16 adapter weights deterministically
+			const int loraIdx = (arch * 64 + exp * 8) % (256 * 16);
 
-      NeuralAI::Backpack.LoRA_A[loraIdx] =
-          ClampInt8(NeuralAI::Backpack.LoRA_A[loraIdx] + (won ? 2 : -1));
-    }
+			NeuralAI::Backpack.LoRA_A[loraIdx] = ClampInt8(NeuralAI::Backpack.LoRA_A[loraIdx] + (won ? 2 : -1));
+		}
 
-    NeuralAI::SaveBackpack();
-  }
+		NeuralAI::SaveBackpack();
+	}
 
-  if (NeuralAI::HeadlessMode) {
-    NeuralAI::UpdateTelemetrySnapshot(true,
-                                      NeuralAI::MatchEndWinnerHouse >= 0
-                                          ? NeuralAI::MatchEndWinnerHouse
-                                          : bestHouseIdx,
-                                      NeuralAI::MatchEndStalemate);
-  }
+	if (NeuralAI::HeadlessMode)
+	{
+		NeuralAI::UpdateTelemetrySnapshot(true,
+			NeuralAI::MatchEndWinnerHouse >= 0 ? NeuralAI::MatchEndWinnerHouse : bestHouseIdx,
+			NeuralAI::MatchEndStalemate);
+	}
 }
 
-void NeuralAI::OnAutoBaseBuildingTriggered(HouseClass *pHouse, bool enabled) {
-  if (!pHouse)
-    return;
+void NeuralAI::OnAutoBaseBuildingTriggered(HouseClass* pHouse, bool enabled)
+{
+	if (!pHouse)
+		return;
 
-  pHouse->AutoBaseBuilding = enabled;
+	pHouse->AutoBaseBuilding = enabled;
 
-  if (enabled) {
-    if (auto const pExt = HouseExt::TryFetch(pHouse))
-      pExt->NeuralAI_Campaign = true;
-  }
+	if (enabled)
+	{
+		if (auto const pExt = HouseExt::TryFetch(pHouse))
+			pExt->NeuralAI_Campaign = true;
+	}
 }
 
-// Damage to a Neural AI house's units or buildings by another player house (the
-// victim always knows who hit it). Aimed: the attacker's target was ours (or
-// there was no attacking unit, as for a superweapon). Expert 3 diplomacy reads
-// it:
-// - inside the grace window of a truce (PactGraceFrames) damage between the
-// partners counts for
+// Damage to a Neural AI house's units or buildings by another player house (the victim always
+// knows who hit it). Aimed: the attacker's target was ours (or there was no attacking unit, as for a
+// superweapon). Expert 3 diplomacy reads it:
+// - inside the grace window of a truce (PactGraceFrames) damage between the partners counts for
 //   nothing, either way (missiles, shells, storms launched before the truce);
-// - every hit feeds our grudge against that house (aimed in full, the rest a
-// quarter);
-// - from a truce partner, aimed damage in force within BetrayalWindowFrames is
-// a betrayal: the truce
-//   ends at once, the pact at the next update, and the partner is a traitor to
-//   us for the rest of the match, unless we hit back a third as hard in that
-//   window (a skirmish of units clashing at the shared target); anything less
-//   (splash, stray hits while both fire at the target) is collateral, and the
-//   truce ends without blame once it passes CollateralDamageLimit within
-//   CollateralWindowFrames.
-// The engine shrouds the whole map again for pHouse, or for every house with
-// nullptr (see NeuralMapShroudState).
-void NeuralAI::OnMapReshroud(HouseClass *pHouse) { MarkMapReshroud(pHouse); }
-
-// A warhead with Reveal above 0 reveals the cells with dx * dx + dy * dy below
-// (radius + 1) squared for its house and allies.
-void NeuralAI::OnRevealWarhead(HouseClass *pHouse, const CoordStruct &coords,
-                               int radius) {
-  if (radius > 0)
-    MarkAreaReveal(pHouse, coords, radius + 1.0, 0, false);
+// - every hit feeds our grudge against that house (aimed in full, the rest a quarter);
+// - from a truce partner, aimed damage in force within BetrayalWindowFrames is a betrayal: the truce
+//   ends at once, the pact at the next update, and the partner is a traitor to us for the rest of
+//   the match, unless we hit back a third as hard in that window (a skirmish of units clashing at
+//   the shared target); anything less (splash, stray hits while both fire at the target) is collateral, and
+//   the truce ends without blame once it passes CollateralDamageLimit within CollateralWindowFrames.
+// The engine shrouds the whole map again for pHouse, or for every house with nullptr (see
+// NeuralMapShroudState).
+void NeuralAI::OnMapReshroud(HouseClass* pHouse)
+{
+	MarkMapReshroud(pHouse);
 }
 
-// An Ares PsychicReveal superweapon reveals its area when it is charged
-// (IsReady): SW.Range (a radius, or the width of a rectangle and its height),
-// else the rules' PsychicRevealRadius up to 10 cells.
-void NeuralAI::OnSuperWeaponLaunched(SuperClass *pSuper,
-                                     const CellStruct &cell) {
-  if (!pSuper || !pSuper->Type || !pSuper->Owner ||
-      pSuper->Type->Type != SuperWeaponType::PsychicReveal || !pSuper->IsReady)
-    return;
-
-  auto const pCell = MapClass::Instance.TryGetCellAt(cell);
-
-  if (!pCell)
-    return;
-
-  int height = -1;
-  const double range = GetPsychicRevealRange(pSuper->Type, height);
-
-  MarkAreaReveal(pSuper->Owner, pCell->GetCoordsWithBridge(), range, height,
-                 true);
+// A warhead with Reveal above 0 reveals the cells with dx * dx + dy * dy below (radius + 1) squared
+// for its house and allies.
+void NeuralAI::OnRevealWarhead(HouseClass* pHouse, const CoordStruct& coords, int radius)
+{
+	if (radius > 0)
+		MarkAreaReveal(pHouse, coords, radius + 1.0, 0, false);
 }
 
-void NeuralAI::OnHouseDamaged(HouseClass *pVictim, HouseClass *pAttacker,
-                              int damage, bool aimed) {
-  if (!pVictim || !pAttacker || pVictim == pAttacker || damage <= 0)
-    return;
+// An Ares PsychicReveal superweapon reveals its area when it is charged (IsReady): SW.Range (a radius, or the
+// width of a rectangle and its height), else the rules' PsychicRevealRadius up to 10 cells.
+void NeuralAI::OnSuperWeaponLaunched(SuperClass* pSuper, const CellStruct& cell)
+{
+	if (!pSuper || !pSuper->Type || !pSuper->Owner || pSuper->Type->Type != SuperWeaponType::PsychicReveal || !pSuper->IsReady)
+		return;
 
-  const int victim = pVictim->ArrayIndex;
-  const int attacker = pAttacker->ArrayIndex;
+	auto const pCell = MapClass::Instance.TryGetCellAt(cell);
 
-  if (victim < 0 || victim >= 8 || attacker < 0 || attacker >= 8 ||
-      pVictim->IsAlliedWith(pAttacker))
-    return;
+	if (!pCell)
+		return;
 
-  const int now = Unsorted::CurrentFrame;
+	int height = -1;
+	const double range = GetPsychicRevealRange(pSuper->Type, height);
 
-  // The attacker's own books: damage it did to its partner inside the grace
-  // window, and the aimed damage it did to a partner (the skirmish test of the
-  // betrayal rule).
-  if (NeuralAI::IsEnabledForHouse(pAttacker)) {
-    auto &attackerCoal = GetMacroState(pAttacker).Coalition;
-
-    if (IsInPactGrace(pAttacker, victim)) {
-      attackerCoal.GraceDamageIgnored += damage;
-    } else if (aimed && attackerCoal.Target >= 0 &&
-               attackerCoal.TruceSinceFrame[victim] >= 0) {
-      if (now - attackerCoal.AimedDealtFrame[victim] > BetrayalWindowFrames ||
-          now < attackerCoal.AimedDealtFrame[victim]) {
-        attackerCoal.AimedDealtFrame[victim] = now;
-        attackerCoal.AimedDealt[victim] = 0;
-      }
-
-      attackerCoal.AimedDealt[victim] += damage;
-    }
-  }
-
-  if (!NeuralAI::IsEnabledForHouse(pVictim))
-    return;
-
-  auto &coal = GetMacroState(pVictim).Coalition;
-
-  if (IsInPactGrace(pVictim, attacker)) {
-    coal.GraceDamageIgnored += damage;
-    return;
-  }
-
-  coal.Grudge[attacker] =
-      std::min(1000000, coal.Grudge[attacker] + (aimed ? damage : damage / 4));
-
-  if (aimed)
-    coal.HurtByFrame[attacker] = now;
-
-  const bool partner = coal.Target >= 0 && attacker != coal.Target &&
-                       coal.TruceSinceFrame[attacker] >= 0 &&
-                       (coal.RevokedMask & (1u << attacker)) == 0;
-
-  if (!partner)
-    return;
-
-  if (aimed) {
-    if (now - coal.AimedWindowFrame[attacker] > BetrayalWindowFrames ||
-        now < coal.AimedWindowFrame[attacker]) {
-      coal.AimedWindowFrame[attacker] = now;
-      coal.AimedDamage[attacker] = 0;
-    }
-
-    coal.AimedDamage[attacker] += damage;
-
-    // A trade of shots (we hit back a third as hard in the same window) is a
-    // skirmish: collateral.
-    const bool weTradedShots =
-        now - coal.AimedDealtFrame[attacker] <= BetrayalWindowFrames &&
-        coal.AimedDealt[attacker] * 3 >= coal.AimedDamage[attacker];
-
-    if (coal.AimedDamage[attacker] >= BetrayalDamage && !weTradedShots) {
-      coal.RevokedMask |= 1u << attacker;
-      coal.Revoked++;
-      coal.TruceEnds[static_cast<size_t>(NeuralTruceEnd::Betrayal)]++;
-      coal.BetrayalsSuffered++;
-      coal.TraitorScore[attacker]++;
-      coal.Grudge[attacker] = std::min(1000000, coal.Grudge[attacker] + 3000);
-      coal.BetrayedPending = true;
-      BetrayalsCommitted[attacker]++;
-      CountDecision(NeuralDecision::TruceRevoked, victim);
-      Debug::Log("[NeuralAI] House %d Coalition: betrayed by house %d at frame "
-                 "%d (aimed damage %d in %d frames).\n",
-                 victim, attacker, now, coal.AimedDamage[attacker],
-                 now - coal.AimedWindowFrame[attacker]);
-      return;
-    }
-  }
-
-  if (now - coal.CollateralWindowFrame[attacker] > CollateralWindowFrames ||
-      now < coal.CollateralWindowFrame[attacker]) {
-    coal.CollateralWindowFrame[attacker] = now;
-    coal.CollateralDamage[attacker] = 0;
-  }
-
-  coal.CollateralDamage[attacker] += damage;
-
-  if (coal.CollateralDamage[attacker] >= CollateralDamageLimit) {
-    coal.RevokedMask |= 1u << attacker;
-    coal.Revoked++;
-    coal.TruceEnds[static_cast<size_t>(NeuralTruceEnd::Collateral)]++;
-    coal.ExPartnerUntil[attacker] = now + ExPartnerCooldownFrames;
-    CountDecision(NeuralDecision::TruceRevoked, victim);
-    Debug::Log("[NeuralAI] House %d Coalition: truce with house %d ends at "
-               "frame %d, collateral losses %d.\n",
-               victim, attacker, now, coal.CollateralDamage[attacker]);
-  }
+	MarkAreaReveal(pSuper->Owner, pCell->GetCoordsWithBridge(), range, height, true);
 }
 
-void NeuralAI::OnBuildingDamaged(BuildingClass *pBuilding,
-                                 TechnoClass *pAttacker,
-                                 HouseClass *pAttackerHouse) {
-  if (!pBuilding || !pBuilding->Owner ||
-      !NeuralAI::IsEnabledForHouse(pBuilding->Owner))
-    return;
+void NeuralAI::OnHouseDamaged(HouseClass* pVictim, HouseClass* pAttacker, int damage, bool aimed)
+{
+	if (!pVictim || !pAttacker || pVictim == pAttacker || damage <= 0)
+		return;
 
-  auto &state = GetMacroState(pBuilding->Owner);
+	const int victim = pVictim->ArrayIndex;
+	const int attacker = pAttacker->ArrayIndex;
 
-  const CellStruct bldCoords = pBuilding->GetMapCoords();
-  CellStruct attackerCoords = CellStruct::Empty;
+	if (victim < 0 || victim >= 8 || attacker < 0 || attacker >= 8 || pVictim->IsAlliedWith(pAttacker))
+		return;
 
-  TechnoTypeClass *pAttackerType = nullptr;
+	const int now = Unsorted::CurrentFrame;
 
-  NeuralThreatCategory threat = NeuralThreatCategory::None;
+	// The attacker's own books: damage it did to its partner inside the grace window, and the aimed
+	// damage it did to a partner (the skirmish test of the betrayal rule).
+	if (NeuralAI::IsEnabledForHouse(pAttacker))
+	{
+		auto& attackerCoal = GetMacroState(pAttacker).Coalition;
 
-  if (pAttacker) {
-    attackerCoords = pAttacker->GetMapCoords();
+		if (IsInPactGrace(pAttacker, victim))
+		{
+			attackerCoal.GraceDamageIgnored += damage;
+		}
+		else if (aimed && attackerCoal.Target >= 0 && attackerCoal.TruceSinceFrame[victim] >= 0)
+		{
+			if (now - attackerCoal.AimedDealtFrame[victim] > BetrayalWindowFrames || now < attackerCoal.AimedDealtFrame[victim])
+			{
+				attackerCoal.AimedDealtFrame[victim] = now;
+				attackerCoal.AimedDealt[victim] = 0;
+			}
 
-    pAttackerType = pAttacker->GetTechnoType();
+			attackerCoal.AimedDealt[victim] += damage;
+		}
+	}
 
-    if (pAttacker->IsInAir() ||
-        pAttacker->WhatAmI() == AbstractType::Aircraft ||
-        (pAttackerType &&
-         (pAttackerType->JumpJet || pAttackerType->ConsideredAircraft))) {
-      threat = NeuralThreatCategory::Air;
-    } else if (pAttacker->WhatAmI() == AbstractType::Infantry) {
-      threat = NeuralThreatCategory::Infantry;
-    } else {
-      threat = NeuralThreatCategory::Vehicle;
-    }
-  } else if (pAttackerHouse && pAttackerHouse->ConYards.Count > 0) {
-    attackerCoords = pAttackerHouse->ConYards.GetItem(0)->GetMapCoords();
-  }
+	if (!NeuralAI::IsEnabledForHouse(pVictim))
+		return;
 
-  if (pBuilding->Type && !pBuilding->Type->IsBaseDefense &&
-      !pBuilding->Type->ConstructionYard &&
-      pBuilding->GetHealthPercentage() < 0.35) {
-    RecordUnsafePlacementZone(pBuilding->Owner, bldCoords, 2700);
-  }
+	auto& coal = GetMacroState(pVictim).Coalition;
 
-  auto it = std::find_if(state.AttackedBuildingsLIFO.begin(),
-                         state.AttackedBuildingsLIFO.end(),
-                         [&](const NeuralAttackedBuildingRecord &r) {
-                           return r.BuildingCoords == bldCoords;
-                         });
+	if (IsInPactGrace(pVictim, attacker))
+	{
+		coal.GraceDamageIgnored += damage;
+		return;
+	}
 
-  if (it != state.AttackedBuildingsLIFO.end()) {
-    NeuralAttackedBuildingRecord rec = *it;
+	coal.Grudge[attacker] = std::min(1000000, coal.Grudge[attacker] + (aimed ? damage : damage / 4));
 
-    rec.AttackerCoords = attackerCoords;
+	if (aimed)
+		coal.HurtByFrame[attacker] = now;
 
-    rec.AttackerType = pAttackerType;
+	const bool partner = coal.Target >= 0 && attacker != coal.Target && coal.TruceSinceFrame[attacker] >= 0
+		&& (coal.RevokedMask & (1u << attacker)) == 0;
 
-    if (threat != NeuralThreatCategory::None)
-      rec.Threat = threat;
+	if (!partner)
+		return;
 
-    rec.AttackFrame = Unsorted::CurrentFrame;
+	if (aimed)
+	{
+		if (now - coal.AimedWindowFrame[attacker] > BetrayalWindowFrames || now < coal.AimedWindowFrame[attacker])
+		{
+			coal.AimedWindowFrame[attacker] = now;
+			coal.AimedDamage[attacker] = 0;
+		}
 
-    state.AttackedBuildingsLIFO.erase(it);
+		coal.AimedDamage[attacker] += damage;
 
-    state.AttackedBuildingsLIFO.push_back(rec);
-  } else {
-    NeuralAttackedBuildingRecord rec;
+		// A trade of shots (we hit back a third as hard in the same window) is a skirmish: collateral.
+		const bool weTradedShots = now - coal.AimedDealtFrame[attacker] <= BetrayalWindowFrames
+			&& coal.AimedDealt[attacker] * 3 >= coal.AimedDamage[attacker];
 
-    rec.BuildingCoords = bldCoords;
+		if (coal.AimedDamage[attacker] >= BetrayalDamage && !weTradedShots)
+		{
+			coal.RevokedMask |= 1u << attacker;
+			coal.Revoked++;
+			coal.TruceEnds[static_cast<size_t>(NeuralTruceEnd::Betrayal)]++;
+			coal.BetrayalsSuffered++;
+			coal.TraitorScore[attacker]++;
+			coal.Grudge[attacker] = std::min(1000000, coal.Grudge[attacker] + 3000);
+			coal.BetrayedPending = true;
+			BetrayalsCommitted[attacker]++;
+			CountDecision(NeuralDecision::TruceRevoked, victim);
+			Debug::Log("[NeuralAI] House %d Coalition: betrayed by house %d at frame %d (aimed damage %d in %d frames).\n",
+				victim, attacker, now, coal.AimedDamage[attacker], now - coal.AimedWindowFrame[attacker]);
+			return;
+		}
+	}
 
-    rec.AttackerCoords = attackerCoords;
+	if (now - coal.CollateralWindowFrame[attacker] > CollateralWindowFrames || now < coal.CollateralWindowFrame[attacker])
+	{
+		coal.CollateralWindowFrame[attacker] = now;
+		coal.CollateralDamage[attacker] = 0;
+	}
 
-    rec.AttackerType = pAttackerType;
+	coal.CollateralDamage[attacker] += damage;
 
-    rec.Threat = threat;
-
-    rec.AttackFrame = Unsorted::CurrentFrame;
-
-    state.AttackedBuildingsLIFO.push_back(rec);
-  }
-
-  if (state.AttackedBuildingsLIFO.size() > 20)
-    state.AttackedBuildingsLIFO.erase(state.AttackedBuildingsLIFO.begin());
+	if (coal.CollateralDamage[attacker] >= CollateralDamageLimit)
+	{
+		coal.RevokedMask |= 1u << attacker;
+		coal.Revoked++;
+		coal.TruceEnds[static_cast<size_t>(NeuralTruceEnd::Collateral)]++;
+		coal.ExPartnerUntil[attacker] = now + ExPartnerCooldownFrames;
+		CountDecision(NeuralDecision::TruceRevoked, victim);
+		Debug::Log("[NeuralAI] House %d Coalition: truce with house %d ends at frame %d, collateral losses %d.\n", victim,
+			attacker, now, coal.CollateralDamage[attacker]);
+	}
 }
 
-void NeuralAI::OnHeadlessFrameTick() {
-  if (!NeuralAI::HeadlessMode)
-    return;
+void NeuralAI::OnBuildingDamaged(BuildingClass* pBuilding, TechnoClass* pAttacker, HouseClass* pAttackerHouse)
+{
+	if (!pBuilding || !pBuilding->Owner || !NeuralAI::IsEnabledForHouse(pBuilding->Owner))
+		return;
 
-  NeuralAI::FramesSinceLastFPSCheck++;
+	auto& state = GetMacroState(pBuilding->Owner);
 
-  const DWORD now = GetTickCount();
+	const CellStruct bldCoords = pBuilding->GetMapCoords();
+	CellStruct attackerCoords = CellStruct::Empty;
 
-  if (now - NeuralAI::LastFPSCheckTick >= 1000) {
-    NeuralAI::CurrentMeasuredFPS =
-        (NeuralAI::FramesSinceLastFPSCheck * 1000) /
-        std::max<DWORD>(1, now - NeuralAI::LastFPSCheckTick);
+	TechnoTypeClass* pAttackerType = nullptr;
 
-    NeuralAI::FramesSinceLastFPSCheck = 0;
+	NeuralThreatCategory threat = NeuralThreatCategory::None;
 
-    NeuralAI::LastFPSCheckTick = now;
-  }
+	if (pAttacker)
+	{
+		attackerCoords = pAttacker->GetMapCoords();
 
-  const int frame = Unsorted::CurrentFrame;
+		pAttackerType = pAttacker->GetTechnoType();
 
-  if (frame % 60 != 0)
-    return;
+		if (pAttacker->IsInAir() || pAttacker->WhatAmI() == AbstractType::Aircraft
+			|| (pAttackerType && (pAttackerType->JumpJet || pAttackerType->ConsideredAircraft)))
+		{
+			threat = NeuralThreatCategory::Air;
+		}
+		else if (pAttacker->WhatAmI() == AbstractType::Infantry)
+		{
+			threat = NeuralThreatCategory::Infantry;
+		}
+		else
+		{
+			threat = NeuralThreatCategory::Vehicle;
+		}
+	}
+	else if (pAttackerHouse && pAttackerHouse->ConYards.Count > 0)
+	{
+		attackerCoords = pAttackerHouse->ConYards.GetItem(0)->GetMapCoords();
+	}
 
-  int totalKillsAndCaptures = 0;
-  int aliveCombatHouses = 0;
-  int lastAliveHouseIdx = -1;
+	if (pBuilding->Type && !pBuilding->Type->IsBaseDefense && !pBuilding->Type->ConstructionYard
+		&& pBuilding->GetHealthPercentage() < 0.35)
+	{
+		RecordUnsafePlacementZone(pBuilding->Owner, bldCoords, 2700);
+	}
 
-  std::vector<HouseClass *> aliveCombatList;
+	auto it = std::find_if(state.AttackedBuildingsLIFO.begin(), state.AttackedBuildingsLIFO.end(),
+		[&](const NeuralAttackedBuildingRecord& r) { return r.BuildingCoords == bldCoords; });
 
-  for (auto const pHouse : HouseClass::Array) {
-    if (!pHouse || pHouse->IsNeutral() || pHouse->IsObserver())
-      continue;
+	if (it != state.AttackedBuildingsLIFO.end())
+	{
+		NeuralAttackedBuildingRecord rec = *it;
 
-    totalKillsAndCaptures += pHouse->TotalKilledUnits +
-                             pHouse->TotalKilledBuildings +
-                             pHouse->StolenBuildingsCredits;
+		rec.AttackerCoords = attackerCoords;
 
-    if (!pHouse->Defeated &&
-        (pHouse->OwnedBuildings > 0 || pHouse->OwnedUnits > 0 ||
-         pHouse->OwnedInfantry > 0)) {
-      aliveCombatHouses++;
+		rec.AttackerType = pAttackerType;
 
-      lastAliveHouseIdx = pHouse->ArrayIndex;
+		if (threat != NeuralThreatCategory::None)
+			rec.Threat = threat;
 
-      aliveCombatList.push_back(pHouse);
-    }
-  }
+		rec.AttackFrame = Unsorted::CurrentFrame;
 
-  bool hasHostilePairAlive = false;
+		state.AttackedBuildingsLIFO.erase(it);
 
-  for (size_t i = 0; i < aliveCombatList.size() && !hasHostilePairAlive; ++i) {
-    for (size_t j = i + 1; j < aliveCombatList.size(); ++j) {
-      if (!aliveCombatList[i]->IsAlliedWith(aliveCombatList[j]) ||
-          !aliveCombatList[j]->IsAlliedWith(aliveCombatList[i])) {
-        hasHostilePairAlive = true;
+		state.AttackedBuildingsLIFO.push_back(rec);
+	}
+	else
+	{
+		NeuralAttackedBuildingRecord rec;
 
-        break;
-      }
-    }
-  }
+		rec.BuildingCoords = bldCoords;
 
-  if (totalKillsAndCaptures > NeuralAI::LastTotalKillsAndCaptures) {
-    NeuralAI::LastTotalKillsAndCaptures = totalKillsAndCaptures;
+		rec.AttackerCoords = attackerCoords;
 
-    NeuralAI::LastCombatFrame = frame;
-  }
+		rec.AttackerType = pAttackerType;
 
-  const bool isRegularTrainSlot =
-      NeuralAI::TrainSlotIndex >= 1 && NeuralAI::TrainSlotIndex < 60;
-  const bool onlyOneSideLeft =
-      (frame > 300 && (aliveCombatHouses <= 1 || !hasHostilePairAlive));
-  const bool activeRecentCombat = ((frame - NeuralAI::LastCombatFrame) < 2700);
-  const int baseMaxFrames = isRegularTrainSlot
-                                ? ((aliveCombatHouses >= 3) ? 90000 : 72000)
-                                : ((aliveCombatHouses >= 3) ? 162000 : 135000);
-  const int maxMatchFrames =
-      activeRecentCombat ? (baseMaxFrames + (isRegularTrainSlot ? 9000 : 27000))
-                         : baseMaxFrames;
-  const int noCombatLimit = (aliveCombatHouses >= 3) ? 12600 : 9000;
+		rec.Threat = threat;
 
-  bool mercyDecisiveWin = false;
+		rec.AttackFrame = Unsorted::CurrentFrame;
 
-  if (!onlyOneSideLeft && isRegularTrainSlot && frame >= 9000) {
-    static int mercyEnvChecked = -1;
+		state.AttackedBuildingsLIFO.push_back(rec);
+	}
 
-    if (mercyEnvChecked < 0) {
-      char envBuf[16] = {};
-      const DWORD envLen =
-          GetEnvironmentVariableA("PHOBOS_TRAIN_MERCY", envBuf, sizeof(envBuf));
-      mercyEnvChecked = (envLen > 0 && envBuf[0] == '1') ? 1 : 0;
-    }
-
-    static int mercySerial = -1;
-    static int mercyStreakFrames = 0;
-    static int mercyLeadSlot = -1;
-
-    if (mercySerial != NeuralMatchSerial) {
-      mercySerial = NeuralMatchSerial;
-      mercyStreakFrames = 0;
-      mercyLeadSlot = -1;
-    }
-
-    if (mercyEnvChecked == 1) {
-      std::array<int, 2> slotScore{};
-      std::array<int, 2> slotCoreProd{};
-      std::array<int, 2> slotReadySuper{};
-      std::array<int, 2> slotAliveCount{};
-
-      for (auto const pH : aliveCombatList) {
-        auto const pHExt = HouseExt::TryFetch(pH);
-        const int pSlot = (pHExt && pHExt->NeuralAI_PolicySlot == 1) ? 1 : 0;
-        slotAliveCount[pSlot]++;
-        slotScore[pSlot] += std::max(0, HouseMatchScore(pH));
-        slotCoreProd[pSlot] +=
-            pH->NumConYards + pH->NumWarFactories + pH->NumShipyards;
-
-        for (auto const pSW : pH->Supers) {
-          if (pSW && pSW->IsPresent && pSW->IsReady && pSW->Type &&
-              !pSW->Type->DisableableFromShell)
-            slotReadySuper[pSlot]++;
-        }
-      }
-
-      int domSlot = -1;
-
-      if (slotAliveCount[0] > 0 && slotAliveCount[1] > 0) {
-        if (slotCoreProd[0] >= 2 && slotCoreProd[1] == 0 &&
-            slotReadySuper[1] == 0 &&
-            slotScore[0] >= std::max(4000, slotScore[1] * 5)) {
-          domSlot = 0;
-        } else if (slotCoreProd[1] >= 2 && slotCoreProd[0] == 0 &&
-                   slotReadySuper[0] == 0 &&
-                   slotScore[1] >= std::max(4000, slotScore[0] * 5)) {
-          domSlot = 1;
-        }
-      }
-
-      if (domSlot >= 0 && domSlot == mercyLeadSlot) {
-        mercyStreakFrames += 60;
-      } else if (domSlot >= 0) {
-        mercyLeadSlot = domSlot;
-        mercyStreakFrames = 60;
-      } else {
-        mercyLeadSlot = -1;
-        mercyStreakFrames = 0;
-      }
-
-      if (mercyStreakFrames >= 1800)
-        mercyDecisiveWin = true;
-    }
-  }
-
-  const bool stalemate =
-      !onlyOneSideLeft && !mercyDecisiveWin &&
-      ((frame > 16200 &&
-        (frame - NeuralAI::LastCombatFrame) >= noCombatLimit) ||
-       (frame >= maxMatchFrames));
-
-  if (stalemate || onlyOneSideLeft || mercyDecisiveWin) {
-    int bestHouseIdx = lastAliveHouseIdx;
-    int bestScore = -1;
-
-    SampleTerritory(true);
-
-    for (auto const pHouse : HouseClass::Array) {
-      if (!pHouse || pHouse->IsNeutral() || pHouse->IsObserver() ||
-          pHouse->Defeated)
-        continue;
-
-      const int score = HouseMatchScore(pHouse);
-
-      if (score > bestScore) {
-        bestScore = score;
-
-        bestHouseIdx = pHouse->ArrayIndex;
-      }
-    }
-
-    NeuralAI::MatchEndWinnerHouse = bestHouseIdx;
-
-    NeuralAI::MatchEndStalemate = stalemate;
-
-    NeuralAI::UpdateTelemetrySnapshot(true, bestHouseIdx, stalemate);
-
-    NeuralAI::OnScenarioEnd(true);
-
-    Game::IsActive = false;
-
-    return;
-  }
-
-  if (frame % 60 == 0)
-    NeuralAI::UpdateTelemetrySnapshot(false, -1, false);
+	if (state.AttackedBuildingsLIFO.size() > 20)
+		state.AttackedBuildingsLIFO.erase(state.AttackedBuildingsLIFO.begin());
 }
+
+void NeuralAI::OnHeadlessFrameTick()
+{
+	if (!NeuralAI::HeadlessMode)
+		return;
+
+	NeuralAI::FramesSinceLastFPSCheck++;
+
+	const DWORD now = GetTickCount();
+
+	if (now - NeuralAI::LastFPSCheckTick >= 1000)
+	{
+		NeuralAI::CurrentMeasuredFPS
+			= (NeuralAI::FramesSinceLastFPSCheck * 1000) / std::max<DWORD>(1, now - NeuralAI::LastFPSCheckTick);
+
+		NeuralAI::FramesSinceLastFPSCheck = 0;
+
+		NeuralAI::LastFPSCheckTick = now;
+	}
+
+	const int frame = Unsorted::CurrentFrame;
+
+	if (frame % 60 != 0)
+		return;
+
+	int totalKillsAndCaptures = 0;
+	int aliveCombatHouses = 0;
+	int lastAliveHouseIdx = -1;
+
+	std::vector<HouseClass*> aliveCombatList;
+
+	for (auto const pHouse : HouseClass::Array)
+	{
+		if (!pHouse || pHouse->IsNeutral() || pHouse->IsObserver())
+			continue;
+
+		totalKillsAndCaptures
+			+= pHouse->TotalKilledUnits + pHouse->TotalKilledBuildings + pHouse->StolenBuildingsCredits;
+
+		if (!pHouse->Defeated && (pHouse->OwnedBuildings > 0 || pHouse->OwnedUnits > 0 || pHouse->OwnedInfantry > 0))
+		{
+			aliveCombatHouses++;
+
+			lastAliveHouseIdx = pHouse->ArrayIndex;
+
+			aliveCombatList.push_back(pHouse);
+		}
+	}
+
+	bool hasHostilePairAlive = false;
+
+	for (size_t i = 0; i < aliveCombatList.size() && !hasHostilePairAlive; ++i)
+	{
+		for (size_t j = i + 1; j < aliveCombatList.size(); ++j)
+		{
+			if (!aliveCombatList[i]->IsAlliedWith(aliveCombatList[j])
+				|| !aliveCombatList[j]->IsAlliedWith(aliveCombatList[i]))
+			{
+				hasHostilePairAlive = true;
+
+				break;
+			}
+		}
+	}
+
+	if (totalKillsAndCaptures > NeuralAI::LastTotalKillsAndCaptures)
+	{
+		NeuralAI::LastTotalKillsAndCaptures = totalKillsAndCaptures;
+
+		NeuralAI::LastCombatFrame = frame;
+	}
+
+	const bool isRegularTrainSlot = NeuralAI::TrainSlotIndex >= 1 && NeuralAI::TrainSlotIndex < 60;
+	const bool onlyOneSideLeft = (frame > 300 && (aliveCombatHouses <= 1 || !hasHostilePairAlive));
+	const bool activeRecentCombat = ((frame - NeuralAI::LastCombatFrame) < 2700);
+	const int baseMaxFrames = isRegularTrainSlot
+		? ((aliveCombatHouses >= 3) ? 90000 : 72000)
+		: ((aliveCombatHouses >= 3) ? 162000 : 135000);
+	const int maxMatchFrames = activeRecentCombat
+		? (baseMaxFrames + (isRegularTrainSlot ? 9000 : 27000))
+		: baseMaxFrames;
+	const int noCombatLimit = (aliveCombatHouses >= 3) ? 12600 : 9000;
+
+	bool mercyDecisiveWin = false;
+
+	if (!onlyOneSideLeft && isRegularTrainSlot && frame >= 9000)
+	{
+		static int mercyEnvChecked = -1;
+
+		if (mercyEnvChecked < 0)
+		{
+			char envBuf[16] = {};
+			const DWORD envLen = GetEnvironmentVariableA("PHOBOS_TRAIN_MERCY", envBuf, sizeof(envBuf));
+			mercyEnvChecked = (envLen > 0 && envBuf[0] == '1') ? 1 : 0;
+		}
+
+		static int mercySerial = -1;
+		static int mercyStreakFrames = 0;
+		static int mercyLeadSlot = -1;
+
+		if (mercySerial != NeuralMatchSerial)
+		{
+			mercySerial = NeuralMatchSerial;
+			mercyStreakFrames = 0;
+			mercyLeadSlot = -1;
+		}
+
+		if (mercyEnvChecked == 1)
+		{
+			std::array<int, 2> slotScore {};
+			std::array<int, 2> slotCoreProd {};
+			std::array<int, 2> slotReadySuper {};
+			std::array<int, 2> slotAliveCount {};
+
+			for (auto const pH : aliveCombatList)
+			{
+				auto const pHExt = HouseExt::TryFetch(pH);
+				const int pSlot = (pHExt && pHExt->NeuralAI_PolicySlot == 1) ? 1 : 0;
+				slotAliveCount[pSlot]++;
+				slotScore[pSlot] += std::max(0, HouseMatchScore(pH));
+				slotCoreProd[pSlot] += pH->NumConYards + pH->NumWarFactories + pH->NumShipyards;
+
+				for (auto const pSW : pH->Supers)
+				{
+					if (pSW && pSW->IsPresent && pSW->IsReady && pSW->Type && !pSW->Type->DisableableFromShell)
+						slotReadySuper[pSlot]++;
+				}
+			}
+
+			int domSlot = -1;
+
+			if (slotAliveCount[0] > 0 && slotAliveCount[1] > 0)
+			{
+				if (slotCoreProd[0] >= 2 && slotCoreProd[1] == 0 && slotReadySuper[1] == 0
+					&& slotScore[0] >= std::max(4000, slotScore[1] * 5))
+				{
+					domSlot = 0;
+				}
+				else if (slotCoreProd[1] >= 2 && slotCoreProd[0] == 0 && slotReadySuper[0] == 0
+					&& slotScore[1] >= std::max(4000, slotScore[0] * 5))
+				{
+					domSlot = 1;
+				}
+			}
+
+			if (domSlot >= 0 && domSlot == mercyLeadSlot)
+			{
+				mercyStreakFrames += 60;
+			}
+			else if (domSlot >= 0)
+			{
+				mercyLeadSlot = domSlot;
+				mercyStreakFrames = 60;
+			}
+			else
+			{
+				mercyLeadSlot = -1;
+				mercyStreakFrames = 0;
+			}
+
+			if (mercyStreakFrames >= 1800)
+				mercyDecisiveWin = true;
+		}
+	}
+
+	const bool stalemate = !onlyOneSideLeft && !mercyDecisiveWin
+		&& ((frame > 16200 && (frame - NeuralAI::LastCombatFrame) >= noCombatLimit) || (frame >= maxMatchFrames));
+
+	if (stalemate || onlyOneSideLeft || mercyDecisiveWin)
+	{
+		int bestHouseIdx = lastAliveHouseIdx;
+		int bestScore = -1;
+
+		SampleTerritory(true);
+
+		for (auto const pHouse : HouseClass::Array)
+		{
+			if (!pHouse || pHouse->IsNeutral() || pHouse->IsObserver() || pHouse->Defeated)
+				continue;
+
+			const int score = HouseMatchScore(pHouse);
+
+			if (score > bestScore)
+			{
+				bestScore = score;
+
+				bestHouseIdx = pHouse->ArrayIndex;
+			}
+		}
+
+		NeuralAI::MatchEndWinnerHouse = bestHouseIdx;
+
+		NeuralAI::MatchEndStalemate = stalemate;
+
+		NeuralAI::UpdateTelemetrySnapshot(true, bestHouseIdx, stalemate);
+
+		NeuralAI::OnScenarioEnd(true);
+
+		Game::IsActive = false;
+
+		return;
+	}
+
+	if (frame % 60 == 0)
+		NeuralAI::UpdateTelemetrySnapshot(false, -1, false);
+}
+
