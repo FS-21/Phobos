@@ -55,6 +55,8 @@ namespace
 		bool IsBuildingTarget { true };
 		std::vector<DWORD> Members {};
 		int Frame { 0 };
+		// A pass of a wing of attrition (AirWingAttrition*): the target standing after it is no failure.
+		bool Attrition { false };
 	};
 
 	TechnoClass* FindAirStrikeTechnoByID(DWORD uid)
@@ -135,6 +137,14 @@ namespace
 	constexpr int AirWingLessonMaxSteps = 2;
 	constexpr int AirWingLessonFadeFrames = 5400;
 	constexpr int AirPadGuardCells = 12;
+
+	// Wings of attrition (user, 2026-11-25): a building at no known anti-air risk of an enemy who has few
+	// buildings left is struck pass after pass when the ready aircraft bring it down in
+	// AirWingAttritionPasses passes or fewer; its standing after the pass is no lesson. Two aircraft that
+	// delivered 314 of the 1500 of the last naval yard of an enemy waited on their pads for 32000 frames
+	// (match #18296).
+	constexpr int AirWingAttritionPasses = 6;
+	constexpr int AirWingAttritionBuildingsMost = 8;
 
 	// How long a wing keeps flying the same strike.
 	constexpr int AirStrikeOrderFrames = 4500;
@@ -599,6 +609,8 @@ namespace
 		// Sortie damage of the aircraft expected to reach the target, and the health left to destroy.
 		int Damage { 0 };
 		int Need { 0 };
+		// Brought down in several passes (AirWingAttrition*).
+		bool Attrition { false };
 		// TEMP diagnostic: the best target the ready aircraft are still too few for.
 		TechnoClass* ShortTarget { nullptr };
 		int ShortDamage { 0 };
@@ -623,7 +635,16 @@ namespace
 		const bool noEnemyBuildingsKnown = knownBlds.empty();
 		int shortScore = 0;
 
-		auto evaluateCandidate = [&](TechnoClass* pCand, int score, int risk, int extraMarginPct)
+		// The known buildings of each enemy: one with few left is worn down pass after pass.
+		int knownBuildingsOf[32] {};
+
+		for (auto const& info : knownBlds)
+		{
+			if (const int owner = info.Building->Owner->ArrayIndex; owner >= 0 && owner < 32)
+				knownBuildingsOf[owner]++;
+		}
+
+		auto evaluateCandidate = [&](TechnoClass* pCand, int score, int risk, int extraMarginPct, bool mayWearDown)
 		{
 			if (score <= 0 || (score <= pick.Score && score <= shortScore))
 				return;
@@ -652,8 +673,13 @@ namespace
 				return;
 
 			const int delivered = damage / strikers * (strikers - risk);
+			const bool onePass = delivered * 100 >= need * (100 + extraMarginPct + lessonPercent);
+			const int candOwner = pCand->Owner ? pCand->Owner->ArrayIndex : -1;
+			const bool wearsDown = !onePass && mayWearDown && risk == 0 && candOwner >= 0 && candOwner < 32
+				&& knownBuildingsOf[candOwner] <= AirWingAttritionBuildingsMost
+				&& delivered * AirWingAttritionPasses * 100 >= need * (100 + extraMarginPct);
 
-			if (delivered * 100 >= need * (100 + extraMarginPct + lessonPercent))
+			if (onePass || wearsDown)
 			{
 				if (score > pick.Score)
 				{
@@ -662,6 +688,7 @@ namespace
 					pick.Risk = risk;
 					pick.Damage = delivered;
 					pick.Need = need;
+					pick.Attrition = wearsDown;
 				}
 			}
 			else if (score > shortScore)
@@ -678,7 +705,7 @@ namespace
 		{
 			int risk = 0;
 			const int score = AirStrikeTargetScore(pHouse, info, from, front, airValues, tolerance, risk);
-			evaluateCandidate(info.Building, score, risk, 15);
+			evaluateCandidate(info.Building, score, risk, 15, true);
 		}
 
 		auto considerEnemyUnit = [&](TechnoClass* pTech)
@@ -703,7 +730,7 @@ namespace
 			if (pTech->Owner->ArrayIndex == pHouse->EnemyHouseIndex)
 				score += 30;
 
-			evaluateCandidate(pTech, std::max(0, score), risk, 25);
+			evaluateCandidate(pTech, std::max(0, score), risk, 25, false);
 		};
 
 		for (auto const pUnit : UnitClass::Array)
@@ -1221,7 +1248,7 @@ namespace
 				const int size = static_cast<int>(flight.Members.size());
 				const int lost = static_cast<int>(std::count_if(flight.Members.begin(), flight.Members.end(),
 					[&strikeAircraftAlive](DWORD id) { return !strikeAircraftAlive.contains(id); }));
-				const bool failed = (flight.IsBuildingTarget && stands) || lost * 2 >= size;
+				const bool failed = (flight.IsBuildingTarget && stands && !flight.Attrition) || lost * 2 >= size;
 				const int stepsBefore = AirWingLessonStepsNow(state);
 
 				if (failed)
@@ -1364,12 +1391,12 @@ namespace
 			state.WingsLaunched++;
 			CountDecision(NeuralDecision::AirWing, pHouse->ArrayIndex);
 			Debug::Log("[NeuralAI] House %d AirWing: %d %s -> %s of house %d at (%d,%d), risk %d, score %d, front %s, frame %d (wings %d);"
-				" %d ready of %d (%d pending), they deliver %d of %d.\n", pHouse->ArrayIndex, wingCount, wing.front()->Type->ID,
+				" %d ready of %d (%d pending), they deliver %d of %d%s.\n", pHouse->ArrayIndex, wingCount, wing.front()->Type->ID,
 				pTargetType ? pTargetType->ID : "?", pTarget->Owner->ArrayIndex, targetCell.X, targetCell.Y, pick.Risk, pick.Score,
 				state.FrontCell != CellStruct::Empty ? "yes" : "no", now, state.WingsLaunched, static_cast<int>(ready.size()), strikeFleet, pending,
-				wingDelivered, pick.Need);
+				wingDelivered, pick.Need, pick.Attrition ? ", a pass of attrition" : "");
 
-			NeuralAirWingFlight flight { pTarget->UniqueID, pTargetType, isBuildingTarget, {}, now };
+			NeuralAirWingFlight flight { pTarget->UniqueID, pTargetType, isBuildingTarget, {}, now, pick.Attrition };
 
 			// Every order of the wing first, then the flights: ContinueAirStrike weighs the risk at the target
 			// against the aircraft bound for it, and given one by one each member saw a wing of itself
