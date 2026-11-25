@@ -1614,10 +1614,41 @@ namespace
 		return best;
 	}
 
+	// A sensor vehicle's move to its lookout. An attack-move still pending from an earlier order is
+	// dropped first: the engine takes it up again over any mission but Attack and Move, the unfold
+	// order among them, and the vehicle drove back to that old goal instead of unfolding.
+	void OrderSensorMove(UnitClass* pUnit, CellClass* pCell)
+	{
+		pUnit->ClearMegaMissionData();
+		OrderScoutMove(pUnit, pCell, false);
+	}
+
+	// A packed sensor vehicle the lookouts may take: on guard, or standing where an order left it with
+	// no goal beyond its cell, whatever its mission but boarding and unfolding (match #18157: one stood
+	// on the goal of an attack-move, still on Move, and no lookout took it).
+	bool IsSensorVehicleFree(UnitClass* pUnit)
+	{
+		const Mission mission = pUnit->CurrentMission;
+
+		if (mission == Mission::Guard || mission == Mission::Area_Guard || mission == Mission::Sleep)
+			return true;
+
+		if (mission == Mission::Enter || mission == Mission::Unload || pUnit->QueuedMission == Mission::Enter
+			|| pUnit->QueuedMission == Mission::Unload || pUnit->Locomotor->Is_Moving())
+		{
+			return false;
+		}
+
+		auto const pGoal = pUnit->Destination ? pUnit->Destination : pUnit->MegaDestination;
+
+		return !pGoal || CellClass::Coord2Cell(pGoal->GetCoords()).DistanceFrom(pUnit->GetMapCoords()) <= 1.5;
+	}
+
 	// Sensor lookouts (SensorLookoutMinSight), every scouting update: a mobile sensor array on its way
 	// unfolds once there (or steps onto the nearest deployable cell free of ore/slopes), and an idle
 	// packed sensor vehicle ALWAYS deploys at a useful forward/lookout spot even while enemies are in
 	// sight elsewhere on the map (whereas already-deployed arrays stay put while enemies are in sight).
+	// The lookouts alone lead a sensor vehicle: the vehicle micro leaves it to them.
 	void UpdateSensorLookouts(HouseClass* pHouse, NeuralScoutState& state, bool enemyInSight)
 	{
 		auto& macro = GetMacroState(pHouse);
@@ -1648,7 +1679,9 @@ namespace
 			if (there && UnitExt::CanDeployIntoBuilding(pUnit)
 				&& pUnit->GetCell() && pUnit->GetCell()->GetContainedTiberiumIndex() < 0)
 			{
-				// UnitClass::TryToDeploy gives up while the unit has a destination.
+				// UnitClass::TryToDeploy gives up while the unit has a destination, and a pending
+				// attack-move would turn the unfold order back into a move.
+				pUnit->ClearMegaMissionData();
 				pUnit->SetDestination(nullptr, true);
 				pUnit->ClearNavigationList();
 				pUnit->SetTarget(nullptr);
@@ -1673,7 +1706,7 @@ namespace
 				{
 					trip.Target = cleanSpot;
 					if (auto const pCleanCell = MapClass::Instance.TryGetCellAt(cleanSpot))
-						OrderScoutMove(pUnit, pCleanCell, false);
+						OrderSensorMove(pUnit, pCleanCell);
 				}
 				else if (!moving)
 				{
@@ -1683,7 +1716,7 @@ namespace
 			else if (!moving)
 			{
 				if (auto const pCell = MapClass::Instance.TryGetCellAt(trip.Target))
-					OrderScoutMove(pUnit, pCell, false);
+					OrderSensorMove(pUnit, pCell);
 			}
 
 			macro.PlanMembers.insert(trip.ID);
@@ -1839,9 +1872,7 @@ namespace
 		{
 			if (!pUnit || pUnit->Owner != pHouse || !pUnit->IsAlive || pUnit->InLimbo || !IsSensorLookoutType(pUnit->Type)
 				|| pUnit->IsDeploying || macro.PlanMembers.contains(pUnit->UniqueID) || IsInTransportOp(pHouse, pUnit->UniqueID)
-				|| IsScoutTripUnit(state, pUnit->UniqueID) || pUnit->GetHealthPercentage() < 0.5
-				|| (pUnit->CurrentMission != Mission::Guard && pUnit->CurrentMission != Mission::Area_Guard
-					&& pUnit->CurrentMission != Mission::Sleep))
+				|| IsScoutTripUnit(state, pUnit->UniqueID) || pUnit->GetHealthPercentage() < 0.5 || !IsSensorVehicleFree(pUnit))
 			{
 				continue;
 			}
@@ -1860,7 +1891,7 @@ namespace
 			if (!pNext)
 				continue;
 
-			OrderScoutMove(pUnit, pNext, false);
+			OrderSensorMove(pUnit, pNext);
 			state.SensorTrips.push_back({ pUnit->UniqueID, next, now });
 			macro.PlanMembers.insert(pUnit->UniqueID);
 			taken.push_back(next);
