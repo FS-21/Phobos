@@ -4466,17 +4466,20 @@ namespace
 	// Sensor chain (user): while a stealth sighting lies where no sensor of ours covers and no array
 	// of ours reaches, production is asked for one more array, one packed at a time and with no cap
 	// on the unfolded ones (the first one comes for any detection need it answers). It unfolds on the
-	// line from our array nearest the sighting toward it: SensorChainStepPercent of the sensor radius
-	// away at most and one radius at least, nearer when that already puts the sighting half a radius
-	// inside its reach, on a deployable cell within SensorChainSnapCells (tried every
-	// SensorChainTryStepCells back toward the array). So each array adds a link and the reach of them
-	// all adds up, until the sighting is covered. With no array on its land the first one unfolds by
-	// our building nearest the sighting, SensorChainBaseAheadCells toward it. The newest
+	// line from our array nearest the sighting toward it, as far from the sighting as still leaves it
+	// inside its reach, SensorChainSnapCells from the edge (user: the arrays that unfolded half a
+	// radius or less from where the stealth units were seen got hit there): SensorChainStepPercent of
+	// the sensor radius from that array at most and SensorChainMinStepPercent at least, on a
+	// deployable cell within SensorChainSnapCells (tried every SensorChainTryStepCells back toward
+	// the array). So each array adds a link and the reach of them all adds up, until the sighting is
+	// covered. With no array on its land the first one unfolds by our building nearest the sighting,
+	// up to SensorChainBaseAheadCells toward it by the same rule. The newest
 	// SensorChainSightingsTried sightings are tried, SensorChainSightingsApartCells apart. A vehicle
 	// the chain has no post for on its land holds the asking for SensorLookoutSightingFrames. Up to
 	// SensorChainLinksMost links are weighed.
 	constexpr int SensorChainLinksMost = 48;
 	constexpr int SensorChainStepPercent = 150;
+	constexpr int SensorChainMinStepPercent = 50;
 	constexpr int SensorChainTryStepCells = 4;
 	constexpr int SensorChainSnapCells = 6;
 	constexpr int SensorChainBaseAheadCells = 6;

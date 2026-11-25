@@ -1631,13 +1631,20 @@ namespace
 	// One more link of the sensor chain (SensorChain*) toward a stealth sighting, for a sensor array
 	// of this radius that unfolds in `zone`, with `links` the cells where arrays of ours stand or are
 	// about to on that land: a deployable cell on the line from the link nearest the sighting toward
-	// it, far enough from every link to add ground and nearer the sighting than that link. With no
-	// link on that land, by our building there nearest the sighting. Empty when there is none.
+	// it, as far from the sighting as still leaves it inside the reach of the new array (the arrays
+	// that unfolded half a radius or less from where the stealth units were seen got hit there),
+	// apart from every link and nearer the sighting than that link. With no link on that land, by
+	// our building there nearest the sighting, toward it only as far as that reach asks. Empty when
+	// there is none.
 	CellStruct FindSensorChainPost(HouseClass* pHouse, BuildingTypeClass* pSensorBld, int zone, int radius, const CellStruct& sighting,
 		const std::vector<CellStruct>& links, UnitClass* pSelf = nullptr)
 	{
 		if (!pHouse || !pSensorBld || zone < 0 || sighting == CellStruct::Empty)
 			return CellStruct::Empty;
+
+		// How far from the post the sighting lies at the edge of its reach, the snap of the post
+		// allowed for.
+		const int edge = std::max(1, radius - SensorChainSnapCells);
 
 		if (links.empty())
 		{
@@ -1663,7 +1670,7 @@ namespace
 			if (base == CellStruct::Empty)
 				return CellStruct::Empty;
 
-			const int ahead = std::min(SensorChainBaseAheadCells, baseDist);
+			const int ahead = std::clamp(baseDist - edge, 0, SensorChainBaseAheadCells);
 			const int len = std::max(1, baseDist);
 			const CellStruct center { static_cast<short>(base.X + (sighting.X - base.X) * ahead / len),
 				static_cast<short>(base.Y + (sighting.Y - base.Y) * ahead / len) };
@@ -1689,9 +1696,13 @@ namespace
 		if (anchorDist <= radius)
 			return CellStruct::Empty;
 
-		const int farthest = std::clamp(anchorDist - radius / 2, radius, radius * SensorChainStepPercent / 100);
+		// A sighting just beyond the reach of that link takes a short step: a whole radius on, the
+		// new array stood on the sighting itself.
+		const int nearest = std::max(1, radius * SensorChainMinStepPercent / 100);
+		const int farthest = std::clamp(anchorDist - edge, nearest, radius * SensorChainStepPercent / 100);
+		const int apart = std::max(1, nearest - SensorChainSnapCells);
 
-		for (int step = farthest; step >= radius; step -= SensorChainTryStepCells)
+		for (int step = farthest; step >= nearest; step -= SensorChainTryStepCells)
 		{
 			const CellStruct onLine { static_cast<short>(anchor.X + (sighting.X - anchor.X) * step / anchorDist),
 				static_cast<short>(anchor.Y + (sighting.Y - anchor.Y) * step / anchorDist) };
@@ -1704,7 +1715,7 @@ namespace
 				if (!addsGround)
 					break;
 
-				addsGround = link.DistanceFrom(post) >= radius - SensorChainSnapCells;
+				addsGround = link.DistanceFrom(post) >= apart;
 			}
 
 			if (addsGround)
