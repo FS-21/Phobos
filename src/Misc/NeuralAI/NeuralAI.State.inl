@@ -2504,8 +2504,10 @@ namespace
 		// goal of ours or still holds the enemy, cleared once the cargo is off (see the ferry loop).
 		int CommittedZone { -1 };
 		CellStruct CommittedGoal { CellStruct::Empty };
-		// The landing picked at the last tick before the commitment (diagnostics: landing re-picks).
+		// The landing a loaded transport sails for before the commitment, and the goal cell it was
+		// picked for: kept while it stays usable (FerryLandingKeep*), a new pick is taken otherwise.
 		CellStruct LastLanding { CellStruct::Empty };
+		CellStruct LandingGoal { CellStruct::Empty };
 		// First frame a combat cargo sat loaded but short of three quarters of the room on its
 		// pickup shore.
 		int UnderfilledSince { -1 };
@@ -2575,6 +2577,14 @@ namespace
 	// How often the ferry island commitment logs how many times it kept a loaded transport on course.
 	constexpr int FerryIslandKeptLogFrames = 1800;
 	constexpr double FerryLandingRepickCells = 8.0;
+	// The landing a loaded transport sails for is kept before its commitment while no known enemy
+	// defense reaches it (its range and FerryLandingKeepDefenseMarginCells more) and no armed enemy
+	// is known within FerryLandingKeepEnemyCells of it, as the picker judges a landing, and while its
+	// goal stays within FerryLandingRepickCells. FerryLandingKeptLogLines: lines a match of the TEMP
+	// diagnostic of the picks not taken.
+	constexpr int FerryLandingKeepDefenseMarginCells = 4;
+	constexpr int FerryLandingKeepEnemyCells = 11;
+	constexpr int FerryLandingKeptLogLines = 12;
 	// A loaded transport this close to its landing keeps its island whatever the goals say.
 	constexpr double FerryArrivalKeepCells = 20.0;
 	constexpr int FerryMostLoadWaitFrames = 2700;

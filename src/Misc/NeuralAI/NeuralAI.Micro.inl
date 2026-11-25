@@ -7478,12 +7478,13 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			}
 			// Siege units (Tick Tank, artillery) are left to the rule above: an enemy vehicle near them
 			// may be one their gun cannot hit, such as a flying one.
-			else if (pTargetBld != nullptr && !IsTrueBaseStructureTarget(pTargetBld) && !IsDeployableSiegeUnitType(pType))
+			else if (pTargetBld != nullptr && !IsTrueBaseStructureTarget(pTargetBld) && !IsDeployableSiegeUnitType(pType)
+				&& !IsSensorLookoutType(pType))
 			{
-				// Tactical Support Deployers (Mobile Stealth Generator SGEN/GGEN,
-				// Mobile Sensor Array LPST/NLPST, Limpet Drone): Only deploy when near
-				// our frontline lead tank or when an enemy unit is within 10 cells,
-				// never right outside the War Factory!
+				// Tactical Support Deployers (Mobile Stealth Generator SGEN/GGEN, Limpet Drone): Only
+				// deploy when near our frontline lead tank or when an enemy unit is within 10 cells,
+				// never right outside the War Factory! A mobile sensor array unfolds at its lookout
+				// (UpdateSensorLookouts).
 				const bool nearLeadTank = (pLeadHeavyTank != nullptr && pUnit->DistanceFrom(pLeadHeavyTank) <= 1024);
 				bool nearEnemyThreat = false;
 				for (auto const pEU : UnitClass::Array)
@@ -7587,6 +7588,13 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			if (pUnit->MoveToTiberium(10, false))
 				continue;
 		}
+
+		// A mobile sensor array is led by the sensor lookouts alone (UpdateSensorLookouts): the rules
+		// below took it for an idle vehicle of theirs and it never stood idle for a lookout (match
+		// #18157: an unarmed one on an attack-move to a harvester under attack stood in its base for
+		// the rest of the match). Its repairs and survival are settled above.
+		if (IsSensorLookoutType(pType))
+			continue;
 
 		UnstickCrossIslandFoot(pUnit);
 		const bool isUnitIdle
@@ -17501,13 +17509,75 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				{
 					pTrip->CommittedLanding = CellStruct::Empty;
 
-					// Diagnostics: a landing that jumps before the commitment (the transport turns).
 					if (pSafeLanding && numPass >= 1)
 					{
 						auto& macro = GetMacroState(pHouse);
 						const int now = Unsorted::CurrentFrame;
+						// Before the commitment the trip keeps the landing it sails for while that one stays
+						// usable (dry, free of buildings, on the goal's land, out of the known enemy defenses,
+						// no enemy in sight by it) and its goal has not moved: taken anew from every pick it
+						// jumped between two cells of one shore, and the transport turned with each jump
+						// (match #18157: 13 jumps in 1890 frames on one crossing).
+						auto const pKeptLanding = pTrip->LastLanding != CellStruct::Empty
+							? MapClass::Instance.TryGetCellAt(pTrip->LastLanding)
+							: nullptr;
+						const bool keepsLanding = pKeptLanding && pKeptLanding != pSafeLanding
+							&& pKeptLanding->LandType != LandType::Water && !pKeptLanding->GetBuilding()
+							&& MapClass::Instance.GetMovementZoneType(pTrip->LastLanding, MovementZone::Normal, false) == activeIslandZone
+							&& pTrip->LandingGoal.DistanceFrom(pActiveIslandGoal->MapCoords) <= FerryLandingRepickCells
+							&& !IsCellInKnownEnemyDefenseReach(pHouse, pTrip->LastLanding, FerryLandingKeepDefenseMarginCells)
+							&& VisibleEnemyThreatNear(pHouse, pTrip->LastLanding, FerryLandingKeepEnemyCells) == 0;
 
-						if (pTrip->LastLanding != CellStruct::Empty && pTrip->LastLanding.DistanceFrom(pSafeLanding->MapCoords) > FerryLandingRepickCells)
+						if (keepsLanding)
+						{
+							// TEMP diagnostic: a pick the trip did not take, FerryLandingKeptLogLines a match. The
+							// picker spreads the landings away from where our transports head, the asking one
+							// among them: this tells whether that is what moved the pick off the kept landing.
+							if (pTrip->LastLanding.DistanceFrom(pSafeLanding->MapCoords) > FerryLandingRepickCells)
+							{
+								static int keptLogSerial = -1;
+								static int keptLogCount = 0;
+
+								if (keptLogSerial != NeuralMatchSerial)
+								{
+									keptLogSerial = NeuralMatchSerial;
+									keptLogCount = 0;
+								}
+
+								if (keptLogCount < FerryLandingKeptLogLines)
+								{
+									++keptLogCount;
+									int headingThere = 0;
+									bool itself = false;
+
+									for (auto const pOwnT : UnitClass::Array)
+									{
+										if (!pOwnT || pOwnT->Owner != pHouse || pOwnT->InLimbo || !pOwnT->IsAlive || !pOwnT->Type
+											|| !pOwnT->Destination || !IsAmphibiousOrAirTransport(pOwnT->Type))
+										{
+											continue;
+										}
+
+										const CellStruct heading = CellClass::Coord2Cell(pOwnT->Destination->GetCoords());
+
+										if (std::max(std::abs(heading.X - pTrip->LastLanding.X), std::abs(heading.Y - pTrip->LastLanding.Y)) <= 2)
+										{
+											++headingThere;
+											itself = itself || pOwnT == pTrans;
+										}
+									}
+
+									Debug::Log("[NeuralAI] House %d ferry landing kept (TEMP): %s %u at (%d,%d) keeps (%d,%d) against the pick "
+										"(%d,%d), %d of our transports head within 2 cells of the kept one (itself %d), frame %d.\n",
+										pHouse->ArrayIndex, pTrans->Type->ID, pTrans->UniqueID, transCoords.X, transCoords.Y, pTrip->LastLanding.X,
+										pTrip->LastLanding.Y, pSafeLanding->MapCoords.X, pSafeLanding->MapCoords.Y, headingThere, itself ? 1 : 0, now);
+								}
+							}
+
+							pSafeLanding = pKeptLanding;
+						}
+						// Diagnostics: a landing that jumps before the commitment (the transport turns).
+						else if (pTrip->LastLanding != CellStruct::Empty && pTrip->LastLanding.DistanceFrom(pSafeLanding->MapCoords) > FerryLandingRepickCells)
 						{
 							++macro.FerryLandingRepicks;
 
@@ -17524,7 +17594,11 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 							}
 						}
 
-						pTrip->LastLanding = pSafeLanding->MapCoords;
+						if (!keepsLanding)
+						{
+							pTrip->LastLanding = pSafeLanding->MapCoords;
+							pTrip->LandingGoal = pActiveIslandGoal->MapCoords;
+						}
 					}
 
 					if (pSafeLanding && transCoords.DistanceFrom(pSafeLanding->MapCoords) <= 14.0)
@@ -17801,10 +17875,12 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					|| (pTrans->CurrentMission != Mission::Unload && (IsAITickWindow(60, 20))))
 				{
 					// Sail around enemy bases and defenses through a safe waypoint
-					// unless crossing their range is unavoidable.
+					// unless crossing their range is unavoidable. A burrowing transport goes
+					// straight: under the ground it meets no danger on its way (as PlanOpRoute
+					// has it), and the safe lane sent it round the enemy base over land.
 					CellClass* pNextHop = pSafeLanding;
 
-					if (pTrip && distToLanding > 12.0)
+					if (pTrip && distToLanding > 12.0 && !IsUndergroundTransportType(pTrans->Type))
 					{
 						const bool landingMoved = pTrip->RouteTarget == CellStruct::Empty
 							|| pTrip->RouteTarget.DistanceFrom(pSafeLanding->MapCoords) > 6.0;
