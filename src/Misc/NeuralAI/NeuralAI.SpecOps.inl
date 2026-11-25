@@ -84,6 +84,11 @@ namespace
 		DWORD Target { 0 };
 		int StartFrame { 0 };
 		bool Charging { false };
+		bool WaitingForRide { false };
+		CellStruct LastCell { CellStruct::Empty };
+		int LastMoveFrame { 0 };
+		DWORD SkipTarget { 0 };
+		int SkipUntilFrame { 0 };
 	};
 
 	// A barracks built next to a tech so that engineers walk to it (UpdateCaptureBarracks): where it stood,
@@ -2997,11 +3002,30 @@ namespace
 		return false;
 	}
 
+	struct SneakAssignedTarget
+	{
+		DWORD RaiderID { 0 };
+		DWORD TargetID { 0 };
+		CellStruct Coords { CellStruct::Empty };
+		bool WideBlast { false };
+	};
+
+	bool IsWideSuicideRaider(TechnoTypeClass* pType)
+	{
+		auto const pBlast = GetSuicideBlastWeapon(pType);
+
+		if (!pBlast)
+			return false;
+
+		return pBlast->RadLevel >= 100 || (pBlast->Warhead && pBlast->Warhead->CellSpread >= 5.0f);
+	}
+
 	// Where a suicide raider (DTRUCK, TERROR) deals the highest net blast + radiation damage:
 	// evaluates both known enemy building clusters and dense visible enemy ground-force clusters
-	// within the warhead's CellSpread, subtracting friendly-fire risk and counting only ground-capable
-	// enemy defenses (never AA-only flak/SAMs) so distant bases never score <= 0 and freeze the raider.
-	TechnoClass* PickSneakStrikeTarget(HouseClass* pHouse, FootClass* pRaider, bool crossIsland = false)
+	// within the warhead's CellSpread, spreads active raiders across distinct clusters, commits
+	// strongly to nearby targets when already inside an enemy base, and ignores AA-only defenses.
+	TechnoClass* PickSneakStrikeTarget(HouseClass* pHouse, FootClass* pRaider,
+		const std::vector<SneakAssignedTarget>& assigned, DWORD skipTargetId = 0, bool crossIsland = false)
 	{
 		auto const pType = pRaider->GetTechnoType();
 		auto const pBlast = GetSuicideBlastWeapon(pType);
@@ -3010,6 +3034,8 @@ namespace
 			: 2.0;
 		const double spread = std::clamp(rawSpread, 2.0, 9.0) + 1.0;
 		const bool radBlast = pBlast && pBlast->RadLevel >= 100;
+		const bool wideBlast = rawSpread >= 5.0 || radBlast;
+		const DWORD selfId = pRaider->UniqueID;
 		const CellStruct from = pRaider->GetMapCoords();
 		auto const& entries = GetKnownEnemyBuildingCache(pHouse).Entries;
 
@@ -3079,6 +3105,34 @@ namespace
 			return defs;
 		};
 
+		auto assignedOverlapPenalty = [&](const CellStruct& center, DWORD candidateId)
+		{
+			int sameTarget = 0;
+			int wideOverlap = 0;
+			int closeSmall = 0;
+
+			for (auto const& a : assigned)
+			{
+				if (a.RaiderID == selfId || a.TargetID == 0)
+					continue;
+
+				if (a.TargetID == candidateId)
+					sameTarget++;
+
+				const double d = a.Coords.DistanceFrom(center);
+
+				if (a.WideBlast && d <= spread)
+					wideOverlap++;
+				else if (!a.WideBlast && d <= 4.0)
+					closeSmall++;
+			}
+
+			if (wideBlast)
+				return sameTarget * 260 + wideOverlap * 180 + closeSmall * 45;
+
+			return wideOverlap * 160 + std::max(0, sameTarget - 1) * 90 + std::max(0, closeSmall - 2) * 55;
+		};
+
 		TechnoClass* pBest = nullptr;
 		int bestScore = INT_MIN;
 
@@ -3086,8 +3140,8 @@ namespace
 		{
 			auto const pBld = info.Building;
 
-			if (!pBld || !pBld->IsAlive || pBld->InLimbo || !pBld->Owner || pHouse->IsAlliedWith(pBld->Owner)
-				|| pBld->Type->Insignificant || pBld->Type->InvisibleInGame || pBld->Type->Wall)
+			if (!pBld || pBld->UniqueID == skipTargetId || !pBld->IsAlive || pBld->InLimbo || !pBld->Owner
+				|| pHouse->IsAlliedWith(pBld->Owner) || pBld->Type->Insignificant || pBld->Type->InvisibleInGame || pBld->Type->Wall)
 			{
 				continue;
 			}
@@ -3132,8 +3186,11 @@ namespace
 			if (worth <= friendlyLoss || worth < 8)
 				continue;
 
+			const double dist = from.DistanceFrom(info.Coords);
+			const int proximityBonus = dist <= 36.0 ? static_cast<int>(36.0 - dist) * 4 : 0;
 			const int defenses = groundDefensesNear(info.Coords, pBld);
-			const int score = (worth - friendlyLoss) - defenses * 8 - static_cast<int>(from.DistanceFrom(info.Coords)) / 12;
+			const int overlapPenalty = assignedOverlapPenalty(info.Coords, pBld->UniqueID);
+			const int score = (worth - friendlyLoss) + proximityBonus - defenses * 8 - static_cast<int>(dist) / 5 - overlapPenalty;
 
 			if (score > bestScore || (score == bestScore && pBest && pBld->UniqueID < pBest->UniqueID))
 			{
@@ -3147,8 +3204,11 @@ namespace
 		{
 			for (auto const& anchor : groundUnits)
 			{
-				if (anchor.Friendly || !AreZonesConnected(from, anchor.Coords, pType->MovementZone))
+				if (anchor.Friendly || anchor.Foot->UniqueID == skipTargetId
+					|| !AreZonesConnected(from, anchor.Coords, pType->MovementZone))
+				{
 					continue;
+				}
 
 				if (friendlyBuildingNear(anchor.Coords))
 					continue;
@@ -3176,8 +3236,11 @@ namespace
 				if (enemyCount < 3 || enemyClusterWorth < 36 || enemyClusterWorth <= friendlyLoss * 2)
 					continue;
 
+				const double dist = from.DistanceFrom(anchor.Coords);
+				const int proximityBonus = dist <= 36.0 ? static_cast<int>(36.0 - dist) * 4 : 0;
 				const int defenses = groundDefensesNear(anchor.Coords, nullptr);
-				const int score = (enemyClusterWorth - friendlyLoss) - defenses * 8 - static_cast<int>(from.DistanceFrom(anchor.Coords)) / 10;
+				const int overlapPenalty = assignedOverlapPenalty(anchor.Coords, anchor.Foot->UniqueID);
+				const int score = (enemyClusterWorth - friendlyLoss) + proximityBonus - defenses * 8 - static_cast<int>(dist) / 5 - overlapPenalty;
 
 				if (score > bestScore || (score == bestScore && pBest && anchor.Foot->UniqueID < pBest->UniqueID))
 				{
@@ -3190,13 +3253,14 @@ namespace
 		return pBest;
 	}
 
-	// A suicide raider of ours is sneaking to (or charging) a target: the micro leaves it alone.
+	// A suicide raider of ours is sneaking to (or charging) a target, or briefly holding at home for a raid transport:
+	// the micro leaves it alone.
 	bool IsSneakStrikeActive(HouseClass* pHouse, DWORD id)
 	{
 		auto const& strikes = GetSpecOpsState(pHouse).SneakStrikes;
 		auto const it = strikes.find(id);
 
-		return it != strikes.end() && it->second.Target != 0;
+		return it != strikes.end() && (it->second.Target != 0 || it->second.WaitingForRide);
 	}
 
 	// Suicide raiders without a ride (demolition trucks, terrorists): fragile and only useful once
@@ -3213,6 +3277,7 @@ namespace
 			return;
 
 		state.LastSneakFrame = now;
+		const NeuralOrderPriorityScope orderPriority { NeuralOrderPriority::Operation };
 		auto& strikes = state.SneakStrikes;
 		std::unordered_set<DWORD> seen;
 
@@ -3245,10 +3310,54 @@ namespace
 			return nullptr;
 		};
 
+		std::vector<SneakAssignedTarget> assigned;
+		assigned.reserve(strikes.size() + 8);
+
+		auto syncAssigned = [&](DWORD raiderId, DWORD targetId, const CellStruct& coords, bool wide)
+		{
+			for (auto& a : assigned)
+			{
+				if (a.RaiderID == raiderId)
+				{
+					a.TargetID = targetId;
+					a.Coords = coords;
+					a.WideBlast = wide;
+					return;
+				}
+			}
+
+			if (targetId != 0)
+				assigned.push_back({ raiderId, targetId, coords, wide });
+		};
+
+		for (auto const& [raiderId, st] : strikes)
+		{
+			if (st.Target == 0)
+				continue;
+
+			if (auto const pT = findTarget(st.Target))
+			{
+				bool wide = true;
+
+				for (auto const pI : InfantryClass::Array)
+				{
+					if (pI && pI->UniqueID == raiderId)
+					{
+						wide = IsWideSuicideRaider(pI->Type);
+						break;
+					}
+				}
+
+				assigned.push_back({ raiderId, st.Target, pT->GetMapCoords(), wide });
+			}
+		}
+
 		auto handle = [&](FootClass* pFoot)
 		{
 			const DWORD id = pFoot->UniqueID;
-			const double size = pFoot->GetTechnoType()->Size;
+			auto const pType = pFoot->GetTechnoType();
+			const double size = pType->Size;
+			const bool wideBlast = IsWideSuicideRaider(pType);
 			seen.insert(id);
 			auto it = strikes.find(id);
 
@@ -3258,37 +3367,94 @@ namespace
 				if (it != strikes.end())
 					strikes.erase(it);
 
+				syncAssigned(id, 0, CellStruct::Empty, wideBlast);
 				return;
 			}
 
-			auto const pCurTargetTech = abstract_cast<TechnoClass*>(pFoot->Target);
-			const bool hasValidEnemyAttackTarget = pCurTargetTech && pCurTargetTech->IsAlive && !pCurTargetTech->InLimbo
-				&& pCurTargetTech->Owner && pCurTargetTech->Owner != pHouse && !pHouse->IsAlliedWith(pCurTargetTech->Owner);
-			const bool readyForStrike = !hasValidEnemyAttackTarget
-				&& (pFoot->CurrentMission == Mission::Guard || pFoot->CurrentMission == Mission::Area_Guard
-					|| pFoot->CurrentMission == Mission::Move || pFoot->CurrentMission == Mission::Enter
-					|| pFoot->MindControlledBy != nullptr);
+			TechnoClass* pTarget = nullptr;
+			const CellStruct curCell = pFoot->GetMapCoords();
+
+			// Validate existing target first so a destroyed or blocked target immediately re-picks in this same tick
+			// without leaving a 60-frame Target == 0 window where Micro would pull the raider back to home base.
+			if (it != strikes.end() && it->second.Target != 0)
+			{
+				auto& strike = it->second;
+				pTarget = findTarget(strike.Target);
+
+				if (strike.LastCell == CellStruct::Empty || curCell.DistanceFrom(strike.LastCell) >= 2.0)
+				{
+					strike.LastCell = curCell;
+					strike.LastMoveFrame = now;
+				}
+
+				if (!pTarget || pHouse->IsAlliedWith(pTarget->Owner) || now - strike.StartFrame > 5400 || now < strike.StartFrame)
+				{
+					strike.Target = 0;
+					strike.Charging = false;
+					strike.WaitingForRide = false;
+					strike.StartFrame = now - 900;
+					pTarget = nullptr;
+					syncAssigned(id, 0, CellStruct::Empty, wideBlast);
+				}
+				else if (now - strike.LastMoveFrame >= 240 && now >= strike.LastMoveFrame)
+				{
+					const double stuckDist = curCell.DistanceFrom(pTarget->GetMapCoords());
+
+					if (!strike.Charging && stuckDist <= 32.0)
+					{
+						strike.Charging = true;
+						strike.LastMoveFrame = now;
+					}
+					else
+					{
+						strike.SkipTarget = strike.Target;
+						strike.SkipUntilFrame = now + 1800;
+						strike.Target = 0;
+						strike.Charging = false;
+						strike.WaitingForRide = false;
+						strike.StartFrame = now - 900;
+						pTarget = nullptr;
+						syncAssigned(id, 0, CellStruct::Empty, wideBlast);
+					}
+				}
+			}
 
 			if (it == strikes.end() || it->second.Target == 0)
 			{
+				auto const pCurTargetTech = abstract_cast<TechnoClass*>(pFoot->Target);
+				const bool hasValidEnemyAttackTarget = pCurTargetTech && pCurTargetTech->IsAlive && !pCurTargetTech->InLimbo
+					&& pCurTargetTech->Owner && pCurTargetTech->Owner != pHouse && !pHouse->IsAlliedWith(pCurTargetTech->Owner);
+				const bool readyForStrike = !hasValidEnemyAttackTarget
+					&& (pFoot->CurrentMission == Mission::Guard || pFoot->CurrentMission == Mission::Area_Guard
+						|| pFoot->CurrentMission == Mission::Move || pFoot->CurrentMission == Mission::Enter
+						|| pFoot->CurrentMission == Mission::Attack || pFoot->MindControlledBy != nullptr);
+
 				if (!readyForStrike)
 					return;
 
 				if (it == strikes.end())
-					it = strikes.emplace(id, NeuralSneakStrike { 0, now, false }).first;
+					it = strikes.emplace(id, NeuralSneakStrike { 0, now, false, false, curCell, now, 0, 0 }).first;
 
-				const bool threatRightHere = VisibleEnemyThreatNear(pHouse, pFoot->GetMapCoords(), 8) > 0;
+				const bool threatRightHere = VisibleEnemyThreatNear(pHouse, curCell, 8) > 0;
 				const bool waitForRide = !threatRightHere && pFoot->MindControlledBy == nullptr
 					&& now - it->second.StartFrame < 450 && now >= it->second.StartFrame;
 
 				if (waitForRide && HasRaidTransportFor(pHouse, size))
+				{
+					it->second.WaitingForRide = true;
 					return;
+				}
 
-				auto pTarget = PickSneakStrikeTarget(pHouse, pFoot, false);
+				it->second.WaitingForRide = false;
+				const DWORD skipId = (now < it->second.SkipUntilFrame) ? it->second.SkipTarget : 0;
+				pTarget = PickSneakStrikeTarget(pHouse, pFoot, assigned, skipId, false);
+
+				if (!pTarget && skipId != 0)
+					pTarget = PickSneakStrikeTarget(pHouse, pFoot, assigned, 0, false);
 
 				if (!pTarget)
 				{
-					if (auto const pIslandTarget = PickSneakStrikeTarget(pHouse, pFoot, true))
+					if (auto const pIslandTarget = PickSneakStrikeTarget(pHouse, pFoot, assigned, 0, true))
 					{
 						if (RequestTransportOperation(pHouse, NeuralOpClient::Wave, pFoot, pIslandTarget->GetMapCoords()))
 							return;
@@ -3303,22 +3469,25 @@ namespace
 					pFoot->ForceMission(Mission::Guard);
 				}
 
-				it->second = NeuralSneakStrike { pTarget->UniqueID, now, threatRightHere };
+				it->second.Target = pTarget->UniqueID;
+				it->second.StartFrame = now;
+				it->second.Charging = threatRightHere;
+				it->second.WaitingForRide = false;
+				it->second.LastCell = curCell;
+				it->second.LastMoveFrame = now;
 				const CellStruct cell = pTarget->GetMapCoords();
+				syncAssigned(id, pTarget->UniqueID, cell, wideBlast);
 				Debug::Log("[NeuralAI] House %d SneakStrike: %s %u sneaks to %s of house %d at (%d,%d), %d cells, frame %d.\n",
-					pHouse->ArrayIndex, pFoot->GetTechnoType()->ID, id, pTarget->GetTechnoType()->ID, pTarget->Owner->ArrayIndex,
-					cell.X, cell.Y, static_cast<int>(pFoot->GetMapCoords().DistanceFrom(cell)), now);
+					pHouse->ArrayIndex, pType->ID, id, pTarget->GetTechnoType()->ID, pTarget->Owner->ArrayIndex,
+					cell.X, cell.Y, static_cast<int>(curCell.DistanceFrom(cell)), now);
 			}
 
 			auto& strike = it->second;
-			auto const pTarget = findTarget(strike.Target);
 
-			if (!pTarget || pHouse->IsAlliedWith(pTarget->Owner) || now - strike.StartFrame > 9000 || now < strike.StartFrame)
-			{
-				// Target gone or too long on the way: pick again at once next tick.
-				strike = NeuralSneakStrike { 0, now - 900, false };
+			if (!pTarget)
 				return;
-			}
+
+			syncAssigned(id, pTarget->UniqueID, pTarget->GetMapCoords(), wideBlast);
 
 			if (strike.Charging)
 			{
@@ -3333,17 +3502,18 @@ namespace
 			}
 
 			const CellStruct cell = pTarget->GetMapCoords();
-			const double dist = pFoot->GetMapCoords().DistanceFrom(cell);
-			const bool pressed = pFoot->HasBeenAttacked || VisibleEnemyThreatNear(pHouse, pFoot->GetMapCoords(), 4) > 0;
+			const double dist = curCell.DistanceFrom(cell);
+			const bool pressed = pFoot->HasBeenAttacked || VisibleEnemyThreatNear(pHouse, curCell, 5) > 0;
 			CellClass* const pGoal = pTarget->GetCell();
 
-			if (dist <= 8.0 || (pressed && dist <= 14.0))
+			if (dist <= 12.0 || (pressed && dist <= 18.0))
 			{
 				strike.Charging = true;
+				pFoot->SetDestination(nullptr, true);
 				pFoot->SetTarget(pTarget);
 				pFoot->QueueMission(Mission::Attack, false);
 				Debug::Log("[NeuralAI] House %d SneakStrike: %s %u charges %s of house %d from %d cells, frame %d.\n",
-					pHouse->ArrayIndex, pFoot->GetTechnoType()->ID, id, pTarget->GetTechnoType()->ID, pTarget->Owner->ArrayIndex,
+					pHouse->ArrayIndex, pType->ID, id, pTarget->GetTechnoType()->ID, pTarget->Owner->ArrayIndex,
 					static_cast<int>(dist), now);
 			}
 			else

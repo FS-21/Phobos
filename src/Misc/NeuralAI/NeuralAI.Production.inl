@@ -5240,6 +5240,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	bool newestTankOrLightIsRepairer = false;
 	// Repairers of ours (IsRepairerUnit: an IFV with an engineer too), within ownedGroundCombatUnits.
 	int ownedRepairerVehicles = 0;
+	int ownedSuicideVehicles = 0;
 	// Armed ground vehicles whose main gun reaches ArtilleryRangeCells, unfolded siege guns included
 	// (the rest of ownedGroundCombatUnits is their front line).
 	int ownedArtilleryVehicles = 0;
@@ -5296,15 +5297,23 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		// An MCV aboard one of our transports is still ours and still undeployed: out of sight in the
 		// hold it let the next one be built, five MCVs for one yard (match #10267).
 		if (pOwnedU && pOwnedU->Owner == pHouse && pOwnedU->InLimbo && pOwnedU->IsAlive && pOwnedU->Type
-			&& pOwnedU->Transporter && pOwnedU->Transporter->Owner == pHouse
-			&& pOwnedU->Type->DeploysInto && pOwnedU->Type->DeploysInto->ConstructionYard)
+			&& pOwnedU->Transporter && pOwnedU->Transporter->Owner == pHouse)
 		{
-			ownsUndeployedMCV = true;
+			if (pOwnedU->Type->DeploysInto && pOwnedU->Type->DeploysInto->ConstructionYard)
+				ownsUndeployedMCV = true;
+
+			if (IsVehicleRaiderType(pOwnedU->Type))
+				ownedSuicideVehicles++;
 		}
 
 		if (pOwnedU && pOwnedU->Owner == pHouse && !pOwnedU->InLimbo && pOwnedU->IsAlive && pOwnedU->Type)
 		{
 			auto const pOwnedType = pOwnedU->Type;
+			const bool isOwnedSuicideVehicle = IsVehicleRaiderType(pOwnedType);
+
+			if (isOwnedSuicideVehicle)
+				ownedSuicideVehicles++;
+
 			const auto pOwnedWpn = pOwnedType->GetWeapon(0) ? pOwnedType->GetWeapon(0)->WeaponType : nullptr;
 			if (!pOwnedType->Harvester && !pOwnedType->ResourceGatherer
 				&& !(pOwnedType->DeploysInto && pOwnedType->DeploysInto->ConstructionYard)
@@ -5319,7 +5328,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				{
 					ownedNavalOrAmphibCombatUnits++;
 				}
-				else if (pOwnedWpn != nullptr)
+				else if (pOwnedWpn != nullptr && !isOwnedSuicideVehicle)
 				{
 					ownedGroundCombatUnits++;
 					const bool isOwnedRepairer = IsRepairerUnit(pOwnedU);
@@ -6809,6 +6818,26 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			}
 		}
 
+		const bool isSuicideVehicle = IsVehicleRaiderType(pUnit);
+
+		if (isSuicideVehicle)
+		{
+			// Suicide demolition trucks are tactical strike raiders, never frontline escorts: keep at most
+			// 2 active at once (3 when rich with a full tank army), and only once a solid tank core stands.
+			const int suicideVehicleCap = (money >= 30000 && ownedMainTanks >= 14) ? 3 : 2;
+			const int activeOrQueuedSuicides = ownedSuicideVehicles
+				+ (!isUnitInProgress && inProgressUnitIdx >= 0
+					&& IsVehicleRaiderType(UnitTypeClass::Array.GetItem(inProgressUnitIdx)) ? 1 : 0);
+
+			if (ownedSuicideVehicles >= suicideVehicleCap
+				|| (!isUnitInProgress && (activeOrQueuedSuicides >= suicideVehicleCap || ownedMainTanks < 6
+					|| ownVehiclesAndShips < 10 || GetMacroState(pHouse).CounterUnderAttack))
+				|| canSafelySaveForMCV || savingForIslandTransport)
+			{
+				continue;
+			}
+		}
+
 		const bool isIncomeRecoveryUnit = isEconomyUnit || (isMCV && canSafelySaveForMCV)
 			|| (isAmphibTransport && ownedAmphibTransports == 0 && (features[21] > 0 || features[19] == 0));
 		// Only restrict unit choices by remaining cash when all income sources are
@@ -7168,9 +7197,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			}
 
 			// A Rotating Raids recruiting the bigger group of a lesson (RaidRecruitWanted) asks for fast
-			// armed vehicles: the raid takes the fastest idle units first.
+			// armed vehicles: the raid takes the fastest idle units first (never suicide trucks).
 			if (GetMacroState(pHouse).RaidRecruitWanted > 0 && pWpn && !pUnit->Naval && !isEconomyUnit && !isMCV && !isTransportClass
-				&& !isAA)
+				&& !isAA && !isSuicideVehicle)
 			{
 				score += std::min(RaidRecruitMostBonus, std::max(0, pUnit->Speed) * RaidRecruitSpeedBonus);
 			}
@@ -7179,7 +7208,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			{
 				const char diagClass = isMCV ? 'M' : ((pUnit->Harvester || pUnit->ResourceGatherer) ? 'H'
 					: (isTransportClass ? 'P'
-						: ((isUnarmedSupportVehicle || IsRepairerUnitType(pUnit)) ? 'S'
+						: ((isUnarmedSupportVehicle || IsRepairerUnitType(pUnit) || isSuicideVehicle) ? 'S'
 							: (isAA ? 'A' : (isArtillery ? 'G' : (isMainTank ? 'T' : 'L'))))));
 				const int diagBase = pUnit->Cost / 4 + pUnit->Strength / 3 + unitFirepower;
 				const int diagPenalty = std::min(1200, ownedUnitWithConv * 55);
@@ -7221,9 +7250,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			}
 
 			// An armed light vehicle (the pick line's class L): no main battle tank, artillery, anti-air,
-			// transport, economy unit, deployer or repairer (IsRepairerUnitType).
-			if (pWpn && !IsRepairerUnitType(pUnit) && !isMainTank && !isAA && !isArtillery && !isTransportClass && !isEconomyUnit && !isMCV
-				&& !pUnit->Harvester && !pUnit->ResourceGatherer && score > bestLightScore)
+			// transport, economy unit, deployer, repairer or suicide truck.
+			if (pWpn && !IsRepairerUnitType(pUnit) && !isSuicideVehicle && !isMainTank && !isAA && !isArtillery
+				&& !isTransportClass && !isEconomyUnit && !isMCV && !pUnit->Harvester && !pUnit->ResourceGatherer
+				&& score > bestLightScore)
 			{
 				bestLightScore = score;
 				bestLightIdx = pUnit->ArrayIndex;
@@ -7236,7 +7266,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				bestRepairerIdx = pUnit->ArrayIndex;
 			}
 
-			if (tankBunkersToFill > 0 && pUnit->Bunkerable && !isEconomyUnit && !isMCV
+			if (tankBunkersToFill > 0 && pUnit->Bunkerable && !isEconomyUnit && !isMCV && !isSuicideVehicle
 				&& score > bestBunkerTankScore)
 			{
 				bestBunkerTankScore = score;
@@ -7708,13 +7738,16 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	// riflemen, no soldier left to garrison the city).
 	int ownedHealerInfantry = 0;
 	int ownedFighterInfantry = 0;
+	int ownedSuicideInfantry = 0;
 
 	for (auto const pOwnI : InfantryClass::Array)
 	{
 		if (!pOwnI || pOwnI->Owner != pHouse || !pOwnI->IsAlive || !pOwnI->Type)
 			continue;
 
-		if (IsHealerInfantryType(pOwnI->Type))
+		if (IsSuicideInfantryType(pOwnI->Type))
+			ownedSuicideInfantry++;
+		else if (IsHealerInfantryType(pOwnI->Type))
 			ownedHealerInfantry++;
 		else if (!IsSpecialistInfantryType(pOwnI->Type) && pOwnI->Type->GetWeapon(0) && pOwnI->Type->GetWeapon(0)->WeaponType)
 			ownedFighterInfantry++;
@@ -7736,6 +7769,14 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 		if (!isInfInProgress && IsHealerInfantryType(pInf) && ownedHealerInfantry * 10 >= std::max(1, ownedFighterInfantry))
 			continue;
+
+		const int suicideInfCap = (money >= 20000 && ownedFighterInfantry >= 12) ? 6 : 4;
+
+		if (IsSuicideInfantryType(pInf) && (ownedSuicideInfantry >= suicideInfCap
+			|| (!isInfInProgress && (ownedFighterInfantry < 6 || GetMacroState(pHouse).CounterUnderAttack))))
+		{
+			continue;
+		}
 
 		const bool isIncomeRecoveryEng = (IsCaptureInfantryType(pInf) && neutralCashDerrickCount > ownedEngineers);
 		if (!hasActiveUnitIncome && !isInfInProgress && !isIncomeRecoveryEng && pInf->GetActualCost(pHouse) > money)
@@ -7836,7 +7877,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			score += scores[16];
 		}
 
-		if (needsCheapInfForBioReactor && !IsCaptureInfantryType(pInf) && !IsSpyInfantryType(pInf) && !pInf->Doggie && pInf->Cost <= 220)
+		if (needsCheapInfForBioReactor && !IsCaptureInfantryType(pInf) && !IsSpyInfantryType(pInf) && !IsSuicideInfantryType(pInf)
+			&& !pInf->Doggie && pInf->Cost <= 220)
 		{
 			score += 520;
 		}
@@ -7866,7 +7908,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			if (pOwnB && !pOwnB->InLimbo && pOwnB->IsAlive && pOwnB->Type && pOwnB->Type->IsBaseDefense
 				&& pOwnB->Type->CanBeOccupied
 				&& pOwnB->Occupants.Count < std::clamp(pOwnB->Type->MaxNumberOccupants, 1, 10) && pInf->Occupier
-				&& !IsCaptureInfantryType(pInf) && !IsSpyInfantryType(pInf))
+				&& !IsCaptureInfantryType(pInf) && !IsSpyInfantryType(pInf) && !IsSuicideInfantryType(pInf))
 			{
 				score += 650;
 				break;
@@ -7932,7 +7974,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	// the scored pick, with or without money in hand (a soldier is cheap and is paid as the money
 	// comes in; a house is often broke for minutes and the seat would go to a dearer pick). The
 	// first engineer still goes first, and under attack the answer to the threat does.
-	if (bestGarrisonIdx >= 0 && bestInfIdx != bestGarrisonIdx && !GetMacroState(pHouse).CounterUnderAttack)
+	const int garrisonTrainingCap = 40 + pHouse->NumWarFactories * 15;
+	if (bestGarrisonIdx >= 0 && bestInfIdx != bestGarrisonIdx && !GetMacroState(pHouse).CounterUnderAttack
+		&& (garrisonedInfantry < garrisonTrainingCap || money >= 4000))
 	{
 		auto const pScoredPick = bestInfIdx >= 0 ? InfantryTypeClass::Array.GetItem(bestInfIdx) : nullptr;
 
@@ -7943,17 +7987,37 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		}
 	}
 
-	// Dynamic Base-Congestion & High-Money Infantry Scaling:
-	// Allow continuous Barracks production when money is abundant and logistics
-	// can deploy troops across the map, pausing only if idle infantry congests
-	// the home base or island transport queues!
+	// Dynamic Base-Congestion, Stranded Island Barracks & War Factory Tank-Starvation Protection:
+	// Measure congestion around both home base and each owned barracks (so a capture barracks left on a
+	// tiny island never piles up 30 stranded soldiers), and yield Barracks cash drain when the house already
+	// fields 18+ infantry while its War Factory is starved below the tank floor with < 1000 credits.
 	int congestedBaseInfantry = 0;
 	const CellStruct infHomeCenter = (pHouse->ConYards.Count > 0 && pHouse->ConYards.GetItem(0))
 		? pHouse->ConYards.GetItem(0)->GetMapCoords()
 		: (pHouse->BaseCenter != CellStruct::Empty ? pHouse->BaseCenter : pHouse->BaseSpawnCell);
 
+	std::vector<CellStruct> infCheckCenters;
+	infCheckCenters.reserve(8);
+	BuildingClass* pPrimaryBarracksBld = nullptr;
+
 	if (infHomeCenter != CellStruct::Empty)
+		infCheckCenters.push_back(infHomeCenter);
+
+	for (auto const pOwnB : pHouse->Buildings)
 	{
+		if (!pOwnB || !pOwnB->IsAlive || pOwnB->InLimbo || !pOwnB->Type || pOwnB->Type->Factory != AbstractType::InfantryType || pOwnB->Type->Naval)
+			continue;
+
+		infCheckCenters.push_back(pOwnB->GetMapCoords());
+
+		if (pOwnB->IsPrimaryFactory || !pPrimaryBarracksBld)
+			pPrimaryBarracksBld = pOwnB;
+	}
+
+	if (!infCheckCenters.empty())
+	{
+		std::vector<int> centerCounts(infCheckCenters.size(), 0);
+
 		for (auto const pOwnI : InfantryClass::Array)
 		{
 			if (!pOwnI || pOwnI->Owner != pHouse || pOwnI->InLimbo || !pOwnI->IsAlive)
@@ -7966,19 +8030,87 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			}
 
 			const CellStruct ic = pOwnI->GetMapCoords();
-			const int dx = static_cast<int>(ic.X) - static_cast<int>(infHomeCenter.X);
-			const int dy = static_cast<int>(ic.Y) - static_cast<int>(infHomeCenter.Y);
-			if (dx * dx + dy * dy <= 12 * 12)
-				congestedBaseInfantry++;
+
+			for (size_t ci = 0; ci < infCheckCenters.size(); ++ci)
+			{
+				const int dx = static_cast<int>(ic.X) - static_cast<int>(infCheckCenters[ci].X);
+				const int dy = static_cast<int>(ic.Y) - static_cast<int>(infCheckCenters[ci].Y);
+
+				if (dx * dx + dy * dy <= 12 * 12)
+					centerCounts[ci]++;
+			}
+		}
+
+		for (const int cnt : centerCounts)
+			congestedBaseInfantry = std::max(congestedBaseInfantry, cnt);
+	}
+
+	bool strandedIslandBarracks = false;
+
+	if (pPrimaryBarracksBld && ownedTransportTotalCapacity == 0 && maxBuildableTransportSizeLimit == 0 && pHouse->NumAirpads == 0)
+	{
+		const int raxZone = MapClass::Instance.GetMovementZoneType(pPrimaryBarracksBld->GetMapCoords(), MovementZone::Normal, false);
+
+		if (raxZone >= 0)
+		{
+			bool enemyOnRaxZone = false;
+
+			for (auto const& eb : GetKnownEnemyBuildingCache(pHouse).Entries)
+			{
+				if (MapClass::Instance.GetMovementZoneType(eb.Coords, MovementZone::Normal, false) == raxZone)
+				{
+					enemyOnRaxZone = true;
+					break;
+				}
+			}
+
+			if (!enemyOnRaxZone)
+			{
+				int infOnRaxZone = 0;
+
+				for (auto const pOwnI : InfantryClass::Array)
+				{
+					if (pOwnI && pOwnI->Owner == pHouse && !pOwnI->InLimbo && pOwnI->IsAlive
+						&& MapClass::Instance.GetMovementZoneType(pOwnI->GetMapCoords(), MovementZone::Normal, false) == raxZone)
+					{
+						infOnRaxZone++;
+					}
+				}
+
+				bool localCapturableOnRaxZone = false;
+				auto const pBestInfType = bestInfIdx >= 0 ? InfantryTypeClass::Array.GetItem(bestInfIdx) : nullptr;
+
+				if (pBestInfType && IsCaptureInfantryType(pBestInfType))
+				{
+					for (auto const pBld : BuildingClass::Array)
+					{
+						if (pBld && pBld->IsAlive && !pBld->InLimbo && pBld->Type && pBld->Type->Capturable
+							&& pBld->Owner && pBld->Owner->IsNeutral()
+							&& AreZonesConnected(pPrimaryBarracksBld->GetMapCoords(), pBld->GetMapCoords(), MovementZone::Normal))
+						{
+							localCapturableOnRaxZone = true;
+							break;
+						}
+					}
+				}
+
+				if (infOnRaxZone >= 4 && !localCapturableOnRaxZone)
+					strandedIslandBarracks = true;
+			}
 		}
 	}
+
+	const bool warFactoryStarvedByInfantry = pHouse->NumWarFactories >= 1 && bestUnitIdx >= 0 && hasActiveUnitIncome
+		&& ((ownedMainTanks < std::min(3, tankFloor) && money < 1000 && pHouse->OwnedInfantry >= 18)
+			|| (garrisonedInfantry >= 55 && ownedGroundCombatUnits < 4 && money < 2500));
 
 	const bool islandInfantryQueueFull
 		= (features[21] > 0 && waitingBattalionSizeOnIslands > ownedTransportTotalCapacity + 12);
 	// No ceiling by number: the barracks wait while soldiers go unused (IsArmyKindUnused), crowd
-	// the base, or wait on the islands for more transports than we own.
+	// the base or a mini-island barracks, or starve a War Factory below its tank floor on urban maps.
 	constexpr int IslandQueueInfantry = 45;
 	const bool baseInfantrySaturated = IsArmyKindUnused(pHouse, ArmyKind::Infantry) || congestedBaseInfantry >= 24
+		|| strandedIslandBarracks || warFactoryStarvedByInfantry
 		|| (islandInfantryQueueFull && pHouse->OwnedInfantry - garrisonedInfantry >= IslandQueueInfantry);
 
 	// Only pause secondary queues to ration finite credits when all income

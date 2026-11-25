@@ -1041,6 +1041,7 @@ namespace
 		if (!pTarget || !pTarget->Owner || pTarget->Owner == pHouse || pHouse->IsAlliedWith(pTarget->Owner)
 			|| pTarget->Owner->IsNeutral() || !targetKnownAndVisible || age < 0 || age > AirStrikeOrderFrames)
 		{
+			AirRoutes.erase(pAir->UniqueID);
 			state.Orders.erase(it);
 			return false;
 		}
@@ -1057,9 +1058,54 @@ namespace
 
 		if (AirStrikeRiskAt(pHouse, pTarget->GetMapCoords()) > wing - 1)
 		{
+			AirRoutes.erase(pAir->UniqueID);
 			state.Orders.erase(it);
 			return false;
 		}
+
+		auto const pHop = GetSafeAirHop(pHouse, pAir, pTargetCell);
+
+		if (!pHop || pHop == pTargetCell)
+			OrderAircraftAttack(pAir, pTarget);
+		else
+			IssueMoveOrder(pAir, pHop, 3.0);
+
+		return true;
+	}
+
+	bool ContinueSoloAirStrike(HouseClass* pHouse, AircraftClass* pAir)
+	{
+		auto& state = GetAirForceState(pHouse);
+		auto const it = state.SoloStrikes.find(pAir->UniqueID);
+
+		if (it == state.SoloStrikes.end())
+			return false;
+
+		if (!HasEndlessAirLoad(pAir->Type) && pAir->Ammo < pAir->Type->Ammo)
+			it->second.Returning = true;
+
+		if (it->second.Returning)
+		{
+			if (!pAir->IsInAir())
+				state.SoloStrikes.erase(it);
+
+			return false;
+		}
+
+		const int age = Unsorted::CurrentFrame - it->second.Frame;
+		auto const pTarget = abstract_cast<BuildingClass*>(FindAirStrikeTechnoByID(it->second.TargetID));
+		auto const pTargetCell = pTarget ? pTarget->GetCell() : nullptr;
+
+		if (!pTarget || !pTargetCell || !pTarget->Owner || pTarget->Owner == pHouse || pHouse->IsAlliedWith(pTarget->Owner)
+			|| pTarget->Owner->IsNeutral() || !IsEnemyBuildingKnown(pHouse, pTarget)
+			|| AirStrikeRiskAt(pHouse, pTarget->GetMapCoords()) > 0 || age < 0 || age > AirSoloStrikeLossFrames)
+		{
+			AirRoutes.erase(pAir->UniqueID);
+			state.SoloStrikes.erase(it);
+			return false;
+		}
+
+		it->second.TargetCell = pTarget->GetMapCoords();
 		auto const pHop = GetSafeAirHop(pHouse, pAir, pTargetCell);
 
 		if (!pHop || pHop == pTargetCell)
@@ -1378,7 +1424,22 @@ namespace
 	// not sent back. True when it was sent to a hop.
 	bool FlyAircraftHomeSafely(HouseClass* pHouse, AircraftClass* pAir)
 	{
-		if (pAir->CurrentMission != Mission::Enter || !pAir->IsInAir())
+		if (!pAir->IsInAir())
+			return false;
+
+		auto& state = GetAirForceState(pHouse);
+
+		if (auto const itOrd = state.Orders.find(pAir->UniqueID); itOrd != state.Orders.end() && !itOrd->second.Returning)
+			return false;
+
+		if (auto const itSolo = state.SoloStrikes.find(pAir->UniqueID); itSolo != state.SoloStrikes.end() && !itSolo->second.Returning)
+			return false;
+
+		auto const itTask = state.Tasks.find(pAir->UniqueID);
+		const bool continuingSafeHome = pAir->CurrentMission == Mission::Move && itTask != state.Tasks.end()
+			&& itTask->second.Task == NeuralAirTask::SafeHome;
+
+		if (pAir->CurrentMission != Mission::Enter && !continuingSafeHome)
 			return false;
 
 		auto pDock = abstract_cast<BuildingClass*>(pAir->Destination);
@@ -1386,13 +1447,32 @@ namespace
 		if (!pDock)
 			pDock = abstract_cast<BuildingClass*>(pAir->GetNthLink(0));
 
+		const CellStruct from = pAir->GetMapCoords();
+
+		if (!pDock)
+		{
+			double bestDockDist = 1e18;
+
+			for (auto const pBld : pHouse->Buildings)
+			{
+				if (!pBld || !pBld->IsAlive || pBld->InLimbo || !pBld->Type || !pBld->Type->Helipad)
+					continue;
+
+				const double d = pBld->GetMapCoords().DistanceFromSquared(from);
+
+				if (d < bestDockDist)
+				{
+					bestDockDist = d;
+					pDock = pBld;
+				}
+			}
+		}
+
 		if (!pDock || !pDock->Owner || (pDock->Owner != pHouse && !pHouse->IsAlliedWith(pDock->Owner)))
 			return false;
 
-		const CellStruct from = pAir->GetMapCoords();
-
 		if (auto const itRoute = AirRoutes.find(pAir->UniqueID);
-			itRoute != AirRoutes.end() && itRoute->second.Waypoint != CellStruct::Empty && from.DistanceFrom(itRoute->second.Waypoint) <= 8.0)
+			itRoute != AirRoutes.end() && itRoute->second.Waypoint != CellStruct::Empty && from.DistanceFrom(itRoute->second.Waypoint) <= 9.0)
 		{
 			itRoute->second.Waypoint = CellStruct::Empty;
 		}
@@ -1400,7 +1480,19 @@ namespace
 		auto const pDockCell = pDock->GetCell();
 		auto const pHop = GetSafeAirHop(pHouse, pAir, pDockCell);
 
-		if (!pHop || pHop == pDockCell || !IssueMoveOrder(pAir, pHop, 3.0))
+		if (!pHop || pHop == pDockCell)
+		{
+			if (continuingSafeHome && pAir->CurrentMission != Mission::Enter)
+			{
+				pAir->SetDestination(nullptr, true);
+				pAir->EnterIdleMode(false, true);
+				return true;
+			}
+
+			return false;
+		}
+
+		if (!IssueMoveOrder(pAir, pHop, 3.0))
 			return false;
 
 		NoteAirTask(pHouse, pAir, NeuralAirTask::SafeHome);

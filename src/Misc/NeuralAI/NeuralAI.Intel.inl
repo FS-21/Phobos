@@ -88,10 +88,17 @@ namespace
 	// area damage, times its range.
 	int WeaponFirepowerOf(WeaponTypeClass* pWeapon)
 	{
-		const int rate = GetWeaponThreatRate(pWeapon);
+		int rate = GetWeaponThreatRate(pWeapon);
 
 		if (rate <= 0 || !pWeapon->Warhead || !CanWarheadDamageEnemy(pWeapon->Warhead))
 			return 0;
+
+		// A suicide blast fires once in the unit's lifetime instead of every ROF frames.
+		const auto pWeaponExt = WeaponTypeExt::TryFetch(pWeapon);
+		const bool isOneShotSuicide = pWeapon->Suicide || (pWeaponExt && IsAreaWeapon(pWeaponExt->FeedbackWeapon.Get()));
+
+		if (isOneShotSuicide)
+			rate = std::max(1, rate / 8);
 
 		const int armorCount = GetRegisteredArmorCount();
 		int versesSum = 0;
@@ -1152,7 +1159,27 @@ namespace
 		if (!pHouse || targetCoords == CellStruct::Empty)
 			return;
 
-		auto updateCategory = [&](AbstractType type, bool isNaval, CellStruct categoryGoal)
+		auto hasMainBaseOnZone = [&](int zone) -> bool
+		{
+			if (zone < 0)
+				return false;
+
+			for (auto const pOwnB : pHouse->Buildings)
+			{
+				if (!pOwnB || !pOwnB->IsAlive || pOwnB->InLimbo || !pOwnB->Type)
+					continue;
+
+				if (!pOwnB->Type->ConstructionYard && !pOwnB->Type->WeaponsFactory && pOwnB->Type->Factory != AbstractType::UnitType)
+					continue;
+
+				if (MapClass::Instance.GetMovementZoneType(pOwnB->GetMapCoords(), MovementZone::Normal, false) == zone)
+					return true;
+			}
+
+			return false;
+		};
+
+		auto updateCategory = [&](AbstractType type, bool isNaval, CellStruct categoryGoal, bool allowIsolatedBarracks = false)
 		{
 			const CellStruct goalCoords = (categoryGoal != CellStruct::Empty) ? categoryGoal : targetCoords;
 			if (goalCoords == CellStruct::Empty)
@@ -1205,7 +1232,20 @@ namespace
 					if (pBld->Type->Factory != type || pBld->Type->Naval != isNaval)
 						continue;
 
-					const double distSq = pBld->GetMapCoords().DistanceFromSquared(goalCoords);
+					if (pBld->CurrentMission == Mission::Selling || pBld->QueuedMission == Mission::Selling)
+						continue;
+
+					double distSq = pBld->GetMapCoords().DistanceFromSquared(goalCoords);
+
+					// Never make a tiny isolated capture-derrick barracks the primary infantry factory when a
+					// main base barracks exists on another island, unless routing an engineer to that capture site.
+					if (type == AbstractType::InfantryType && !isNaval && !allowIsolatedBarracks)
+					{
+						const int bldZone = MapClass::Instance.GetMovementZoneType(pBld->GetMapCoords(), MovementZone::Normal, false);
+
+						if (!hasMainBaseOnZone(bldZone))
+							distSq += 1e12;
+					}
 
 					if (distSq < bestDistanceSq)
 					{
@@ -1473,7 +1513,7 @@ namespace
 				infGoal = bestCapCell;
 		}
 
-		updateCategory(AbstractType::InfantryType, false, infGoal);
+		updateCategory(AbstractType::InfantryType, false, infGoal, captureGoal != CellStruct::Empty);
 
 		if (captureGoal != CellStruct::Empty)
 		{

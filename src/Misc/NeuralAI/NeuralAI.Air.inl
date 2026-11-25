@@ -14,7 +14,7 @@ namespace
 		auto const pCarrierType = pCarrier->GetTechnoType();
 		const CellStruct from = pCarrier->GetMapCoords();
 
-		if (!pCarrierType || from.DistanceFrom(pGoal->MapCoords) <= 12.0)
+		if (!pCarrierType || from.DistanceFrom(pGoal->MapCoords) <= 15.0)
 		{
 			AirRoutes.erase(pCarrier->UniqueID);
 			return pGoal;
@@ -41,7 +41,9 @@ namespace
 
 		if (route.Waypoint != CellStruct::Empty)
 		{
-			if (from.DistanceFrom(route.Waypoint) <= 4.0)
+			// Advance to the final goal well before touching the intermediate cell: AirportBound jets on
+			// Mission::Move call EnterIdleMode (aborting back to their pad) the instant they reach a non-dock cell.
+			if (from.DistanceFrom(route.Waypoint) <= 9.0)
 				route.Waypoint = CellStruct::Empty;
 			else if (auto const pWaypointCell = MapClass::Instance.TryGetCellAt(route.Waypoint))
 				return pWaypointCell;
