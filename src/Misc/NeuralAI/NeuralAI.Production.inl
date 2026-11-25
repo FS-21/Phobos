@@ -5238,8 +5238,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	// The support the tank floor escorts: unarmed vehicles, folded or not, without the unfolded siege
 	// guns (they count as artillery).
 	int ownedEscortedSupportVehicles = 0;
-	// Mobile sensor arrays, folded or not (SensorLookoutMinSight).
+	// Mobile sensor arrays, folded or not (SensorLookoutMinSight), and the packed ones among them.
 	int ownedSensorLookouts = 0;
+	int ownedPackedSensorLookouts = 0;
 	int ownedTransportTotalCapacity = 0;
 	int waitingBattalionSizeOnIslands = 0;
 	int maxWaitingUnitSizeOnIslands = 0;
@@ -5474,7 +5475,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			}
 
 			if (IsSensorLookoutType(pOwnedType))
+			{
 				ownedSensorLookouts++;
+				ownedPackedSensorLookouts++;
+			}
 
 			// Airlift jobs the carryalls really have (same rules as the carryall dispatcher):
 			// critically damaged expensive vehicles to rescue and loaded strike APCs to drop, each one
@@ -5652,16 +5656,21 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 	for (auto const pOwnB : pHouse->Buildings)
 	{
-		if (pOwnB && !pOwnB->InLimbo && pOwnB->IsAlive && pOwnB->Type && pOwnB->Type->UndeploysInto != nullptr
-			&& !IsTrueBaseStructureTarget(pOwnB->Type))
+		if (!pOwnB || pOwnB->InLimbo || !pOwnB->IsAlive || !pOwnB->Type || pOwnB->Type->UndeploysInto == nullptr)
+			continue;
+
+		// An unfolded sensor array counts whatever else its building is: one that also holds a
+		// superweapon is a base structure below, and production never saw it (match #18157: four
+		// arrays in a house whose cap was two).
+		if (IsSensorLookoutType(pOwnB->Type->UndeploysInto))
+			ownedSensorLookouts++;
+
+		if (!IsTrueBaseStructureTarget(pOwnB->Type))
 		{
 			ownedUnarmedSupportVehicles++;
 
 			if (!IsDeployedSiegeBuildingType(pOwnB->Type) || GroundRangeOf(pOwnB->Type) < ArtilleryRangeCells * Unsorted::LeptonsPerCell)
 				ownedEscortedSupportVehicles++;
-
-			if (IsSensorLookoutType(pOwnB->Type->UndeploysInto))
-				ownedSensorLookouts++;
 		}
 	}
 
@@ -6796,14 +6805,23 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		// Detection need (Detection*): how far this vehicle finds what the house cannot see, and whether
 		// the detectors of ours that reach as far or farther already fill the detectors' own cap.
 		const int detectReach = pUnit->Naval ? 0 : DetectionReachCells(pUnit, detectionNeed);
-		const bool detectorWanted = detectReach > 0 && detectorsReaching(detectReach) < detectionCap;
+		// A mobile sensor array is a detector of the sensor chain (SensorChain*, user), not of the
+		// detectors' cap, which counts vehicles and so never saw the unfolded ones: the first one comes
+		// for a detection need it answers; after it one more only while the chain has a post toward a
+		// stealth sighting out of the reach of our sensors, and never while a packed one of ours is
+		// still on its way. The unfolded ones have no cap.
+		const bool isSensorLookout = IsSensorLookoutType(pUnit);
+		const bool detectorWanted = isSensorLookout
+			? detectReach > 0 && ownedPackedSensorLookouts == 0 && (ownedSensorLookouts == 0 || GetScoutState(pHouse).SensorChainAsks)
+			: detectReach > 0 && detectorsReaching(detectReach) < detectionCap;
 
 		if (isUnarmedSupportVehicle)
 		{
-			// A mobile sensor array has a cap of its own (one) while enemy stealth units were seen in the
-			// last SensorLookoutSightingFrames or the house searched for remnants lately (user: it
-			// finds the stealth units hiding in the area it covers).
-			const bool sensorWanted = IsSensorLookoutType(pUnit)
+			// Without the chain a mobile sensor array has a cap of its own (one, folded or not) while
+			// enemy stealth units were seen in the last SensorLookoutSightingFrames or the house
+			// searched for remnants lately (user: it finds the stealth units hiding in the area it
+			// covers).
+			const bool sensorWanted = isSensorLookout
 				&& (Unsorted::CurrentFrame - GetMacroState(pHouse).RemnantSearchFrame < 2 * RemnantSearchEveryFrames
 					|| std::any_of(GetMacroState(pHouse).StealthSightings.begin(), GetMacroState(pHouse).StealthSightings.end(),
 						[](const auto& seen) { return Unsorted::CurrentFrame - seen.second.second <= SensorLookoutSightingFrames; }));
@@ -6813,7 +6831,11 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			// Array LPST/NLPST, Limpet Drone) at 1 across the house so they are never
 			// spammed! A detector the detection need asks for has the detectors' cap instead
 			// (detectorWanted): a jammer no longer keeps a farther reaching sensor array out.
-			if ((!detectorWanted && (sensorWanted ? ownedSensorLookouts >= 1 : ownedUnarmedSupportVehicles >= 1)) || pHouse->OwnedUnits < 8
+			const bool supportCapFull = isSensorLookout
+				? ownedSensorLookouts >= 1 || (!sensorWanted && ownedUnarmedSupportVehicles >= 1)
+				: ownedUnarmedSupportVehicles >= 1;
+
+			if ((!detectorWanted && supportCapFull) || pHouse->OwnedUnits < 8
 				|| canSafelySaveForMCV || savingForIslandTransport)
 			{
 				continue;
