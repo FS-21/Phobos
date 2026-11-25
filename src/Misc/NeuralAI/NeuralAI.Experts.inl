@@ -9,6 +9,11 @@ namespace
 	std::array<bool, 32> AirTechPossible {};
 	int AirTechMatchSerial { -1 };
 
+	// The expert the training exploration drew for each house, and the 900-frame window of the draw.
+	std::array<int, 32> ExplorationDrawWindow {};
+	std::array<int, 32> ExplorationDrawExpert {};
+	int ExplorationMatchSerial { -1 };
+
 	bool HouseCanEverFieldAircraft(HouseClass* pHouse)
 	{
 		const int idx = pHouse->ArrayIndex;
@@ -381,8 +386,9 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 	// expert within 300 points of the best takes over for that window, the best one twice as
 	// often, so close alternatives get matches to prove themselves. The less an expert has been
 	// tried for this side and archetype (faction memory visits), the further behind it may be and
-	// still get its turn: up to 250 more points when untried. Deterministic (frame, house), never
-	// the game RNG. Real games always take the best.
+	// still get its turn: up to 250 more points when untried. The drawn expert keeps the window
+	// while it stays within that reach. Deterministic (frame, house), never the game RNG. Real
+	// games always take the best.
 	if (NeuralAI::TrainingMode)
 	{
 		std::array<int, 11> pool {};
@@ -412,7 +418,37 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 
 		const uint32_t window = static_cast<uint32_t>(Unsorted::CurrentFrame / 900);
 		const uint32_t mix = (window * 2654435761u) ^ (static_cast<uint32_t>(pHouse->ArrayIndex + 1) * 40503u);
-		activeExpert = pool[mix % static_cast<uint32_t>(poolSize)];
+		int drawnExpert = pool[mix % static_cast<uint32_t>(poolSize)];
+
+		// The pool is rebuilt every AI tick, and each time it gained or lost a member the same draw
+		// landed on another expert: the active expert changed inside two of every three trajectory
+		// windows of 240 frames (25 training matches, 2026-11-25), so no expert held the house for
+		// the window it was given. The expert of the draw is kept instead; it is drawn again when
+		// the window ends or when it leaves the pool (too far behind, or vetoed).
+		if (const int hIdx = pHouse->ArrayIndex; hIdx >= 0 && hIdx < 32)
+		{
+			if (ExplorationMatchSerial != NeuralMatchSerial)
+			{
+				ExplorationMatchSerial = NeuralMatchSerial;
+				ExplorationDrawWindow.fill(-1);
+				ExplorationDrawExpert.fill(-1);
+			}
+
+			const int heldExpert = ExplorationDrawExpert[hIdx];
+			auto const poolEnd = pool.begin() + poolSize;
+
+			if (ExplorationDrawWindow[hIdx] == static_cast<int>(window) && std::find(pool.begin(), poolEnd, heldExpert) != poolEnd)
+			{
+				drawnExpert = heldExpert;
+			}
+			else
+			{
+				ExplorationDrawWindow[hIdx] = static_cast<int>(window);
+				ExplorationDrawExpert[hIdx] = drawnExpert;
+			}
+		}
+
+		activeExpert = drawnExpert;
 
 		// Training focus: the expert the trainer asked to watch leads most windows, unless it
 		// has no work here (vetoed).
