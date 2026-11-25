@@ -275,6 +275,73 @@ namespace
 	// slots pushed so far that the gate always gives the same answer (no gradient reaches them).
 	std::array<std::array<std::array<uint32_t, 2>, 128>, 32> GateCounts {};
 
+	// Statistics of the SlotGate draws of the current trajectory window (headless training only;
+	// nothing in the simulation reads them).
+	struct GateWindowStats
+	{
+		std::array<uint16_t, 128> Draws {};
+		std::array<uint16_t, 128> Opens {};
+		std::array<uint16_t, 128> FreeDraws {};
+		std::array<int32_t, 128> ScoreFnSum {};
+	};
+
+	std::array<GateWindowStats, 8> GateWindow {};
+
+	// One bit per draw hash, so a held draw counts once, at its first read. 1 << 16 words per house,
+	// allocated at match start in headless mode only (where GateCounts is cleared).
+	std::array<std::vector<uint64_t>, 8> GateSeenDraws {};
+
+	struct TrajRoutingRecord
+	{
+		uint16_t PoolMask { 1u };
+		uint8_t BestExpert { 0 };
+		uint8_t RoutingFlags { 0 };
+	};
+
+	std::array<TrajRoutingRecord, 8> LastRoutingRecords {};
+
+	struct PickEval
+	{
+		bool Valid { false };
+		uint8_t Expert { 0 };
+		std::array<int, 40> BestTotal {};
+		std::array<int, 40> BestType {};
+		std::array<bool, 40> BestFree {};
+	};
+
+	std::array<std::array<PickEval, 5>, 8> PickEvals {};
+
+	void ResetPickEval(const HouseClass* pHouse, int queue, int activeExpert)
+	{
+		if (!NeuralAI::HeadlessMode || !pHouse || pHouse->ArrayIndex < 0 || pHouse->ArrayIndex >= 8 || queue < 0 || queue >= 5)
+			return;
+
+		auto& eval = PickEvals[pHouse->ArrayIndex][queue];
+		eval.Valid = true;
+		eval.Expert = static_cast<uint8_t>(std::clamp(activeExpert, 0, 9));
+		eval.BestTotal.fill(INT_MIN);
+		eval.BestType.fill(-1);
+		eval.BestFree.fill(false);
+	}
+
+	void NotePickCandidate(const HouseClass* pHouse, int queue, int candSlot, bool candFree, int typeIndex, int score)
+	{
+		if (!NeuralAI::HeadlessMode || !pHouse || pHouse->ArrayIndex < 0 || pHouse->ArrayIndex >= 8
+			|| queue < 0 || queue >= 5 || candSlot < 0 || candSlot >= 40)
+		{
+			return;
+		}
+
+		auto& eval = PickEvals[pHouse->ArrayIndex][queue];
+
+		if (score > eval.BestTotal[candSlot])
+		{
+			eval.BestTotal[candSlot] = score;
+			eval.BestType[candSlot] = typeIndex;
+			eval.BestFree[candSlot] = candFree;
+		}
+	}
+
 	// CPU cost of each house's AI ticks this match (milliseconds). Telemetry only: it never feeds
 	// a decision (wall-clock time differs between machines), so it cannot desync.
 	struct NeuralTickCost
@@ -1577,6 +1644,33 @@ namespace
 
 		if (CurrentAIHouseIndex >= 0 && CurrentAIHouseIndex < 32 && slot >= 0 && slot < 128)
 			GateCounts[CurrentAIHouseIndex][slot][open ? 0 : 1]++;
+
+		if (NeuralAI::HeadlessMode && CurrentAIHouseIndex >= 0 && CurrentAIHouseIndex < 8 && slot >= 0 && slot < 128)
+		{
+			auto& seen = GateSeenDraws[CurrentAIHouseIndex];
+			const uint32_t bit = h & ((1u << 22) - 1u);
+
+			if (!seen.empty() && !(seen[bit >> 6] & (1ULL << (bit & 63u))))
+			{
+				seen[bit >> 6] |= 1ULL << (bit & 63u);
+				auto& window = GateWindow[CurrentAIHouseIndex];
+				const double rawProbability = 1.0 / (1.0 + DeterministicExp(-std::clamp(margin / Softness, -8.0, 8.0)));
+
+				if (window.Draws[slot] < 65535u)
+				{
+					window.Draws[slot]++;
+
+					if (open)
+						window.Opens[slot]++;
+
+					if (rawProbability >= 0.03 && rawProbability <= 0.97)
+					{
+						window.FreeDraws[slot]++;
+						window.ScoreFnSum[slot] += static_cast<int32_t>(std::lround(((open ? 1.0 : 0.0) - probability) * 16384.0));
+					}
+				}
+			}
+		}
 
 		return open;
 	}

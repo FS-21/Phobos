@@ -3,6 +3,7 @@
 #include <Windows.h>
 #include <YRPP.h>
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
@@ -108,6 +109,26 @@ struct AITrainerSharedTelemetry
 	uint8_t RadarCells[128 * 128];
 };
 
+struct AITrajectoryPick
+{
+	uint8_t Queue;
+	uint8_t Flags;
+	int8_t WinnerSlot;
+	int8_t RunnerSlot;
+	int16_t Margin;
+	uint8_t Expert;
+	uint8_t Reserved;
+};
+
+enum TrajPickFlag : uint8_t
+{
+	NoClass = 1,
+	Overridden = 2,
+	SingleClass = 4,
+	WinnerFree = 8,
+	RunnerFree = 16
+};
+
 struct AITrajectoryStep
 {
 	uint32_t Frame;
@@ -128,6 +149,20 @@ struct AITrajectoryStep
 	uint64_t OpenGatesMask;
 	int8_t Features[256];
 	int8_t TopActionRanks[8];
+	uint16_t WindowFrames;
+	uint8_t WindowTicks;
+	uint8_t ExpertOffTicks;
+	uint16_t ExpertPoolMask;
+	uint8_t BestExpert;
+	uint8_t RoutingFlags;
+	uint8_t PickCount;
+	uint8_t PicksDropped;
+	uint16_t Reserved;
+	AITrajectoryPick Picks[8];
+	uint8_t GateDraws[128];
+	uint8_t GateOpens[128];
+	uint8_t GateFreeDraws[128];
+	int16_t GateScoreFn[128];
 };
 
 struct AITrajectorySharedBuffer
@@ -142,6 +177,12 @@ struct AITrajectorySharedBuffer
 
 #pragma pack(pop)
 
+static_assert(sizeof(AITrajectoryPick) == 8);
+static_assert(sizeof(AITrajectoryStep) == 1024);
+static_assert(offsetof(AITrajectoryStep, WindowFrames) == 308);
+static_assert(offsetof(AITrajectoryStep, Picks) == 320);
+static_assert(offsetof(AITrajectoryStep, GateDraws) == 384);
+static_assert(offsetof(AITrajectoryStep, GateScoreFn) == 768);
 static_assert(sizeof(AIBaseHeader) == 984, "AIBaseHeader must remain exactly 984 bytes");
 static_assert(sizeof(AIBackpackEntry) == 72, "AIBackpackEntry must remain 72 bytes");
 static_assert(sizeof(AIBackpackFile) == 6444 + AIBackpackFile::EntryCapacity * sizeof(AIBackpackEntry),
