@@ -4649,12 +4649,14 @@ namespace
 				|| (pInfType && pInfType->Engineer)
 				|| (holdForExpansion && pUnitType
 					&& (IsAmphibiousOrAirTransport(pUnitType) || (pUnitType->DeploysInto && pUnitType->DeploysInto->ConstructionYard)))
-				// The island MCV and its ride come out of the first war factory and shipyard, and the MCV
-				// needs the buildings of its prerequisite list we lack.
+				// The island MCV and its ride come out of the first war factory and shipyard, and on any map
+				// saving for a 3rd+ refinery never cancels the house's very first war factory (Match #18155).
 				|| (holdForExpansion && macro.IslandExpansionUrgent && pBldType
 					&& ((pBldType->Factory == AbstractType::UnitType && (pBldType->Naval ? pHouse->NumShipyards == 0 : pHouse->NumWarFactories == 0))
 						|| std::find(macro.IslandMcvPrerequisites.begin(), macro.IslandMcvPrerequisites.end(), pBldType->ArrayIndex)
 							!= macro.IslandMcvPrerequisites.end()))
+				|| (holdForEconomy && !holdForHarvester && refCount >= 2 && pBldType
+					&& pBldType->Factory == AbstractType::UnitType && !pBldType->Naval && pHouse->NumWarFactories == 0)
 				|| (holdForEconomy && pBldType && (pBldType->Refinery || pBldType->ResourceGatherer));
 
 			if (restoresIncome)

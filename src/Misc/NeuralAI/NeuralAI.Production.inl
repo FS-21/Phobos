@@ -4232,7 +4232,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				// of its other bases, which do nothing for that yard, so only being broke holds it back.
 				const bool fillsIslandHold = IslandHoldWants(pHouse, pBld);
 
-				const bool canBuildEmergencyDefense = (ownedRefineries >= 1 && ownedBarracks >= 1
+				const bool emergencyAllowedBeforeFirstWF = !groundWarFactoryBuildableNow
+					|| (isPureAA ? (underAirAttack && totalAntiAirDefenses < 1) : (totalGroundDefenses < 1));
+				const bool canBuildEmergencyDefense = (ownedRefineries >= 1 && ownedBarracks >= 1 && emergencyAllowedBeforeFirstWF
 					&& (wasRecentlyAttacked || frontlineThreatActive || undefendedRemoteAssetsCount > 0 || underAirAttack));
 				// Sides that open with the war factory have no barracks yet when the first raid comes.
 				const bool canBuildRaidDefense = fillsAirDeficit && ownedRefineries >= 1 && (ownedBarracks >= 1 || ownedWarFactories >= 1);
@@ -4746,7 +4748,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		// raid still needs. Below the floor it comes before the bank governor's factories too; above it the
 		// governor keeps its windows.
 		const bool priorityAirfieldReady = bestPriorityAirfieldIdx >= 0 && bestBldIdx != bestPriorityAirfieldIdx
-			&& hasActiveBuildingIncome && !bestFillsAirDeficit && inProgressBldIdx < 0 && inProgressDefIdx < 0;
+			&& !firstFactoryPending && hasActiveBuildingIncome && !bestFillsAirDeficit && inProgressBldIdx < 0 && inProgressDefIdx < 0;
 
 		if (priorityAirfieldReady && !airDocksBelowFloor)
 		{
@@ -4947,8 +4949,12 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				auto const pPicked = bestBldIdx >= 0 ? BuildingTypeClass::Array.GetItem(bestBldIdx) : nullptr;
 				// The tech floor yields to the refinery (expansion is crucial) until it has waited
 				// TechStepRefineryYieldFrames, then takes one building between refineries.
+				const bool isFirstCoreFactoryPick = firstFactoryPending && ownedRefineries >= 2
+					&& pPicked->Factory == AbstractType::UnitType
+					&& (pPicked->Naval ? ownedShipyards == 0 : ownedWarFactories == 0);
 				const bool keepPick = pPicked
-					&& (pPicked->Refinery || (pHouse->HasLowPower() && pPicked->PowerBonus > pPicked->PowerDrain)
+					&& (pPicked->Refinery || isFirstCoreFactoryPick
+						|| (pHouse->HasLowPower() && pPicked->PowerBonus > pPicked->PowerDrain)
 						|| (techFloorPick && bestBldIdx == bestTechStepIdx
 							&& (techAlternatesWithRefinery || techStepWaited >= TechStepRefineryYieldFrames)));
 
@@ -5240,7 +5246,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	bool newestTankOrLightIsRepairer = false;
 	// Repairers of ours (IsRepairerUnit: an IFV with an engineer too), within ownedGroundCombatUnits.
 	int ownedRepairerVehicles = 0;
-	int ownedSuicideVehicles = 0;
+	int idleUnlaunchedSuicideVehicles = 0;
 	// Armed ground vehicles whose main gun reaches ArtilleryRangeCells, unfolded siege guns included
 	// (the rest of ownedGroundCombatUnits is their front line).
 	int ownedArtilleryVehicles = 0;
@@ -5297,13 +5303,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		// An MCV aboard one of our transports is still ours and still undeployed: out of sight in the
 		// hold it let the next one be built, five MCVs for one yard (match #10267).
 		if (pOwnedU && pOwnedU->Owner == pHouse && pOwnedU->InLimbo && pOwnedU->IsAlive && pOwnedU->Type
-			&& pOwnedU->Transporter && pOwnedU->Transporter->Owner == pHouse)
+			&& pOwnedU->Transporter && pOwnedU->Transporter->Owner == pHouse
+			&& pOwnedU->Type->DeploysInto && pOwnedU->Type->DeploysInto->ConstructionYard)
 		{
-			if (pOwnedU->Type->DeploysInto && pOwnedU->Type->DeploysInto->ConstructionYard)
-				ownsUndeployedMCV = true;
-
-			if (IsVehicleRaiderType(pOwnedU->Type))
-				ownedSuicideVehicles++;
+			ownsUndeployedMCV = true;
 		}
 
 		if (pOwnedU && pOwnedU->Owner == pHouse && !pOwnedU->InLimbo && pOwnedU->IsAlive && pOwnedU->Type)
@@ -5311,8 +5314,15 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			auto const pOwnedType = pOwnedU->Type;
 			const bool isOwnedSuicideVehicle = IsVehicleRaiderType(pOwnedType);
 
-			if (isOwnedSuicideVehicle)
-				ownedSuicideVehicles++;
+			auto const pUAtkTech = abstract_cast<TechnoClass*>(pOwnedU->Target);
+			const bool uActivelyAttackingEnemy = pUAtkTech && pUAtkTech->IsAlive && !pUAtkTech->InLimbo
+				&& pUAtkTech->Owner && pUAtkTech->Owner != pHouse && !pHouse->IsAlliedWith(pUAtkTech->Owner);
+			if (isOwnedSuicideVehicle && !IsLeavingItsFactory(pOwnedU) && !IsSneakStrikeActive(pHouse, pOwnedU->UniqueID)
+				&& !IsPlanMember(pHouse, pOwnedU->UniqueID) && !IsInTransportOp(pHouse, pOwnedU->UniqueID)
+				&& !uActivelyAttackingEnemy)
+			{
+				idleUnlaunchedSuicideVehicles++;
+			}
 
 			const auto pOwnedWpn = pOwnedType->GetWeapon(0) ? pOwnedType->GetWeapon(0)->WeaponType : nullptr;
 			if (!pOwnedType->Harvester && !pOwnedType->ResourceGatherer
@@ -6822,16 +6832,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 		if (isSuicideVehicle)
 		{
-			// Suicide demolition trucks are tactical strike raiders, never frontline escorts: keep at most
-			// 2 active at once (3 when rich with a full tank army), and only once a solid tank core stands.
-			const int suicideVehicleCap = (money >= 30000 && ownedMainTanks >= 14) ? 3 : 2;
-			const int activeOrQueuedSuicides = ownedSuicideVehicles
-				+ (!isUnitInProgress && inProgressUnitIdx >= 0
-					&& IsVehicleRaiderType(UnitTypeClass::Array.GetItem(inProgressUnitIdx)) ? 1 : 0);
-
-			if (ownedSuicideVehicles >= suicideVehicleCap
-				|| (!isUnitInProgress && (activeOrQueuedSuicides >= suicideVehicleCap || ownedMainTanks < 6
-					|| ownVehiclesAndShips < 10 || GetMacroState(pHouse).CounterUnderAttack))
+			// No ceiling by count while suicide trucks are actively launched on missions: only pause building
+			// another one while an existing truck sits unlaunched without a strike/transport mission.
+			if (idleUnlaunchedSuicideVehicles >= 1
+				|| (!isUnitInProgress && GetMacroState(pHouse).CounterUnderAttack)
 				|| canSafelySaveForMCV || savingForIslandTransport)
 			{
 				continue;
@@ -7738,7 +7742,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	// riflemen, no soldier left to garrison the city).
 	int ownedHealerInfantry = 0;
 	int ownedFighterInfantry = 0;
-	int ownedSuicideInfantry = 0;
+	int idleUnlaunchedSuicideInfantry = 0;
 
 	for (auto const pOwnI : InfantryClass::Array)
 	{
@@ -7746,7 +7750,17 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			continue;
 
 		if (IsSuicideInfantryType(pOwnI->Type))
-			ownedSuicideInfantry++;
+		{
+			auto const pIAtkTech = abstract_cast<TechnoClass*>(pOwnI->Target);
+			const bool iActivelyAttackingEnemy = pIAtkTech && pIAtkTech->IsAlive && !pIAtkTech->InLimbo
+				&& pIAtkTech->Owner && pIAtkTech->Owner != pHouse && !pHouse->IsAlliedWith(pIAtkTech->Owner);
+			if (!pOwnI->InLimbo && !IsLeavingItsFactory(pOwnI) && !IsSneakStrikeActive(pHouse, pOwnI->UniqueID)
+				&& !IsPlanMember(pHouse, pOwnI->UniqueID) && !IsInTransportOp(pHouse, pOwnI->UniqueID)
+				&& !iActivelyAttackingEnemy)
+			{
+				idleUnlaunchedSuicideInfantry++;
+			}
+		}
 		else if (IsHealerInfantryType(pOwnI->Type))
 			ownedHealerInfantry++;
 		else if (!IsSpecialistInfantryType(pOwnI->Type) && pOwnI->Type->GetWeapon(0) && pOwnI->Type->GetWeapon(0)->WeaponType)
@@ -7770,10 +7784,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		if (!isInfInProgress && IsHealerInfantryType(pInf) && ownedHealerInfantry * 10 >= std::max(1, ownedFighterInfantry))
 			continue;
 
-		const int suicideInfCap = (money >= 20000 && ownedFighterInfantry >= 12) ? 6 : 4;
-
-		if (IsSuicideInfantryType(pInf) && (ownedSuicideInfantry >= suicideInfCap
-			|| (!isInfInProgress && (ownedFighterInfantry < 6 || GetMacroState(pHouse).CounterUnderAttack))))
+		if (IsSuicideInfantryType(pInf) && (idleUnlaunchedSuicideInfantry >= 2
+			|| (!isInfInProgress && GetMacroState(pHouse).CounterUnderAttack)))
 		{
 			continue;
 		}
@@ -7888,8 +7900,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			// A city to fill (more than a squad of seats left): the bonus grows with the seats, and a
 			// cheap soldier holds a seat as well as an expensive one, so the cost no longer adds.
 			constexpr int SquadSeats = 4;
-			constexpr int CitySeatsCounted = 24;
-			constexpr int CitySeatBonus = 40;
+			constexpr int CitySeatsCounted = 12;
+			constexpr int CitySeatBonus = 25;
 			const int cityRoom = std::min(CitySeatsCounted, std::max(0, urbanGarrisonRoom - SquadSeats));
 			const int garrisonBonus = 260 + std::min(240, GarrisonFirepowerOf(pInf)) + std::min(SquadSeats, urbanGarrisonRoom) * 30
 				+ cityRoom * CitySeatBonus;
@@ -7974,9 +7986,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	// the scored pick, with or without money in hand (a soldier is cheap and is paid as the money
 	// comes in; a house is often broke for minutes and the seat would go to a dearer pick). The
 	// first engineer still goes first, and under attack the answer to the threat does.
-	const int garrisonTrainingCap = 40 + pHouse->NumWarFactories * 15;
+	constexpr int GarrisonOverrideSeats = 24;
 	if (bestGarrisonIdx >= 0 && bestInfIdx != bestGarrisonIdx && !GetMacroState(pHouse).CounterUnderAttack
-		&& (garrisonedInfantry < garrisonTrainingCap || money >= 4000))
+		&& garrisonedInfantry < GarrisonOverrideSeats)
 	{
 		auto const pScoredPick = bestInfIdx >= 0 ? InfantryTypeClass::Array.GetItem(bestInfIdx) : nullptr;
 
@@ -8100,17 +8112,13 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		}
 	}
 
-	const bool warFactoryStarvedByInfantry = pHouse->NumWarFactories >= 1 && bestUnitIdx >= 0 && hasActiveUnitIncome
-		&& ((ownedMainTanks < std::min(3, tankFloor) && money < 1000 && pHouse->OwnedInfantry >= 18)
-			|| (garrisonedInfantry >= 55 && ownedGroundCombatUnits < 4 && money < 2500));
-
 	const bool islandInfantryQueueFull
 		= (features[21] > 0 && waitingBattalionSizeOnIslands > ownedTransportTotalCapacity + 12);
 	// No ceiling by number: the barracks wait while soldiers go unused (IsArmyKindUnused), crowd
-	// the base or a mini-island barracks, or starve a War Factory below its tank floor on urban maps.
+	// the base or a mini-island barracks, or wait on the islands for more transports than we own.
 	constexpr int IslandQueueInfantry = 45;
 	const bool baseInfantrySaturated = IsArmyKindUnused(pHouse, ArmyKind::Infantry) || congestedBaseInfantry >= 24
-		|| strandedIslandBarracks || warFactoryStarvedByInfantry
+		|| strandedIslandBarracks
 		|| (islandInfantryQueueFull && pHouse->OwnedInfantry - garrisonedInfantry >= IslandQueueInfantry);
 
 	// Only pause secondary queues to ration finite credits when all income

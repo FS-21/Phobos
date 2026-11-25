@@ -3460,6 +3460,71 @@ namespace
 							return;
 					}
 
+					// Never leave an unassigned demolition truck parked next to our own structures where a stray
+					// hit would detonate inside our base: move it out to a safe perimeter cell 12..16 cells away.
+					if (wideBlast && pFoot->CurrentMission != Mission::Move)
+					{
+						bool nearOwnBld = false;
+
+						for (auto const pOwnB : pHouse->Buildings)
+						{
+							if (pOwnB && pOwnB->IsAlive && !pOwnB->InLimbo && pOwnB->GetMapCoords().DistanceFrom(curCell) <= 10.0)
+							{
+								nearOwnBld = true;
+								break;
+							}
+						}
+
+						if (nearOwnBld)
+						{
+							const int homeZone = ObjectZone(pFoot, pType->MovementZone);
+
+							for (int ring = 12; ring <= 16; ring += 2)
+							{
+								bool movedOut = false;
+
+								for (int dy = -ring; dy <= ring && !movedOut; dy += 4)
+								{
+									for (int dx = -ring; dx <= ring; dx += 4)
+									{
+										if (std::max(std::abs(dx), std::abs(dy)) < ring)
+											continue;
+
+										const CellStruct c { static_cast<short>(curCell.X + dx), static_cast<short>(curCell.Y + dy) };
+										auto const pParkCell = MapClass::Instance.TryGetCellAt(c);
+
+										if (!pParkCell || !pParkCell->IsClearToMove(pType->SpeedType, false, false, -1, pType->MovementZone, -1, false)
+											|| MapClass::Instance.GetMovementZoneType(c, pType->MovementZone, false) != homeZone)
+										{
+											continue;
+										}
+
+										bool clearOfOwnBlds = true;
+
+										for (auto const pOwnB : pHouse->Buildings)
+										{
+											if (pOwnB && pOwnB->IsAlive && !pOwnB->InLimbo && pOwnB->GetMapCoords().DistanceFrom(c) <= 10.0)
+											{
+												clearOfOwnBlds = false;
+												break;
+											}
+										}
+
+										if (clearOfOwnBlds && !IsCellInKnownEnemyDefenseReach(pHouse, c, 2))
+										{
+											IssueMoveOrder(pFoot, pParkCell, 2.0);
+											movedOut = true;
+											break;
+										}
+									}
+								}
+
+								if (movedOut)
+									break;
+							}
+						}
+					}
+
 					return;
 				}
 
