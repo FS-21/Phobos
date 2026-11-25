@@ -309,11 +309,20 @@ namespace
 		std::array<bool, 40> BestFree {};
 	};
 
-	std::array<std::array<PickEval, 5>, 8> PickEvals {};
+	// One evaluation per factory of the engine: 0 structures, 1 infantry, 2 vehicles, 3 naval,
+	// 4 aircraft, 5 base defenses. Structures and base defenses (BuildCat::Combat) are two factories
+	// that build at the same time: with one evaluation for both, a defense led 73% of the building
+	// starts that another class made (25 training matches, 2026-11-25), and each of them was
+	// recorded as overridden. The trajectory step files both under queue 0.
+	constexpr int PickEvalStructures = 0;
+	constexpr int PickEvalDefenses = 5;
+	constexpr int PickEvalQueues = 6;
+
+	std::array<std::array<PickEval, PickEvalQueues>, 8> PickEvals {};
 
 	void ResetPickEval(const HouseClass* pHouse, int queue, int activeExpert)
 	{
-		if (!NeuralAI::HeadlessMode || !pHouse || pHouse->ArrayIndex < 0 || pHouse->ArrayIndex >= 8 || queue < 0 || queue >= 5)
+		if (!NeuralAI::HeadlessMode || !pHouse || pHouse->ArrayIndex < 0 || pHouse->ArrayIndex >= 8 || queue < 0 || queue >= PickEvalQueues)
 			return;
 
 		auto& eval = PickEvals[pHouse->ArrayIndex][queue];
@@ -327,7 +336,7 @@ namespace
 	void NotePickCandidate(const HouseClass* pHouse, int queue, int candSlot, bool candFree, int typeIndex, int score)
 	{
 		if (!NeuralAI::HeadlessMode || !pHouse || pHouse->ArrayIndex < 0 || pHouse->ArrayIndex >= 8
-			|| queue < 0 || queue >= 5 || candSlot < 0 || candSlot >= 40)
+			|| queue < 0 || queue >= PickEvalQueues || candSlot < 0 || candSlot >= 40)
 		{
 			return;
 		}

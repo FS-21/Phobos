@@ -695,7 +695,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				if (queue < 0)
 					continue;
 
-				auto const& eval = PickEvals[hIdx][queue];
+				// A base defense comes from its own factory, with its own evaluation.
+				const int evalQueue = (queue == 0 && static_cast<BuildingTypeClass*>(pObjType)->BuildCat == BuildCat::Combat)
+					? PickEvalDefenses : queue;
+				auto const& eval = PickEvals[hIdx][evalQueue];
 
 				if (!eval.Valid)
 					continue;
@@ -3619,7 +3622,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		};
 
 		if (NeuralAI::HeadlessMode)
-			ResetPickEval(pHouse, 0, pExt->NeuralAI_ActiveExpert);
+		{
+			ResetPickEval(pHouse, PickEvalStructures, pExt->NeuralAI_ActiveExpert);
+			ResetPickEval(pHouse, PickEvalDefenses, pExt->NeuralAI_ActiveExpert);
+		}
 
 		for (auto const pBld : BuildingTypeClass::Array)
 		{
@@ -4699,7 +4705,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			}
 
 			if (NeuralAI::HeadlessMode)
-				NotePickCandidate(pHouse, 0, candSlot, candFree, pBld->ArrayIndex, score);
+				NotePickCandidate(pHouse, pBld->BuildCat == BuildCat::Combat ? PickEvalDefenses : PickEvalStructures,
+					candSlot, candFree, pBld->ArrayIndex, score);
 
 			if (score > bestBldScore)
 			{
