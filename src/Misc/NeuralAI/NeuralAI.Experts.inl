@@ -214,55 +214,72 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 
 	// Learned non-linear expert gate (SchemaVersion >= 3: dynamic INT16 256 -> GateHidden -> 10 with TanhLUT16;
 	// SchemaVersion == 2 fallback: legacy 256 -> 32 -> 10 INT8 MLP).
+	// Uses per-slot reference base override in headless evaluations when present so untrained/gate
+	// opponents execute their own frozen base brain instead of sharing NeuralAI::BaseMappedView.
+	size_t activeBaseSize = 0;
+	const uint8_t* const pActiveBaseView = SelectHouseBaseModel(
+		pHouse, NeuralAI::BaseMappedView, NeuralAI::BaseMappedSize, activeBaseSize);
 	std::array<int, NeuralAI::NumSpecialists> learnedGateScores {};
 
-	if (NeuralAI::BaseMappedView && NeuralAI::BaseMappedSize >= sizeof(AIBaseHeader))
+	if (pActiveBaseView && activeBaseSize >= sizeof(AIBaseHeader))
 	{
-		auto const pBaseHdr = reinterpret_cast<const AIBaseHeader*>(NeuralAI::BaseMappedView);
+		auto const pBaseHdr = reinterpret_cast<const AIBaseHeader*>(pActiveBaseView);
 
-		if (pBaseHdr->SchemaVersion >= 3
-			&& pBaseHdr->GateWeightsOffset >= sizeof(AIBaseHeader)
-			&& pBaseHdr->TanhLut16Offset >= sizeof(AIBaseHeader)
-			&& static_cast<size_t>(pBaseHdr->TanhLut16Offset) + 2048 * sizeof(int16_t) <= NeuralAI::BaseMappedSize)
+		if (pBaseHdr->SchemaVersion >= 3)
 		{
-			const uint32_t gateHidden = std::clamp(pBaseHdr->GateHiddenDim > 0 ? pBaseHdr->GateHiddenDim : 64u, 16u, 128u);
-			const size_t gw1Bytes = static_cast<size_t>(gateHidden) * NeuralAI::InputVectorSize * sizeof(int16_t);
-			const size_t gb1Bytes = static_cast<size_t>(gateHidden) * sizeof(int16_t);
-			const size_t gw2Bytes = static_cast<size_t>(NeuralAI::NumSpecialists) * gateHidden * sizeof(int16_t);
-			const size_t gb2Bytes = static_cast<size_t>(NeuralAI::NumSpecialists) * sizeof(int16_t);
-			const size_t gateBlockBytes = gw1Bytes + gb1Bytes + gw2Bytes + gb2Bytes;
-
-			if (static_cast<size_t>(pBaseHdr->GateWeightsOffset) + gateBlockBytes <= NeuralAI::BaseMappedSize)
+			if (pBaseHdr->GateHiddenDim < 16u || pBaseHdr->GateHiddenDim > 128u
+				|| pBaseHdr->GateWeightsOffset < sizeof(AIBaseHeader)
+				|| pBaseHdr->TanhLut16Offset < sizeof(AIBaseHeader)
+				|| static_cast<size_t>(pBaseHdr->TanhLut16Offset) + 2048 * sizeof(int16_t) > activeBaseSize)
 			{
-				const uint8_t* pGateBase = NeuralAI::BaseMappedView + pBaseHdr->GateWeightsOffset;
-				const int16_t* pTanhLut16 = reinterpret_cast<const int16_t*>(NeuralAI::BaseMappedView + pBaseHdr->TanhLut16Offset);
-				const int16_t* pGW1 = reinterpret_cast<const int16_t*>(pGateBase);
-				const int16_t* pGB1 = reinterpret_cast<const int16_t*>(pGateBase + gw1Bytes);
-				const int16_t* pGW2 = reinterpret_cast<const int16_t*>(pGateBase + gw1Bytes + gb1Bytes);
-				const int16_t* pGB2 = reinterpret_cast<const int16_t*>(pGateBase + gw1Bytes + gb1Bytes + gw2Bytes);
-				std::array<int16_t, 128> gateHiddenAct {};
-
-				for (uint32_t h = 0; h < gateHidden; ++h)
+				if (!LoggedInvalidV3GateHeader)
 				{
-					int32_t acc = static_cast<int32_t>(pGB1[h]) * 16384;
-					const int16_t* pRow = pGW1 + h * NeuralAI::InputVectorSize;
-
-					for (int i = 0; i < NeuralAI::InputVectorSize; ++i)
-						acc += static_cast<int32_t>(features[i]) * static_cast<int32_t>(pRow[i]);
-
-					const int lutIdx = std::clamp((acc >> 14) + 1024, 0, 2047);
-					gateHiddenAct[h] = pTanhLut16[lutIdx];
+					LoggedInvalidV3GateHeader = true;
+					Debug::Log("[NeuralAI] Rejecting invalid SchemaVersion %u gate header (GateHiddenDim=%u, GateOffset=%u, MappedSize=%zu).\n",
+						pBaseHdr->SchemaVersion, pBaseHdr->GateHiddenDim, pBaseHdr->GateWeightsOffset, activeBaseSize);
 				}
+			}
+			else
+			{
+				const uint32_t gateHidden = pBaseHdr->GateHiddenDim;
+				const size_t gw1Bytes = static_cast<size_t>(gateHidden) * NeuralAI::InputVectorSize * sizeof(int16_t);
+				const size_t gb1Bytes = static_cast<size_t>(gateHidden) * sizeof(int16_t);
+				const size_t gw2Bytes = static_cast<size_t>(NeuralAI::NumSpecialists) * gateHidden * sizeof(int16_t);
+				const size_t gb2Bytes = static_cast<size_t>(NeuralAI::NumSpecialists) * sizeof(int16_t);
+				const size_t gateBlockBytes = gw1Bytes + gb1Bytes + gw2Bytes + gb2Bytes;
 
-				for (int e = 0; e < NeuralAI::NumSpecialists; ++e)
+				if (static_cast<size_t>(pBaseHdr->GateWeightsOffset) + gateBlockBytes <= activeBaseSize)
 				{
-					int32_t acc = static_cast<int32_t>(pGB2[e]) * 4096;
-					const int16_t* pRow = pGW2 + e * gateHidden;
+					const uint8_t* pGateBase = pActiveBaseView + pBaseHdr->GateWeightsOffset;
+					const int16_t* pTanhLut16 = reinterpret_cast<const int16_t*>(pActiveBaseView + pBaseHdr->TanhLut16Offset);
+					const int16_t* pGW1 = reinterpret_cast<const int16_t*>(pGateBase);
+					const int16_t* pGB1 = reinterpret_cast<const int16_t*>(pGateBase + gw1Bytes);
+					const int16_t* pGW2 = reinterpret_cast<const int16_t*>(pGateBase + gw1Bytes + gb1Bytes);
+					const int16_t* pGB2 = reinterpret_cast<const int16_t*>(pGateBase + gw1Bytes + gb1Bytes + gw2Bytes);
+					std::array<int16_t, 128> gateHiddenAct {};
 
 					for (uint32_t h = 0; h < gateHidden; ++h)
-						acc += (static_cast<int32_t>(gateHiddenAct[h]) * static_cast<int32_t>(pRow[h])) >> 4;
+					{
+						int32_t acc = static_cast<int32_t>(pGB1[h]) * 16384;
+						const int16_t* pRow = pGW1 + h * NeuralAI::InputVectorSize;
 
-					learnedGateScores[e] = std::clamp(acc >> 13, -240, 240);
+						for (int i = 0; i < NeuralAI::InputVectorSize; ++i)
+							acc += static_cast<int32_t>(features[i]) * static_cast<int32_t>(pRow[i]);
+
+						const int lutIdx = std::clamp((acc >> 14) + 1024, 0, 2047);
+						gateHiddenAct[h] = pTanhLut16[lutIdx];
+					}
+
+					for (int e = 0; e < NeuralAI::NumSpecialists; ++e)
+					{
+						int32_t acc = static_cast<int32_t>(pGB2[e]) * 4096;
+						const int16_t* pRow = pGW2 + e * gateHidden;
+
+						for (uint32_t h = 0; h < gateHidden; ++h)
+							acc += (static_cast<int32_t>(gateHiddenAct[h]) * static_cast<int32_t>(pRow[h])) >> 4;
+
+						learnedGateScores[e] = std::clamp(acc >> 13, -240, 240);
+					}
 				}
 			}
 		}
@@ -273,9 +290,9 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 				= (GateHidden * NeuralAI::InputVectorSize) + (GateHidden * sizeof(int16_t))
 				+ (NeuralAI::NumSpecialists * GateHidden) + (NeuralAI::NumSpecialists * sizeof(int16_t));
 
-			if (static_cast<size_t>(pBaseHdr->GateWeightsOffset) + GateBlockBytes <= NeuralAI::BaseMappedSize)
+			if (static_cast<size_t>(pBaseHdr->GateWeightsOffset) + GateBlockBytes <= activeBaseSize)
 			{
-				const uint8_t* pGateBase = NeuralAI::BaseMappedView + pBaseHdr->GateWeightsOffset;
+				const uint8_t* pGateBase = pActiveBaseView + pBaseHdr->GateWeightsOffset;
 				const int8_t* pGW1 = reinterpret_cast<const int8_t*>(pGateBase);
 				const int16_t* pGB1 = reinterpret_cast<const int16_t*>(pGateBase + GateHidden * NeuralAI::InputVectorSize);
 				const int8_t* pGW2 = reinterpret_cast<const int8_t*>(
@@ -376,7 +393,7 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 			if (NeuralAI::AllowBackpackInference && NeuralAI::BackpackLoaded)
 			{
 				const uint32_t eIdx = NeuralBackpackEntryIndex(pHouse->SideIndex, curArch, e);
-				uncertainty = static_cast<int>(250.0 / std::sqrt(1.0 + static_cast<double>(policy.Entries[eIdx].VisitCount)));
+				uncertainty = ExactInvSqrtScaled(250, policy.Entries[eIdx].VisitCount);
 			}
 
 			if (finalScores[e] + uncertainty >= bestExpScore - 300)
@@ -417,31 +434,37 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 		ExpertTicksByPhase[pHouse->ArrayIndex][routingPhase][activeExpert]++;
 	}
 
-	// Find runner-up non-vetoed specialist for Top-2 Soft Blending when two roles are closely tied
-	// (e.g., expanding to distant ore while actively fighting). Disabled under forced single-expert focus.
+	// Single-expert forward pass by default so execution matches AITrajectoryStep::ActiveExpert 1:1
+	// (no unrecorded runner-up expert gradient leakage and half the MoE forward cost).
+	// If Top-2 blending is ever enabled alongside dual-expert trajectory logging, its weight ramps
+	// continuously to 50/50 at scoreGap == 0 so ties never jump across 65/35 <-> 35/65.
+	constexpr bool EnableTop2ExpertBlend = false;
 	int secondExpert = -1;
-	int secondBestScore = -999999;
-	if (!(NeuralAI::TrainingMode && TrainingFocus().Expert >= 0))
+	int secondWeightPct = 0;
+	if constexpr (EnableTop2ExpertBlend)
 	{
-		for (int e = 0; e < NeuralAI::NumSpecialists; ++e)
+		int secondBestScore = -999999;
+		if (!(NeuralAI::TrainingMode && TrainingFocus().Expert >= 0))
 		{
-			if (e == activeExpert || vetoed[e])
-				continue;
-			if (diffIdx == 2 && (e == 4 || e == 5 || e == 7))
-				continue;
-			if (finalScores[e] > secondBestScore)
+			for (int e = 0; e < NeuralAI::NumSpecialists; ++e)
 			{
-				secondBestScore = finalScores[e];
-				secondExpert = e;
+				if (e == activeExpert || vetoed[e])
+					continue;
+				if (diffIdx == 2 && (e == 4 || e == 5 || e == 7))
+					continue;
+				if (finalScores[e] > secondBestScore)
+				{
+					secondBestScore = finalScores[e];
+					secondExpert = e;
+				}
 			}
 		}
-	}
-	int secondWeightPct = 0;
-	if (secondExpert >= 0 && finalScores[activeExpert] > -900000 && secondBestScore > -900000)
-	{
-		const int scoreGap = std::max(0, finalScores[activeExpert] - secondBestScore);
-		if (scoreGap < 180)
-			secondWeightPct = ((180 - scoreGap) * 35) / 180;
+		if (secondExpert >= 0 && finalScores[activeExpert] > -900000 && secondBestScore > -900000)
+		{
+			const int scoreGap = std::max(0, finalScores[activeExpert] - secondBestScore);
+			if (scoreGap < 180)
+				secondWeightPct = ((180 - scoreGap) * 50) / 180;
+		}
 	}
 
 	// Run Fixed-Point Inference on the mapped Base Model:
@@ -450,9 +473,9 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 	// - SchemaVersion 1 fallback: legacy 256 -> 128 linear projection
 	const AIBaseHeader* pMappedBaseHdr = nullptr;
 
-	if (NeuralAI::BaseMappedView && NeuralAI::BaseMappedSize >= sizeof(AIBaseHeader))
+	if (pActiveBaseView && activeBaseSize >= sizeof(AIBaseHeader))
 	{
-		auto const pHdr = reinterpret_cast<const AIBaseHeader*>(NeuralAI::BaseMappedView);
+		auto const pHdr = reinterpret_cast<const AIBaseHeader*>(pActiveBaseView);
 		pMappedBaseHdr = pHdr;
 
 		auto const resolveExpertOffset = [pHdr](int expIdx) -> uint32_t
@@ -461,74 +484,94 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 				? pHdr->ExpertWeightsOffset[expIdx]
 				: pHdr->ExtraExpertWeightsOffset[expIdx - 8];
 			if (off == 0)
+			{
+				if (!LoggedExpertOffsetFallback)
+				{
+					LoggedExpertOffsetFallback = true;
+					Debug::Log("[NeuralAI] Warning: expert %d has zero weights offset in ai_base.bin (NumExperts=%u), falling back.\n",
+						expIdx, pHdr->NumExperts);
+				}
 				off = pHdr->ExpertWeightsOffset[expIdx % 8];
-			if (off == 0)
-				off = pHdr->ExpertWeightsOffset[expIdx % 6];
+				if (off == 0)
+					off = pHdr->ExpertWeightsOffset[expIdx % 6];
+			}
 			return off;
 		};
 
-		if (pHdr->SchemaVersion >= 3
-			&& pHdr->TanhLut16Offset >= sizeof(AIBaseHeader)
-			&& static_cast<size_t>(pHdr->TanhLut16Offset) + 2048 * sizeof(int16_t) <= NeuralAI::BaseMappedSize)
+		if (pHdr->SchemaVersion >= 3)
 		{
-			const int hiddenDim = static_cast<int>(std::clamp(pHdr->MlpHiddenDim > 0 ? pHdr->MlpHiddenDim : 256u, 64u, 512u));
-			const size_t w1Bytes = static_cast<size_t>(hiddenDim) * NeuralAI::InputVectorSize * sizeof(int16_t);
-			const size_t b1Bytes = static_cast<size_t>(hiddenDim) * sizeof(int16_t);
-			const size_t w2Bytes = static_cast<size_t>(NeuralAI::OutputVectorSize) * hiddenDim * sizeof(int16_t);
-			const size_t b2Bytes = static_cast<size_t>(NeuralAI::OutputVectorSize) * sizeof(int16_t);
-			const size_t mlpBytes = w1Bytes + b1Bytes + w2Bytes + b2Bytes;
-			const int16_t* pTanhLut16 = reinterpret_cast<const int16_t*>(NeuralAI::BaseMappedView + pHdr->TanhLut16Offset);
-
-			auto const evalExpertV3 = [&](int expIdx, std::array<int16_t, OutputVectorSize>& dst) -> bool
+			if (pHdr->MlpHiddenDim < 64u || pHdr->MlpHiddenDim > 512u
+				|| pHdr->TanhLut16Offset < sizeof(AIBaseHeader)
+				|| static_cast<size_t>(pHdr->TanhLut16Offset) + 2048 * sizeof(int16_t) > activeBaseSize)
 			{
-				const uint32_t expOff = resolveExpertOffset(expIdx);
-				if (expOff < sizeof(AIBaseHeader) || static_cast<size_t>(expOff) + mlpBytes > NeuralAI::BaseMappedSize)
-					return false;
-
-				const uint8_t* pBlock = NeuralAI::BaseMappedView + expOff;
-				const int16_t* pW1 = reinterpret_cast<const int16_t*>(pBlock);
-				const int16_t* pB1 = reinterpret_cast<const int16_t*>(pBlock + w1Bytes);
-				const int16_t* pW2 = reinterpret_cast<const int16_t*>(pBlock + w1Bytes + b1Bytes);
-				const int16_t* pB2 = reinterpret_cast<const int16_t*>(pBlock + w1Bytes + b1Bytes + w2Bytes);
-				std::array<int16_t, 512> hiddenAct {};
-
-				for (int h = 0; h < hiddenDim; ++h)
+				if (!LoggedInvalidV3MlpHeader)
 				{
-					int32_t acc = static_cast<int32_t>(pB1[h]) * 16384;
-					const int16_t* pRow = pW1 + (h * NeuralAI::InputVectorSize);
-
-					for (int i = 0; i < NeuralAI::InputVectorSize; ++i)
-						acc += static_cast<int32_t>(features[i]) * static_cast<int32_t>(pRow[i]);
-
-					const int lutIdx = std::clamp((acc >> 14) + 1024, 0, 2047);
-					hiddenAct[h] = pTanhLut16[lutIdx];
+					LoggedInvalidV3MlpHeader = true;
+					Debug::Log("[NeuralAI] Rejecting invalid SchemaVersion %u MLP header (MlpHiddenDim=%u, TanhLut16Offset=%u, MappedSize=%zu).\n",
+						pHdr->SchemaVersion, pHdr->MlpHiddenDim, pHdr->TanhLut16Offset, activeBaseSize);
 				}
+			}
+			else
+			{
+				const int hiddenDim = static_cast<int>(pHdr->MlpHiddenDim);
+				const size_t w1Bytes = static_cast<size_t>(hiddenDim) * NeuralAI::InputVectorSize * sizeof(int16_t);
+				const size_t b1Bytes = static_cast<size_t>(hiddenDim) * sizeof(int16_t);
+				const size_t w2Bytes = static_cast<size_t>(NeuralAI::OutputVectorSize) * hiddenDim * sizeof(int16_t);
+				const size_t b2Bytes = static_cast<size_t>(NeuralAI::OutputVectorSize) * sizeof(int16_t);
+				const size_t mlpBytes = w1Bytes + b1Bytes + w2Bytes + b2Bytes;
+				const int16_t* pTanhLut16 = reinterpret_cast<const int16_t*>(pActiveBaseView + pHdr->TanhLut16Offset);
 
-				for (int o = 0; o < NeuralAI::OutputVectorSize; ++o)
+				auto const evalExpertV3 = [&](int expIdx, std::array<int16_t, OutputVectorSize>& dst) -> bool
 				{
-					int32_t acc = static_cast<int32_t>(pB2[o]) * 4096;
-					const int16_t* pRow = pW2 + (o * hiddenDim);
+					const uint32_t expOff = resolveExpertOffset(expIdx);
+					if (expOff < sizeof(AIBaseHeader) || static_cast<size_t>(expOff) + mlpBytes > activeBaseSize)
+						return false;
+
+					const uint8_t* pBlock = pActiveBaseView + expOff;
+					const int16_t* pW1 = reinterpret_cast<const int16_t*>(pBlock);
+					const int16_t* pB1 = reinterpret_cast<const int16_t*>(pBlock + w1Bytes);
+					const int16_t* pW2 = reinterpret_cast<const int16_t*>(pBlock + w1Bytes + b1Bytes);
+					const int16_t* pB2 = reinterpret_cast<const int16_t*>(pBlock + w1Bytes + b1Bytes + w2Bytes);
+					std::array<int16_t, 512> hiddenAct {};
 
 					for (int h = 0; h < hiddenDim; ++h)
-						acc += (static_cast<int32_t>(hiddenAct[h]) * static_cast<int32_t>(pRow[h])) >> 4;
+					{
+						int32_t acc = static_cast<int32_t>(pB1[h]) * 16384;
+						const int16_t* pRow = pW1 + (h * NeuralAI::InputVectorSize);
 
-					const int lutIdx = std::clamp((acc >> 13) + 1024, 0, 2047);
-					dst[o] = pTanhLut16[lutIdx];
-				}
-				return true;
-			};
+						for (int i = 0; i < NeuralAI::InputVectorSize; ++i)
+							acc += static_cast<int32_t>(features[i]) * static_cast<int32_t>(pRow[i]);
 
-			if (evalExpertV3(activeExpert, outScores) && secondWeightPct > 0)
-			{
-				std::array<int16_t, OutputVectorSize> secondScores {};
-				if (evalExpertV3(secondExpert, secondScores))
-				{
-					const int firstWeightPct = 100 - secondWeightPct;
+						const int lutIdx = std::clamp((acc >> 14) + 1024, 0, 2047);
+						hiddenAct[h] = pTanhLut16[lutIdx];
+					}
+
 					for (int o = 0; o < NeuralAI::OutputVectorSize; ++o)
 					{
-						outScores[o] = static_cast<int16_t>(
-							(static_cast<int32_t>(outScores[o]) * firstWeightPct
-								+ static_cast<int32_t>(secondScores[o]) * secondWeightPct) / 100);
+						int32_t acc = static_cast<int32_t>(pB2[o]) * 4096;
+						const int16_t* pRow = pW2 + (o * hiddenDim);
+
+						for (int h = 0; h < hiddenDim; ++h)
+							acc += (static_cast<int32_t>(hiddenAct[h]) * static_cast<int32_t>(pRow[h])) >> 4;
+
+						const int lutIdx = std::clamp((acc >> 13) + 1024, 0, 2047);
+						dst[o] = pTanhLut16[lutIdx];
+					}
+					return true;
+				};
+
+				if (evalExpertV3(activeExpert, outScores) && secondWeightPct > 0)
+				{
+					std::array<int16_t, OutputVectorSize> secondScores {};
+					if (evalExpertV3(secondExpert, secondScores))
+					{
+						const int firstWeightPct = 100 - secondWeightPct;
+						for (int o = 0; o < NeuralAI::OutputVectorSize; ++o)
+						{
+							outScores[o] = static_cast<int16_t>(
+								(static_cast<int32_t>(outScores[o]) * firstWeightPct
+									+ static_cast<int32_t>(secondScores[o]) * secondWeightPct) / 100);
+						}
 					}
 				}
 			}
@@ -543,9 +586,9 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 			constexpr size_t b2Bytes = NeuralAI::OutputVectorSize * sizeof(int16_t);
 			constexpr size_t mlpBytes = w1Bytes + b1Bytes + w2Bytes + b2Bytes;
 
-			if (offset >= sizeof(AIBaseHeader) && static_cast<size_t>(offset) + mlpBytes <= NeuralAI::BaseMappedSize)
+			if (offset >= sizeof(AIBaseHeader) && static_cast<size_t>(offset) + mlpBytes <= activeBaseSize)
 			{
-				const uint8_t* pBlock = NeuralAI::BaseMappedView + offset;
+				const uint8_t* pBlock = pActiveBaseView + offset;
 				const int8_t* pW1 = reinterpret_cast<const int8_t*>(pBlock);
 				const int16_t* pB1 = reinterpret_cast<const int16_t*>(pBlock + w1Bytes);
 				const int8_t* pW2 = reinterpret_cast<const int8_t*>(pBlock + w1Bytes + b1Bytes);
@@ -583,9 +626,9 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 			const size_t requiredBytes
 				= static_cast<size_t>(offset) + (NeuralAI::InputVectorSize * NeuralAI::OutputVectorSize);
 
-			if (offset >= sizeof(AIBaseHeader) && requiredBytes <= NeuralAI::BaseMappedSize)
+			if (offset >= sizeof(AIBaseHeader) && requiredBytes <= activeBaseSize)
 			{
-				const int8_t* weights = reinterpret_cast<const int8_t*>(NeuralAI::BaseMappedView + offset);
+				const int8_t* weights = reinterpret_cast<const int8_t*>(pActiveBaseView + offset);
 
 				for (int o = 0; o < NeuralAI::OutputVectorSize; ++o)
 				{
