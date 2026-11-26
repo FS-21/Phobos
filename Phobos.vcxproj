@@ -23,7 +23,9 @@
     <!-- src/ -->
     <ClCompile Include="src\Phobos.COM.cpp" />
     <ClCompile Include="src\Misc\NeuralAI\Hooks.NeuralAI.cpp" />
-    <ClCompile Include="src\Misc\NeuralAI\NeuralAI.cpp" />
+    <ClCompile Include="src\Misc\NeuralAI\NeuralAI.cpp">
+      <AdditionalOptions>%(AdditionalOptions) /bigobj</AdditionalOptions>
+    </ClCompile>
     <ClCompile Include="src\Phobos.cpp" />
     <ClCompile Include="src\Phobos.CRT.cpp" />
     <ClCompile Include="src\Phobos.Ext.cpp" />
