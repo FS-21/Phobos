@@ -5459,6 +5459,13 @@ namespace
 				sortFastest(group);
 				group.resize(std::min(group.size(), std::max(maxGround, group.size() / PlanStrikeIdleShare)));
 
+				// Too few of the units that damage it are idle: the factories are asked for them (StrikeWanted*).
+				if (hurtersOnly && group.size() < minGround)
+				{
+					macro.StrikeWantedTargetID = pTarget->UniqueID;
+					macro.StrikeWantedFrame = Unsorted::CurrentFrame;
+				}
+
 				// A ground strike needs the strength to beat what is known to guard the target: a
 				// group that cannot is not sent.
 				if (group.size() < minGround || !targetLessonAllows(pTarget->UniqueID, groupValueOf(group)) || groupValueOf(group) * 100

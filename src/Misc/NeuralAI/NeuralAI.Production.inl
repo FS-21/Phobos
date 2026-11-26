@@ -5241,6 +5241,20 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	const bool seaControlAcross = seaControl && seaMacro.EnemyAcrossWater;
 	// Army first (ArmyFirstShortCredits), for the unit queues.
 	const bool armyFirstShortUnits = pHouse->NumWarFactories >= 1 && money < ArmyFirstShortCredits;
+	// The building a strike lacks units for (StrikeWanted*), while it stands in enemy hands.
+	BuildingClass* pStrikeWantedTarget = nullptr;
+
+	if (Unsorted::CurrentFrame - GetMacroState(pHouse).StrikeWantedFrame <= StrikeWantedFrames)
+	{
+		pStrikeWantedTarget = FindBuildingByID(GetMacroState(pHouse).StrikeWantedTargetID);
+
+		if (pStrikeWantedTarget && (!pStrikeWantedTarget->IsAlive || pStrikeWantedTarget->InLimbo || !pStrikeWantedTarget->Owner
+			|| pStrikeWantedTarget->Owner == pHouse || pHouse->IsAlliedWith(pStrikeWantedTarget->Owner)))
+		{
+			pStrikeWantedTarget = nullptr;
+		}
+	}
+
 	// Enemy buildings an engineer can take at little risk (EngineerSoftCapture*), and what the engineer
 	// assault that takes them lacks.
 	int softEnemyCaptures = 0;
@@ -7428,6 +7442,13 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				score += MissionUnitsWantedBonus;
 			}
 
+			// A strike lacks units that damage its building (StrikeWanted*).
+			if (pStrikeWantedTarget && pWpn && !pUnit->Naval && !isEconomyUnit && !isMCV && !isTransportClass && !isSuicideVehicle
+				&& HurtsBuilding(pUnit, pStrikeWantedTarget))
+			{
+				score += StrikeWantedBonus;
+			}
+
 			if (logUnitPicks)
 			{
 				const char diagClass = isMCV ? 'M' : ((pUnit->Harvester || pUnit->ResourceGatherer) ? 'H'
@@ -8039,6 +8060,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		const auto pWpnStruct = pInf->GetWeapon(0);
 		const auto pWpn = pWpnStruct ? pWpnStruct->WeaponType : nullptr;
 		const bool isAA = pWpn && pWpn->Projectile && pWpn->Projectile->AA;
+
+		// A strike lacks units that damage its building (StrikeWanted*).
+		if (pStrikeWantedTarget && pWpn && pWpn->Damage > 0 && HurtsBuilding(pInf, pStrikeWantedTarget))
+			score += StrikeWantedBonus;
 
 		if (IsCaptureInfantryType(pInf))
 		{
