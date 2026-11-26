@@ -2415,6 +2415,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		int bestTechStepIdx = -1;
 		int bestTechStepScore = -32000;
 		bool techStepInProgress = false;
+		std::vector<int> techStepTypes;
 		// The buildings the yards of this house build now, read from the factories: GetPrimaryFactory
 		// finds none for an AI house (inProgressBldIdx was none in all 8893 samples of 2026-11-20).
 		std::vector<int> yardBuildIdxs;
@@ -3801,6 +3802,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				&& !IsTunnelNetworkBuilding(pBld) && (pBld->SuperWeapon != -1 || pBld->SuperWeapon2 != -1);
 			const bool isTechStep = opensTechTypes || isCoreTechStep || isSuperWeaponStep;
 
+			if (isTechStep)
+				techStepTypes.push_back(pBld->ArrayIndex);
+
 			// Army first (ArmyFirstShortCredits): what this house leaves for later while short, unless it
 			// opens tech or another need of the house asks for it (the MCV, a crossing, the air defense).
 			const bool armyFirstHolds = armyFirstShort && !isBldInProgress && !opensTechTypes && !isCoreTechStep
@@ -4863,6 +4867,22 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		auto& techMacro = GetMacroState(pHouse);
 		const int techNow = Unsorted::CurrentFrame;
 
+		// A tech step the yard builds may not pass the scored loop any more (a BuildLimit of one counts the
+		// one under construction, a cap or a hold skips it): it is in progress all the same when the last
+		// pick counted its type as a step. Unseen, the wait went on while the step was built (match #19592,
+		// house 2: 12600 frames "without a tech step" with its tech center in the yard) and the floor asked
+		// for the next step the moment that one stood.
+		for (const int yardIdx : yardBuildIdxs)
+		{
+			if (std::find(techMacro.TechStepTypes.begin(), techMacro.TechStepTypes.end(), yardIdx) != techMacro.TechStepTypes.end())
+			{
+				techStepInProgress = true;
+				techStepTypes.push_back(yardIdx);
+			}
+		}
+
+		techMacro.TechStepTypes = techStepTypes;
+
 		if (!hasCoreEconomyAndProduction || techStepInProgress || bestTechStepIdx < 0 || techMacro.TechStepWaitSince > techNow)
 			techMacro.TechStepWaitSince = techNow;
 
@@ -5016,6 +5036,14 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		// refinery more 1800 frames after the price was reached in 53 of 152). With no refinery past
 		// the rules of this pick the hold does not save for one. A harvester the hold saves for comes
 		// first, and so do the power plant of a house short of power and anything under attack.
+		// What the yard keeps instead of the refinery (holdKeptIdx) is told to the hold, which cancelled
+		// it as it cancels whatever stands in the yard's queue: the pick chose it again at once and
+		// neither it nor the refinery came (user approved, 2026-11-26, «Sí, corrígelo»; match #19592,
+		// house 2: one refinery from minute 9 to 35 with room for five, its tech center cancelled 25
+		// times; 25 of 90 status lines of a refinery hold had another building as the pick).
+		int holdKeptIdx = -1;
+		bool holdKeptUnderAttack = false;
+
 		{
 			auto& saveMacro = GetMacroState(pHouse);
 
@@ -5023,23 +5051,32 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			{
 				saveMacro.RefinerySaveTarget = 0;
 			}
-			else if (saveMacro.RefinerySaveTarget > 0 && saveMacro.HarvesterSaveTarget <= 0 && !saveMacro.CounterUnderAttack
+			else if (saveMacro.RefinerySaveTarget > 0 && saveMacro.HarvesterSaveTarget <= 0 && saveMacro.CounterUnderAttack
 				&& bestBldIdx != awaitedRefineryIdx)
+			{
+				holdKeptIdx = bestBldIdx;
+				holdKeptUnderAttack = true;
+			}
+			else if (saveMacro.RefinerySaveTarget > 0 && saveMacro.HarvesterSaveTarget <= 0 && bestBldIdx != awaitedRefineryIdx)
 			{
 				auto const pPicked = bestBldIdx >= 0 ? BuildingTypeClass::Array.GetItem(bestBldIdx) : nullptr;
 				// The tech floor yields to the refinery (expansion is crucial) until it has waited
-				// TechStepRefineryYieldFrames, then takes one building between refineries.
+				// TechStepRefineryYieldFrames, then takes one building between refineries. Below
+				// TechStepRefineriesFirst refineries the refinery always comes first: a house on one
+				// refinery pays for no tech center.
 				const bool isFirstCoreFactoryPick = pPicked && firstFactoryPending && ownedRefineries >= 2
 					&& pPicked->Factory == AbstractType::UnitType
 					&& (pPicked->Naval ? ownedShipyards == 0 : ownedWarFactories == 0);
 				const bool keepPick = pPicked
 					&& (pPicked->Refinery || isFirstCoreFactoryPick
 						|| (pHouse->HasLowPower() && pPicked->PowerBonus > pPicked->PowerDrain)
-						|| (techFloorPick && bestBldIdx == bestTechStepIdx
+						|| (techFloorPick && bestBldIdx == bestTechStepIdx && ownedRefineries >= TechStepRefineriesFirst
 							&& (techAlternatesWithRefinery || techStepWaited >= TechStepRefineryYieldFrames)));
 
 				if (!keepPick)
 					bestBldIdx = awaitedRefineryIdx;
+				else
+					holdKeptIdx = bestBldIdx;
 			}
 		}
 
@@ -5218,6 +5255,32 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				}
 
 				break;
+			}
+		}
+
+		// The hold is told what the yard keeps instead of the refinery, when that is still the pick after
+		// the deployers had their say. While the yard builds the one kept it stays the one kept: the
+		// pick moves on as soon as a tech step is under construction.
+		{
+			auto& keptMacro = GetMacroState(pHouse);
+			const bool keptInYard = keptMacro.HoldKeptBuildingIdx >= 0
+				&& std::find(yardBuildIdxs.begin(), yardBuildIdxs.end(), keptMacro.HoldKeptBuildingIdx) != yardBuildIdxs.end();
+
+			if (!keptInYard)
+			{
+				const int keptNow = (holdKeptIdx >= 0 && holdKeptIdx == bestBldIdx) ? holdKeptIdx : -1;
+
+				// TEMP diagnostic (economy hold, 2026-11-26): what the yard keeps while the hold saves.
+				if (keptNow >= 0 && keptNow != keptMacro.HoldKeptBuildingIdx
+					&& Unsorted::CurrentFrame - keptMacro.HoldKeptLogFrame >= HoldKeptLogFrames)
+				{
+					keptMacro.HoldKeptLogFrame = Unsorted::CurrentFrame;
+					Debug::Log("[NeuralAI] House %d economy hold (TEMP): the yard keeps %s while we save for a refinery (%s), "
+						"%d refineries, credits %d, frame %d.\n", pHouse->ArrayIndex, BuildingTypeClass::Array.GetItem(keptNow)->ID,
+						holdKeptUnderAttack ? "under attack" : "its turn", ownedRefineries, money, Unsorted::CurrentFrame);
+				}
+
+				keptMacro.HoldKeptBuildingIdx = keptNow;
 			}
 		}
 

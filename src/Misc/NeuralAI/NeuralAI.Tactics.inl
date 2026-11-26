@@ -4662,6 +4662,15 @@ namespace
 			if (restoresIncome)
 				continue;
 
+			// The building the yard picked on purpose while we save for a refinery (HoldKeptBuildingIdx,
+			// set by the structure pick): neither cancelled nor held. It is built, paid as it goes with the
+			// other queues on hold, and the refinery follows it.
+			if (holdForEconomy && pBldType && macro.RefinerySaveTarget > 0 && macro.HarvesterSaveTarget <= 0
+				&& pBldType->ArrayIndex == macro.HoldKeptBuildingIdx)
+			{
+				continue;
+			}
+
 			if (pType->WhatAmI() == awaitedQueue && !(pUnitType && pUnitType->Naval))
 			{
 				Debug::Log("[NeuralAI] House %d %s: cancelling %s, it holds the queue of what we save for.\n", pHouse->ArrayIndex,
