@@ -1,6 +1,7 @@
 #include "SyncLogging.h"
 
 #include <Helpers/Macro.h>
+#include <BulletClass.h>
 #include <EventClass.h>
 #include <TechnoClass.h>
 #include <WarheadTypeClass.h>
@@ -25,6 +26,8 @@ SyncLogEventBuffer<TargetChangeSyncLogEvent, DestinationChanges_Size> SyncLogger
 SyncLogEventBuffer<MissionOverrideSyncLogEvent, MissionOverrides_Size> SyncLogger::MissionOverrides;
 SyncLogEventBuffer<AnimCreationSyncLogEvent, AnimCreations_Size> SyncLogger::AnimCreations;
 SyncLogEventBuffer<DamageSyncLogEvent, DamageEvents_Size> SyncLogger::DamageEvents;
+SyncLogEventBuffer<BulletLaunchSyncLogEvent, BulletLaunches_Size> SyncLogger::BulletLaunches;
+SyncLogEventBuffer<BulletStepSyncLogEvent, BulletSteps_Size> SyncLogger::BulletSteps;
 
 void __forceinline MakeCallerRelative(unsigned int& caller)
 {
@@ -147,6 +150,133 @@ void SyncLogger::WriteDamageEvents(FILE* const pLogFile, int frameDigits)
 	fprintf(pLogFile, "\n");
 }
 
+// The point a projectile steers at, as BulletClass::AI reads it.
+static CoordStruct BulletSteersAt(BulletClass* pBullet)
+{
+	auto const pTarget = pBullet->Target;
+
+	if (!pTarget)
+		return pBullet->TargetCoords;
+
+	if (auto const pTargetObject = abstract_cast<ObjectClass*>(pTarget))
+		return pTargetObject->GetTargetCoords();
+
+	return pTarget->GetCenterCoords();
+}
+
+void SyncLogger::AddBulletLaunchSyncLogEvent(BulletClass* pBullet, const CoordStruct& coords, double velocityX, double velocityY, double velocityZ)
+{
+	if (!pBullet)
+		return;
+
+	BulletLaunchSyncLogEvent launch(0, Unsorted::CurrentFrame);
+	auto const pTarget = pBullet->Target;
+	auto const pFirer = pBullet->Owner;
+
+	launch.ID = pBullet->UniqueID;
+	launch.TypeIndex = pBullet->Type ? pBullet->Type->GetArrayIndex() : -1;
+	launch.Coords = coords;
+	launch.Velocity[0] = velocityX;
+	launch.Velocity[1] = velocityY;
+	launch.Velocity[2] = velocityZ;
+	launch.TargetType = pTarget ? pTarget->WhatAmI() : AbstractType::None;
+	launch.TargetID = pTarget ? pTarget->UniqueID : 0;
+	launch.TargetCoords = BulletSteersAt(pBullet);
+	launch.FirerType = pFirer ? pFirer->WhatAmI() : AbstractType::None;
+	launch.FirerID = pFirer ? pFirer->UniqueID : 0;
+	launch.FirerCoords = pFirer ? pFirer->Location : CoordStruct::Empty;
+	launch.FirerFacing = pFirer ? pFirer->PrimaryFacing.Current().Raw : 0;
+	launch.FirerTurretFacing = pFirer ? pFirer->SecondaryFacing.Current().Raw : 0;
+	launch.FirerTiltSideways = pFirer ? pFirer->AngleRotatedSideways : 0.0f;
+	launch.FirerTiltForwards = pFirer ? pFirer->AngleRotatedForwards : 0.0f;
+
+	SyncLogger::BulletLaunches.Add(launch);
+}
+
+void SyncLogger::AddBulletStepSyncLogEvent(BulletClass* pBullet)
+{
+	if (!pBullet || !pBullet->Type || pBullet->Type->ROT <= 0)
+		return;
+
+	BulletStepSyncLogEvent step(0, Unsorted::CurrentFrame);
+	auto const pTarget = pBullet->Target;
+
+	step.ID = pBullet->UniqueID;
+	step.TypeIndex = pBullet->Type->GetArrayIndex();
+	step.Coords = pBullet->Location;
+	step.Velocity[0] = pBullet->Velocity.X;
+	step.Velocity[1] = pBullet->Velocity.Y;
+	step.Velocity[2] = pBullet->Velocity.Z;
+	step.TargetType = pTarget ? pTarget->WhatAmI() : AbstractType::None;
+	step.TargetID = pTarget ? pTarget->UniqueID : 0;
+	step.TargetCoords = BulletSteersAt(pBullet);
+
+	SyncLogger::BulletSteps.Add(step);
+}
+
+// The bits of a floating-point value, for the sync log: two clients may differ in the last one.
+static unsigned long long SyncLogBits(double value)
+{
+	unsigned long long bits = 0;
+	std::memcpy(&bits, &value, sizeof(bits));
+
+	return bits;
+}
+
+static unsigned int SyncLogBits(float value)
+{
+	unsigned int bits = 0;
+	std::memcpy(&bits, &value, sizeof(bits));
+
+	return bits;
+}
+
+void SyncLogger::WriteBulletLaunches(FILE* const pLogFile, int frameDigits)
+{
+	fprintf(pLogFile, "Bullet launches:\n");
+
+	for (size_t i = 0; i < SyncLogger::BulletLaunches.Size(); i++)
+	{
+		auto const& launch = SyncLogger::BulletLaunches.Get();
+
+		if (!launch.Initialized)
+			continue;
+
+		fprintf(pLogFile, "#%05d: ID: %08d | Type: %d | X: %d | Y: %d | Z: %d | Velocity: %016llx %016llx %016llx | TargetRTTI: %02d | TargetID: %08d | "
+			"TX: %d | TY: %d | TZ: %d | FirerRTTI: %02d | FirerID: %08d | FX: %d | FY: %d | FZ: %d | Facing: %05d | Turret: %05d | Tilt: %08x %08x | Frame: %*d\n",
+			i, launch.ID, launch.TypeIndex, launch.Coords.X, launch.Coords.Y, launch.Coords.Z,
+			SyncLogBits(launch.Velocity[0]), SyncLogBits(launch.Velocity[1]), SyncLogBits(launch.Velocity[2]),
+			launch.TargetType, launch.TargetID, launch.TargetCoords.X, launch.TargetCoords.Y, launch.TargetCoords.Z,
+			launch.FirerType, launch.FirerID, launch.FirerCoords.X, launch.FirerCoords.Y, launch.FirerCoords.Z,
+			launch.FirerFacing, launch.FirerTurretFacing, SyncLogBits(launch.FirerTiltSideways), SyncLogBits(launch.FirerTiltForwards),
+			frameDigits, launch.Frame);
+	}
+
+	fprintf(pLogFile, "\n");
+}
+
+void SyncLogger::WriteBulletSteps(FILE* const pLogFile, int frameDigits)
+{
+	fprintf(pLogFile, "Homing bullet steps:\n");
+
+	for (size_t i = 0; i < SyncLogger::BulletSteps.Size(); i++)
+	{
+		auto const& step = SyncLogger::BulletSteps.Get();
+
+		if (!step.Initialized)
+			continue;
+
+		fprintf(pLogFile, "#%05d: ID: %08d | Type: %d | X: %d | Y: %d | Z: %d | Velocity: %016llx %016llx %016llx | TargetRTTI: %02d | TargetID: %08d | "
+			"TX: %d | TY: %d | TZ: %d | Frame: %*d\n",
+			i, step.ID, step.TypeIndex, step.Coords.X, step.Coords.Y, step.Coords.Z,
+			SyncLogBits(step.Velocity[0]), SyncLogBits(step.Velocity[1]), SyncLogBits(step.Velocity[2]),
+			step.TargetType, step.TargetID, step.TargetCoords.X, step.TargetCoords.Y, step.TargetCoords.Z,
+			frameDigits, step.Frame);
+	}
+
+	fprintf(pLogFile, "\n");
+}
+
 void SyncLogger::WriteSyncLog(const char* logFilename)
 {
 	auto const pLogFile = fopen(logFilename, "at");
@@ -165,6 +295,8 @@ void SyncLogger::WriteSyncLog(const char* logFilename)
 		WriteDestinationChanges(pLogFile, frameDigits);
 		WriteAnimCreations(pLogFile, frameDigits);
 		WriteDamageEvents(pLogFile, frameDigits);
+		WriteBulletLaunches(pLogFile, frameDigits);
+		WriteBulletSteps(pLogFile, frameDigits);
 		WriteTeams(pLogFile);
 
 		fclose(pLogFile);

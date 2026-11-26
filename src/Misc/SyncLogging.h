@@ -7,6 +7,7 @@
 
 #include <vector>
 
+class BulletClass;
 class TechnoClass;
 class WarheadTypeClass;
 
@@ -19,6 +20,8 @@ static constexpr unsigned int DestinationChanges_Size = 1024;
 static constexpr unsigned int MissionOverrides_Size = 256;
 static constexpr unsigned int AnimCreations_Size = 512;
 static constexpr unsigned int DamageEvents_Size = 2048;
+static constexpr unsigned int BulletLaunches_Size = 1024;
+static constexpr unsigned int BulletSteps_Size = 8192;
 
 // Intention: Data structure that stores sync event records.
 // Stores fixed amount of items determined by size template arg. Any further additions
@@ -170,6 +173,52 @@ struct DamageSyncLogEvent : SyncLogEvent
 	{ }
 };
 
+// A projectile a techno is about to launch: from where, how fast and at what, with the stance of the
+// firer its launch point is computed from (facings, and the tilt angles, which are floats). The
+// velocity and the angles are kept whole and written as raw bits: the LAN desync of 2026-11-26
+// (two homing missiles, the first of them one lepton off at its launch) left no trace of which
+// of these differed.
+struct BulletLaunchSyncLogEvent : SyncLogEvent
+{
+	DWORD ID;
+	int TypeIndex;
+	CoordStruct Coords;
+	double Velocity[3];
+	AbstractType TargetType;
+	DWORD TargetID;
+	CoordStruct TargetCoords;
+	AbstractType FirerType;
+	DWORD FirerID;
+	CoordStruct FirerCoords;
+	unsigned short FirerFacing;
+	unsigned short FirerTurretFacing;
+	float FirerTiltSideways;
+	float FirerTiltForwards;
+
+	BulletLaunchSyncLogEvent() : SyncLogEvent() { }
+
+	BulletLaunchSyncLogEvent(unsigned int Caller, unsigned int Frame) : SyncLogEvent(Caller, Frame)
+	{ }
+};
+
+// A homing projectile (ROT above 0) at the start of one frame of its flight: where it is, how fast
+// it goes and the point it steers at.
+struct BulletStepSyncLogEvent : SyncLogEvent
+{
+	DWORD ID;
+	int TypeIndex;
+	CoordStruct Coords;
+	double Velocity[3];
+	AbstractType TargetType;
+	DWORD TargetID;
+	CoordStruct TargetCoords;
+
+	BulletStepSyncLogEvent() : SyncLogEvent() { }
+
+	BulletStepSyncLogEvent(unsigned int Caller, unsigned int Frame) : SyncLogEvent(Caller, Frame)
+	{ }
+};
+
 class SyncLogger
 {
 private:
@@ -180,6 +229,8 @@ private:
 	static SyncLogEventBuffer<MissionOverrideSyncLogEvent, MissionOverrides_Size> MissionOverrides;
 	static SyncLogEventBuffer<AnimCreationSyncLogEvent, AnimCreations_Size> AnimCreations;
 	static SyncLogEventBuffer<DamageSyncLogEvent, DamageEvents_Size> DamageEvents;
+	static SyncLogEventBuffer<BulletLaunchSyncLogEvent, BulletLaunches_Size> BulletLaunches;
+	static SyncLogEventBuffer<BulletStepSyncLogEvent, BulletSteps_Size> BulletSteps;
 
 	static void WriteRNGCalls(FILE* const pLogFile, int frameDigits);
 	static void WriteFacingChanges(FILE* const pLogFile, int frameDigits);
@@ -188,6 +239,8 @@ private:
 	static void WriteMissionOverrides(FILE* const pLogFile, int frameDigits);
 	static void WriteAnimCreations(FILE* const pLogFile, int frameDigits);
 	static void WriteDamageEvents(FILE* const pLogFile, int frameDigits);
+	static void WriteBulletLaunches(FILE* const pLogFile, int frameDigits);
+	static void WriteBulletSteps(FILE* const pLogFile, int frameDigits);
 	static void WriteTeams(FILE* const pLogFile);
 public:
 	static int AnimCreations_HighestX;
@@ -205,6 +258,8 @@ public:
 	static void AddMissionOverrideSyncLogEvent(AbstractClass* pObject, int mission, unsigned int callerAddress);
 	static void AddAnimCreationSyncLogEvent(const CoordStruct& coords, unsigned int callerAddress);
 	static void AddDamageSyncLogEvent(TechnoClass* pTarget, int damage, WarheadTypeClass* pWarhead, TechnoClass* pAttacker, unsigned int callerAddress);
+	static void AddBulletLaunchSyncLogEvent(BulletClass* pBullet, const CoordStruct& coords, double velocityX, double velocityY, double velocityZ);
+	static void AddBulletStepSyncLogEvent(BulletClass* pBullet);
 	static void WriteSyncLog(const char* logFilename);
 	static void SetTeamLoggingPadding(TeamClass* pTeam);
 };
