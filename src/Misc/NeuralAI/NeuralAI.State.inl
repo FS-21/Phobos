@@ -1069,6 +1069,9 @@ namespace
 		int MissionHeadSince { 0 };
 		int MissionHeadFrame { -100000 };
 		int MissionUnitsWanted { 0 };
+		// The building a strike came up short of units for (StrikeWanted*), and when.
+		DWORD StrikeWantedTargetID { 0 };
+		int StrikeWantedFrame { -100000 };
 		std::unordered_set<DWORD> PlanMembers {};
 		// Follow-up attacks of plans that took their building target (PlanFollowUp*); their members count
 		// as plan members.
@@ -2046,6 +2049,8 @@ namespace
 			this->MissionHeadSince = 0;
 			this->MissionHeadFrame = -100000;
 			this->MissionUnitsWanted = 0;
+			this->StrikeWantedTargetID = 0;
+			this->StrikeWantedFrame = -100000;
 			this->PlanMembers.clear();
 			this->FollowUps.clear();
 			this->RaidTransportBanUntil.clear();
@@ -3298,6 +3303,13 @@ namespace
 	constexpr int EngineerSoftCaptureDefenses = 1;
 	constexpr int EngineerSoftCaptureBonus = 680;
 	constexpr int EngineerTransportBonus = 900;
+	// A strike that only takes the units able to damage its building (pickStrikeGroup with
+	// hurtersOnly) and finds too few of them idle asks the factories for them (user, 2026-11-26: «¿y no
+	// pueden producirse también para no depender de la suerte de tener unidades ociosas?»): for
+	// StrikeWantedFrames after the plan last came up short, the armed ground vehicles and soldiers
+	// whose weapon damages that building score StrikeWantedBonus.
+	constexpr int StrikeWantedFrames = 1800;
+	constexpr int StrikeWantedBonus = 300;
 	// A refinery for a remote yard without one stands within this many cells of it, on its land
 	// (production counts a yard's refinery within 18 cells, the footprint corner is not its centre),
 	// its search starts at the yard's own field, within RefineryHubOreCells of it.
