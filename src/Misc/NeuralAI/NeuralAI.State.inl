@@ -3288,6 +3288,16 @@ namespace
 	constexpr int EconomyWorkMost = 350;
 	constexpr int EconomyPoorBonus = 250;
 	constexpr int EconomyPriorMost = 1200;
+	// Enemy buildings an engineer can take at little risk (user, 2026-11-26: capturing enemy
+	// structures is a good idea with little money too, above all the poorly protected ones): known,
+	// capturable, with at most EngineerSoftCaptureDefenses known defenses within 8 cells and no enemy
+	// seen within 7. While there are more of them than engineers, an engineer scores
+	// EngineerSoftCaptureBonus as for a neutral building and is trained even short of money
+	// (ArmyFirstShortCredits). The engineer assault needs a closed land transport: with an engineer
+	// and none, one scores EngineerTransportBonus.
+	constexpr int EngineerSoftCaptureDefenses = 1;
+	constexpr int EngineerSoftCaptureBonus = 680;
+	constexpr int EngineerTransportBonus = 900;
 	// A refinery for a remote yard without one stands within this many cells of it, on its land
 	// (production counts a yard's refinery within 18 cells, the footprint corner is not its centre),
 	// its search starts at the yard's own field, within RefineryHubOreCells of it.
