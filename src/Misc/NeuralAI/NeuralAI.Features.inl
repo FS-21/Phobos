@@ -873,6 +873,52 @@ void NeuralAI::ExtractFogFilteredFeatures(HouseClass* pHouse, std::array<int8_t,
 	const int curArchSlot = std::clamp(pExt->NeuralAI_Archetype, 0, NeuralAI::NumArchetypes - 1);
 	features[40 + curArchSlot] = 100;
 
+	// 100..115: Archetype intent progress, review countdown and milestone deficits when the house plan is enabled.
+	const NeuralIntentPlan& intentPlan = IntentPlanFor(pHouse);
+
+	if (intentPlan.Enabled)
+	{
+		auto const& intentMacro = GetMacroState(pHouse);
+		const int c = std::min(intentMacro.IntentReviewsDone, IntentCheckpoints - 1);
+		uint8_t snapNow[IntentQuantities] {};
+		TakeIntentSnapshot(pHouse, snapNow);
+
+		features[100] = ClampInt8(IntentFit(intentPlan, c, curArchSlot, snapNow) * 127 / 100);
+
+		const int nextReviewFrame = intentMacro.IntentReviewsDone < IntentCheckpoints
+			? IntentCheckpointFrames[intentMacro.IntentReviewsDone]
+			: IntentCheckpointFrames[IntentCheckpoints - 1]
+				+ (intentMacro.IntentReviewsDone - (IntentCheckpoints - 1)) * IntentLateReviewFrames;
+		const int prevReviewFrame = intentMacro.IntentReviewsDone == 0
+			? 0
+			: (intentMacro.IntentReviewsDone <= IntentCheckpoints
+				? IntentCheckpointFrames[intentMacro.IntentReviewsDone - 1]
+				: IntentCheckpointFrames[IntentCheckpoints - 1]
+					+ (intentMacro.IntentReviewsDone - IntentCheckpoints) * IntentLateReviewFrames);
+		const int span = std::max(1, nextReviewFrame - prevReviewFrame);
+		const int timeLeft = std::clamp(127 * (nextReviewFrame - Unsorted::CurrentFrame) / span, 0, 127);
+
+		features[101] = static_cast<int8_t>(timeLeft);
+
+		for (int k = 0; k < IntentQuantities; ++k)
+		{
+			const int target = intentPlan.Milestones[c][curArchSlot][k];
+
+			if (target == IntentNoTarget)
+			{
+				features[102 + k] = 0;
+			}
+			else
+			{
+				const int lack = 127 * std::max(0, target - static_cast<int>(snapNow[k])) / std::max(1, target);
+				features[102 + k] = static_cast<int8_t>(std::clamp(lack, 0, 127));
+			}
+		}
+
+		features[114] = static_cast<int8_t>(std::min(127, intentMacro.IntentReviewsDone * 15));
+		features[115] = static_cast<int8_t>(std::clamp(intentMacro.IntentSwitches * 40, 0, 127));
+	}
+
 	int ownTechTier = -60;
 	if (pHouse->NumWarFactories > 0 || pHouse->NumBarracks > 0)
 		ownTechTier = 0;

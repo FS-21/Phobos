@@ -1242,7 +1242,7 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 
 		jsonBuf.reserve(131072);
 
-		char lineBuf[16384]; // one house line carries decisions, plans and gate counts
+		char lineBuf[20480]; // one house line carries decisions, plans, gate counts and intent route
 
 		// The meaning version of the slots that changed (NeuralSlotMeanings).
 		std::string slotMeanings;
@@ -1709,8 +1709,72 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 			char productionText[ProductionTelemetryMaxEntries * ProductionTelemetryEntryRoom] = "";
 			FormatProductionTelemetry(pOwner, productionText, sizeof(productionText));
 
+			int archetypeStart = h.Archetype;
+			std::string intentText = "\"enabled\": 0, \"held\": [-1, -1, -1, -1, -1, -1, -1, -1], "
+				"\"progress\": [-1, -1, -1, -1, -1, -1, -1], \"standing\": [-1, -1, -1, -1, -1, -1, -1], "
+				"\"explored\": [0, 0, 0, 0, 0, 0, 0], \"switches\": 0, \"reviews\": 0, "
+				"\"snapshots\": [[0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0],"
+				"[0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0]]";
+
+			if (pOwner)
+			{
+				auto const& intentMacro = GetMacroState(pOwner);
+
+				if (intentMacro.IntentHeld[0] >= 0)
+					archetypeStart = static_cast<int>(intentMacro.IntentHeld[0]);
+
+				std::string snapsText;
+				snapsText.reserve(512);
+
+				for (int cp = 0; cp < IntentCheckpoints; ++cp)
+				{
+					if (cp > 0)
+						snapsText += ",";
+
+					snapsText += "[";
+
+					for (int q = 0; q < IntentQuantities; ++q)
+					{
+						if (q > 0)
+							snapsText += ",";
+
+						snapsText += std::to_string(static_cast<unsigned>(intentMacro.IntentSnapshots[cp][q]));
+					}
+
+					snapsText += "]";
+				}
+
+				char intentHeader[384];
+				std::snprintf(intentHeader, sizeof(intentHeader),
+					"\"enabled\": %d, \"held\": [%d, %d, %d, %d, %d, %d, %d, %d], "
+					"\"progress\": [%d, %d, %d, %d, %d, %d, %d], \"standing\": [%d, %d, %d, %d, %d, %d, %d], "
+					"\"explored\": [%d, %d, %d, %d, %d, %d, %d], \"switches\": %d, \"reviews\": %d, \"snapshots\": [",
+					IntentPlanFor(pOwner).Enabled ? 1 : 0,
+					static_cast<int>(intentMacro.IntentHeld[0]), static_cast<int>(intentMacro.IntentHeld[1]),
+					static_cast<int>(intentMacro.IntentHeld[2]), static_cast<int>(intentMacro.IntentHeld[3]),
+					static_cast<int>(intentMacro.IntentHeld[4]), static_cast<int>(intentMacro.IntentHeld[5]),
+					static_cast<int>(intentMacro.IntentHeld[6]), static_cast<int>(intentMacro.IntentHeld[7]),
+					static_cast<int>(intentMacro.IntentProgress[0]), static_cast<int>(intentMacro.IntentProgress[1]),
+					static_cast<int>(intentMacro.IntentProgress[2]), static_cast<int>(intentMacro.IntentProgress[3]),
+					static_cast<int>(intentMacro.IntentProgress[4]), static_cast<int>(intentMacro.IntentProgress[5]),
+					static_cast<int>(intentMacro.IntentProgress[6]),
+					static_cast<int>(intentMacro.IntentStanding[0]), static_cast<int>(intentMacro.IntentStanding[1]),
+					static_cast<int>(intentMacro.IntentStanding[2]), static_cast<int>(intentMacro.IntentStanding[3]),
+					static_cast<int>(intentMacro.IntentStanding[4]), static_cast<int>(intentMacro.IntentStanding[5]),
+					static_cast<int>(intentMacro.IntentStanding[6]),
+					intentMacro.IntentExplored[0] ? 1 : 0, intentMacro.IntentExplored[1] ? 1 : 0,
+					intentMacro.IntentExplored[2] ? 1 : 0, intentMacro.IntentExplored[3] ? 1 : 0,
+					intentMacro.IntentExplored[4] ? 1 : 0, intentMacro.IntentExplored[5] ? 1 : 0,
+					intentMacro.IntentExplored[6] ? 1 : 0,
+					intentMacro.IntentSwitches, intentMacro.IntentReviewsDone);
+
+				intentText = intentHeader;
+				intentText += snapsText;
+				intentText += "]";
+			}
+
 			lineLen = std::snprintf(lineBuf, sizeof(lineBuf),
-				"    {\"idx\": %d, \"side\": %d, \"country\": %d, \"archetype\": %d, \"opening\": %d, "
+				"    {\"idx\": %d, \"side\": %d, \"country\": %d, \"archetype\": %d, \"archetypeStart\": %d, \"intent\": {%s}, \"opening\": %d, "
 				"\"expert\": %d, \"credits\": %d, \"killedUnits\": %d, "
 				"\"killedBlds\": %d, \"ownedUnits\": %d, \"ownedBlds\": "
 				"%d, \"score\": %d, \"winner\": %u, \"defeated\": %u, \"policy\": "
@@ -1719,7 +1783,7 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 				"\"defenses\": %d, \"territory\": %d, \"territoryAvg\": %.1f, \"oreFields\": %d, \"oreFieldsAvg\": %.1f, "
 				"\"bldValue\": %d, \"blds\": \"%s\", \"units\": \"%s\", \"prod\": [%s], \"airThreat\": %d, "
 				"\"ownAA\": %d, \"aiMsAvg\": %.2f, \"aiMsMax\": %.2f, \"aiSections\": {%s}, \"aiPeaks\": [%s], \"expertTicks\": [%s], \"expertGain\": [%s], \"expertTicksByPhase\": [%s], \"expertGainByPhase\": [%s], \"expertCredit\": [%s], \"expertCreditByPhase\": [%s], \"expertCreditParts\": [%s], \"defense\": [%s], \"enemyMix\": \"%s\", \"claim\": %s, \"team\": %s, \"econ\": [%s], \"bank\": [%s], \"army\": [%s], \"coalition\": [%s], \"truces\": [%s], \"diplomacy\": {%s}, \"decisions\": {%s}, \"plans\": {%s}, \"gates\": {%s}}%s\n",
-				h.ArrayIndex, h.SideIndex, h.CountryIndex, h.Archetype, pOwner ? GetMacroState(pOwner).Opening : 0, h.ActiveExpert, h.Credits, h.KilledUnits,
+				h.ArrayIndex, h.SideIndex, h.CountryIndex, h.Archetype, archetypeStart, intentText.c_str(), pOwner ? GetMacroState(pOwner).Opening : 0, h.ActiveExpert, h.Credits, h.KilledUnits,
 				h.KilledBuildings, h.OwnedUnits, h.OwnedBuildings, h.NetWorthScore, h.IsWinner, h.IsDefeated,
 				h.PolicySlot, pOwner ? WaveMassPermille(PolicyFor(pOwner).OutputBias[37]) : 1000, pOwner ? pOwner->NumConYards : 0, pOwner ? pOwner->CountResourceGatherers : 0,
 				pOwner ? pOwner->CountResourceDestinations : 0, pOwner ? pOwner->NumWarFactories : 0,

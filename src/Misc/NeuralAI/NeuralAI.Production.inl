@@ -565,6 +565,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 	{
 		const NeuralSectionTimer sectionTimer { pHouse->ArrayIndex, NeuralSection::Features };
+		ReviewIntent(pHouse);
 		UpdateBridgePlanner(pHouse);
 		NeuralAI::ExtractFogFilteredFeatures(pHouse, features);
 
@@ -787,19 +788,11 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 		if (nowFrame - lastTrajFrame[hIdx] >= 240)
 		{
-			auto const& hMacro = GetMacroState(pHouse);
-			auto const& hWave = GetWaveTimingState(pHouse);
+			auto& hMacro = GetMacroState(pHouse);
 			int knownFoeWorth = 0;
-
-			for (auto const& foe : hWave.Enemies)
-				knownFoeWorth = std::max(knownFoeWorth, foe.Army + foe.DefenseValue + foe.KnownBuildings * 120);
-
-			const int killNow = pHouse->TotalKilledUnits * 200 + pHouse->TotalKilledBuildings * 500
-				+ pHouse->StolenBuildingsCredits + hMacro.TrajSpecOpsWorth;
-			int lostNow = hMacro.DefenseLostValue + hMacro.TrajSpecOpsLosses * 300;
-
-			for (const int n : hMacro.TankCensusLost)
-				lostNow += n * 400;
+			int killNow = 0;
+			int lostNow = 0;
+			IntentWorths(pHouse, knownFoeWorth, killNow, lostNow);
 
 			const int capDelta = std::max(0, hMacro.TrajCaptures - lastCaptures[hIdx]);
 			const int infDelta = std::max(0, hMacro.TrajInfiltrations - lastInfiltrations[hIdx]);
@@ -849,7 +842,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				step.RoutingFlags = pending[hIdx].RoutingFlags;
 				step.PickCount = win.PickCount;
 				step.PicksDropped = win.PicksDropped;
-				step.Reserved = 0;
+				step.IntentProgress = hMacro.IntentStepProgress;
+				hMacro.IntentStepProgress = 0;
+				step.IntentSegment = static_cast<uint8_t>(std::min(hMacro.IntentReviewsDone, IntentSegments - 1));
 
 				for (uint8_t k = 0; k < win.PickCount; ++k)
 					step.Picks[k] = win.Picks[k];
