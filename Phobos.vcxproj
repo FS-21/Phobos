@@ -272,7 +272,9 @@
     <ClCompile Include="src\Misc\Selection.cpp" />
     <ClCompile Include="src\Misc\SyncLogging.cpp" />
     <ClCompile Include="src\Misc\TextInput.cpp" />
-    <ClCompile Include="src\Misc\NeuralAI\NeuralAI.cpp" />
+    <ClCompile Include="src\Misc\NeuralAI\NeuralAI.cpp">
+      <AdditionalOptions>%(AdditionalOptions) /bigobj</AdditionalOptions>
+    </ClCompile>
     <ClCompile Include="src\Misc\NeuralAI\Hooks.NeuralAI.cpp" />
     <!-- src\New -->
     <!-- src\New\Entity -->
