@@ -244,6 +244,9 @@ namespace
 		CombatIdle2m,
 		DeployerIdle2m,
 		FerrySingle,
+		// Every DetectorSampleFrames: the armed combat units of the house, and those of them idle as CombatIdle2m counts.
+		CombatSamples,
+		CombatIdleSamples,
 		Count
 	};
 
@@ -278,7 +281,7 @@ namespace
 		"navalStuckReleased", "navalPreyAttacks", "navalSweeps", "navalMassStrikes", "navalPassageWaits", "orderLeaseRefused",
 		"engineerCaptured", "enemyBldCaptured", "conYardCaptured", "engineerLostOnWay", "spyInfiltrated", "spyDisguisedEntry", "spyLostOnWay",
 		"noWarFactory10", "bldCancelled", "bldCancelRepeat", "income10", "income20", "waveShort", "combatIdle2m",
-		"deployerIdle2m", "ferrySingle" };
+		"deployerIdle2m", "ferrySingle", "combatSamples", "combatIdleSamples" };
 
 	static_assert(std::size(NeuralDecisionNames) == static_cast<size_t>(NeuralDecision::Count));
 

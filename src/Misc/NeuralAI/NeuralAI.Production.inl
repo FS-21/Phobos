@@ -1123,13 +1123,17 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 			auto& macro = GetMacroState(pHouse);
 
+			// CombatIdle2m alone grows with the army: the winner of a match showed three times the loser's.
+			// The two sample sums give the share of the army left idle, whatever its size.
+			uint32_t combatSeen = 0;
+			uint32_t combatIdle = 0;
+
 			for (auto const pTechno : TechnoClass::Array)
 			{
 				auto const pFoot = abstract_cast<FootClass*>(pTechno);
 
 				if (!pFoot || pFoot->Owner != pHouse || !pFoot->IsAlive || pFoot->InLimbo || pFoot->WhatAmI() == AbstractType::Aircraft
-					|| pFoot->IsInAir() || !IsFootHeldStill(pHouse, pFoot, DetectorIdleFrames)
-					|| IsInTransportOp(pHouse, pFoot->UniqueID) || IsUnitCarryallAtWork(pFoot))
+					|| pFoot->IsInAir())
 				{
 					continue;
 				}
@@ -1137,23 +1141,34 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				auto const pType = pFoot->GetTechnoType();
 				auto const pUnit = abstract_cast<UnitClass*>(pFoot);
 				auto const pInf = abstract_cast<InfantryClass*>(pFoot);
-				bool isDeployer = false;
+				const bool isDeployer = pUnit && pUnit->Type->DeploysInto;
 
 				if (!pType || (pUnit && (pUnit->Type->Harvester || pUnit->Type->Weeder || pUnit->Type->ResourceGatherer)))
 					continue;
 
-				if (pUnit && pUnit->Type->DeploysInto)
-				{
-					isDeployer = true;
-				}
-				else
+				if (!isDeployer)
 				{
 					auto const pSlot = pFoot->GetWeapon(0);
 
 					if ((pUnit && (IsAmphibiousOrAirTransport(pUnit->Type) || IsImmobileUnitTypeOnLand(pUnit->Type)))
 						|| (pInf && (pInf->Type->Engineer || IsSpyInfantryType(pInf->Type)))
-						|| pType->CanDisguise || pType->PermaDisguise || !pSlot || !pSlot->WeaponType
-						|| (pFoot->CurrentMission != Mission::Guard && pFoot->CurrentMission != Mission::Area_Guard
+						|| pType->CanDisguise || pType->PermaDisguise || !pSlot || !pSlot->WeaponType)
+					{
+						continue;
+					}
+
+					++combatSeen;
+				}
+
+				if (!IsFootHeldStill(pHouse, pFoot, DetectorIdleFrames) || IsInTransportOp(pHouse, pFoot->UniqueID)
+					|| IsUnitCarryallAtWork(pFoot))
+				{
+					continue;
+				}
+
+				if (!isDeployer)
+				{
+					if ((pFoot->CurrentMission != Mission::Guard && pFoot->CurrentMission != Mission::Area_Guard
 							&& pFoot->CurrentMission != Mission::Sleep)
 						|| macro.TankGuard.contains(pFoot->UniqueID) || macro.TankGuardEscorts.contains(pFoot->UniqueID)
 						|| macro.CapitalHeld.contains(pFoot->UniqueID) || IsPlanMember(pHouse, pFoot->UniqueID)
@@ -1161,6 +1176,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					{
 						continue;
 					}
+
+					++combatIdle;
 				}
 
 				auto const pClock = GetClock(macro, pFoot->UniqueID, NeuralClock::Still);
@@ -1176,6 +1193,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				macro.DetectorIdleCounted[pFoot->UniqueID] = pClock->Since;
 				CountDecision(isDeployer ? NeuralDecision::DeployerIdle2m : NeuralDecision::CombatIdle2m, idx);
 			}
+
+			DecisionCounts[idx][static_cast<size_t>(NeuralDecision::CombatSamples)] += combatSeen;
+			DecisionCounts[idx][static_cast<size_t>(NeuralDecision::CombatIdleSamples)] += combatIdle;
 		}
 	}
 
