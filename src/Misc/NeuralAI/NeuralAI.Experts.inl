@@ -83,7 +83,9 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 
 	// Expert 0: Economy, Silos & Crisis Micro, graded by the trouble it can act on (UpdateEconomyCrisis:
 	// nothing gathering, a raid on the economy, lasting low power, harvesters under fire, a refinery
-	// nobody serves, storage nearly full; up to 950). A lost ConYard alone is no work for it.
+	// nobody serves, storage nearly full) and by the work the economy always has (EconomyWork*: the
+	// refineries and harvesters the fields we hold still lack, plain poverty); up to EconomyPriorMost.
+	// A lost ConYard alone is no work for it.
 	auto const& economyMacro = GetMacroState(pHouse);
 	expScores[0] += economyMacro.EconomyTrouble;
 
@@ -183,14 +185,13 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 
 	// Common-sense vetoes: an expert that cannot do its job here is never chosen, whatever the
 	// learned bias says. Airforce with no air work (no armed aircraft, no target or enemy air it
-	// could answer); Urban with no building to occupy, no garrison and no allied coalition; Economy
-	// with no trouble to fix; Expansion with no free field it knows and can take; Special
-	// Operations with nothing to capture, spy or bridge. Their own archetypes are no exception: the
+	// could answer); Urban with no building to occupy, no garrison and no allied coalition; Expansion
+	// with no free field it knows and can take; Special Operations with nothing to capture, spy or
+	// bridge. The economy always has work: Expert 0 is not vetoed (EconomyWork*). Their own archetypes are no exception: the
 	// airfields, strike craft, garrisons and spies of archetypes 6, 7 and 1 come from the archetype
 	// priors whoever is in charge, and an expert with no work only held control (Expert 4 ran 18%
 	// of the ticks of archetype 1 houses, 6 to 7% of the others).
 	std::array<bool, 10> vetoed {};
-	vetoed[0] = economyMacro.EconomyTrouble == 0;
 	vetoed[4] = specOpsOpportunity == 0;
 	vetoed[8] = airForceOpportunity == 0;
 	vetoed[9] = urbanOpportunity == 0;

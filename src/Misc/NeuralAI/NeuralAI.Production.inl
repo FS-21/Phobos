@@ -2907,6 +2907,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		// again every 3000 frames (Campy Festival: 5 refineries to 19 with the cap at 3 to 8, 9 of 22
 		// on fewer than 5 ore cells).
 		const int heldRefineryCap = std::max(1, fieldRefineryRoom);
+		GetMacroState(pHouse).HeldRefineryRoom = fieldRefineryRoom;
 		CellStruct slotFieldCell = CellStruct::Empty;
 		int slotFieldReach = 0;
 
@@ -2965,10 +2966,12 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 		// The held fields fill their room at a steady pace (HeldFieldRefineryFrames) once the first war
 		// factory stands. Not while the income falls or the gatherers bring nothing in: a field that
-		// thins wants no more of them, the next ones come with the expansion.
+		// thins wants no more of them, the next ones come with the expansion. With Expert 0 in charge
+		// its turn comes in half the time (EconomyWork*).
 		const bool heldFieldRefinery = ownedRefineries >= 1 && ownedRefineries < heldRefineryCap && ownedWarFactories >= 1
 			&& !slotMacro.IncomeFalling && !slotMacro.DryEconomyActive
-			&& Unsorted::CurrentFrame - slotMacro.LastRefineryPlacedFrame >= HeldFieldRefineryFrames;
+			&& Unsorted::CurrentFrame - slotMacro.LastRefineryPlacedFrame
+				>= (pExt->NeuralAI_ActiveExpert == 0 ? HeldFieldRefineryFrames / 2 : HeldFieldRefineryFrames);
 
 		// TEMP diagnostic (expansion refineries, 2026-11-18): the refinery cap of each house.
 		if (IsAITickWindow(4500, 0))
@@ -3354,7 +3357,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 		const bool wantsSecondHarvesterViaRefinery = warFactoryBuildsArmy && !GetMacroState(pHouse).IncomeFalling
 			&& ownedHarvestersCount >= staticRefineriesCount && ownedHarvestersCount < 2 * staticRefineriesCount
-			&& Unsorted::CurrentFrame - GetMacroState(pHouse).LastHarvesterRecoveryFrame >= SecondHarvesterRecoveryFrames
+			&& Unsorted::CurrentFrame - GetMacroState(pHouse).LastHarvesterRecoveryFrame
+				>= (pExt->NeuralAI_ActiveExpert == 0 ? SecondHarvesterRecoveryFrames / 2 : SecondHarvesterRecoveryFrames)
 			&& features[19] > 0 && money >= 900;
 		const bool wantsHarvesterRecoveryViaRefinery = (pHouse->ConYards.Count >= 1 && staticRefineriesCount >= 1
 			&& !GetMacroState(pHouse).BrokeHoldActive
