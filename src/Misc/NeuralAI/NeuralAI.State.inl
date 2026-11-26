@@ -4672,6 +4672,8 @@ namespace
 	constexpr int SensorChainBaseAheadCells = 6;
 	constexpr size_t SensorChainSightingsTried = 4;
 	constexpr int SensorChainSightingsApartCells = 12;
+	// TEMP diagnostic (NoteSensorArrayHit): at most that many lines a match on who hit a sensor array.
+	constexpr int SensorHitLines = 120;
 	// A wounded soldier (under WoundedIdleHealth) left idle more than WoundedIdleHomeCells from
 	// home walks back to it (user).
 	constexpr double WoundedIdleHealth = 0.55;

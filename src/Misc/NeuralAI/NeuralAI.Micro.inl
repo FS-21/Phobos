@@ -20397,6 +20397,14 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					{
 						mobileMacro.MobileFactoryAvoidCell = fc;
 						mobileMacro.MobileFactoryAvoidFrame = now;
+
+						// TEMP diagnostic (NoteSensorArrayHit): who hit the sensor array that flees.
+						if (IsSensorLookoutType(pVehicle))
+						{
+							auto const pArrayExt = TechnoExt::TryFetch(pOwnBld);
+							NoteSensorArrayHit(pOwnBld, pArrayExt ? pArrayExt->LastAttacker : nullptr, "packs up to flee");
+						}
+
 						packUp(retreat, MobileFactoryReasonNone, "flees");
 					}
 				}
