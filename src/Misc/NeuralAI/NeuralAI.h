@@ -157,7 +157,8 @@ struct AITrajectoryStep
 	uint8_t RoutingFlags;
 	uint8_t PickCount;
 	uint8_t PicksDropped;
-	uint16_t Reserved;
+	uint8_t IntentProgress;
+	uint8_t IntentSegment;
 	AITrajectoryPick Picks[8];
 	uint8_t GateDraws[128];
 	uint8_t GateOpens[128];
@@ -186,6 +187,8 @@ struct AITrajectorySharedBuffer
 static_assert(sizeof(AITrajectoryPick) == 8);
 static_assert(sizeof(AITrajectoryStep) == 1024);
 static_assert(offsetof(AITrajectoryStep, WindowFrames) == 308);
+static_assert(offsetof(AITrajectoryStep, IntentProgress) == 318);
+static_assert(offsetof(AITrajectoryStep, IntentSegment) == 319);
 static_assert(offsetof(AITrajectoryStep, Picks) == 320);
 static_assert(offsetof(AITrajectoryStep, GateDraws) == 384);
 static_assert(offsetof(AITrajectoryStep, GateScoreFn) == 768);

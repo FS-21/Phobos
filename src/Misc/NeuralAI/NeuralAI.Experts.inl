@@ -770,7 +770,7 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 			// choice already weighs the memory, and a match that changes its archetype
 			// writes its result to the last one (Soviet and Nod houses drawn as
 			// archetype 3 left it at frame 0, on the entry of one expert).
-			if (!NeuralAI::TrainingMode && memEntry.ArchetypeScoreDelta[curArch] < -18 && (IsAITickWindow(900, 30)))
+			if (!IntentPlanFor(pHouse).Enabled && !NeuralAI::TrainingMode && memEntry.ArchetypeScoreDelta[curArch] < -18 && (IsAITickWindow(900, 30)))
 			{
 				int bestAltArch = (curArch + 1) % NeuralAI::NumArchetypes;
 				int bestAltScore = -999999;
@@ -802,7 +802,7 @@ void NeuralAI::RunDeterministicMoE(HouseClass* pHouse, const std::array<int8_t, 
 	// Real games only: in training the loss of a house already beaten would be
 	// written to the archetype it pivoted to (Allied houses that pivoted to
 	// archetype 3 lost 3 of 3), which teaches the memory nothing about either.
-	if (!NeuralAI::TrainingMode && Unsorted::CurrentFrame > 5400 && (IsAITickPeriod(2700)) && pHouse->OwnedUnits < 4
+	if (!IntentPlanFor(pHouse).Enabled && !NeuralAI::TrainingMode && Unsorted::CurrentFrame > 5400 && (IsAITickPeriod(2700)) && pHouse->OwnedUnits < 4
 		&& features[65] > 20)
 	{
 		int bestPivotArch = (pExt->NeuralAI_Archetype + 1) % NeuralAI::NumArchetypes;

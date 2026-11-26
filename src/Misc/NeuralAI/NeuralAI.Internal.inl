@@ -819,6 +819,185 @@ namespace
 		return ContextRouting;
 	}
 
+	// Archetype intent route, checkpoint milestones and segment values handed over by the trainer.
+	constexpr int IntentCheckpoints = 7;
+	constexpr int IntentSegments = 8;
+	constexpr int IntentQuantities = 12;
+	constexpr int IntentCheckpointFrames[IntentCheckpoints] = { 6300, 13500, 22500, 36000, 49500, 63000, 76500 };
+	constexpr int IntentLateReviewFrames = 13500;
+	constexpr int IntentFitWeight = 4;
+	constexpr int IntentStayBonus = 100;
+	constexpr int IntentSwitchMargin = 120;
+	constexpr int IntentMaxSwitches = 3;
+	constexpr int IntentExploreOneIn = 12;
+	constexpr uint8_t IntentNoTarget = 255;
+
+	#pragma pack(push, 1)
+
+	struct NeuralIntentPlanHeader
+	{
+		char Magic[8];
+		uint32_t Version;
+		uint32_t Enabled;
+		uint32_t Checkpoints;
+		uint32_t Archetypes;
+		uint32_t Quantities;
+		uint32_t MapClasses;
+		uint32_t MapClass;
+	};
+
+	struct NeuralIntentPlanBlock
+	{
+		NeuralIntentPlanHeader Header;
+		uint8_t Milestones[IntentCheckpoints][NeuralAI::NumArchetypes][IntentQuantities];
+		int16_t SegmentValue[IntentSegments][NeuralAI::NumArchetypes];
+		int16_t MapValue[NumMapClasses][NeuralAI::NumArchetypes];
+	};
+
+	#pragma pack(pop)
+
+	constexpr size_t IntentPlanFileSize = sizeof(NeuralIntentPlanBlock);
+
+	static_assert(sizeof(NeuralIntentPlanHeader) == 36);
+	static_assert(sizeof(NeuralIntentPlanBlock) == 884);
+	static_assert(offsetof(NeuralIntentPlanBlock, Milestones) == 36);
+	static_assert(offsetof(NeuralIntentPlanBlock, SegmentValue) == 708);
+	static_assert(offsetof(NeuralIntentPlanBlock, MapValue) == 836);
+
+	struct NeuralIntentPlan
+	{
+		bool Loaded { false };
+		bool Enabled { false };
+		int MapClass { -1 };
+		uint8_t Milestones[IntentCheckpoints][NeuralAI::NumArchetypes][IntentQuantities] {};
+		int16_t SegmentValue[IntentSegments][NeuralAI::NumArchetypes] {};
+		int16_t MapValue[NumMapClasses][NeuralAI::NumArchetypes] {};
+	};
+
+	NeuralIntentPlan IntentPlan {};
+	NeuralIntentPlan OpponentIntentPlan {};
+
+	// The map class the plan uses: the trainer's when it gave one, else the one the DLL computes
+	// (-1 before frame 30).
+	int IntentMapClass(const NeuralIntentPlan& plan)
+	{
+		return plan.MapClass >= 0 ? plan.MapClass : CurrentMapClass();
+	}
+
+	bool ParseIntentPlan(const uint8_t* pData, size_t size, NeuralIntentPlan& out)
+	{
+		if (!pData || size != IntentPlanFileSize)
+			return false;
+
+		NeuralIntentPlanHeader header {};
+		std::memcpy(&header, pData, sizeof(header));
+
+		if (std::memcmp(header.Magic, "PHOBOSIP", 8) != 0
+			|| header.Version != 1u
+			|| (header.Enabled != 0u && header.Enabled != 1u)
+			|| header.Checkpoints != static_cast<uint32_t>(IntentCheckpoints)
+			|| header.Archetypes != static_cast<uint32_t>(NeuralAI::NumArchetypes)
+			|| header.Quantities != static_cast<uint32_t>(IntentQuantities)
+			|| header.MapClasses != static_cast<uint32_t>(NumMapClasses)
+			|| (header.MapClass != 0xFFFFFFFFu && header.MapClass >= static_cast<uint32_t>(NumMapClasses)))
+		{
+			return false;
+		}
+
+		out.Loaded = true;
+		out.Enabled = header.Enabled == 1u;
+		out.MapClass = header.MapClass == 0xFFFFFFFFu ? -1 : static_cast<int>(header.MapClass);
+		std::memcpy(out.Milestones, pData + offsetof(NeuralIntentPlanBlock, Milestones), sizeof(out.Milestones));
+		std::memcpy(out.SegmentValue, pData + offsetof(NeuralIntentPlanBlock, SegmentValue), sizeof(out.SegmentValue));
+		std::memcpy(out.MapValue, pData + offsetof(NeuralIntentPlanBlock, MapValue), sizeof(out.MapValue));
+
+		return true;
+	}
+
+	bool LoadIntentPlanFile(const char* pPath, NeuralIntentPlan& out)
+	{
+		HANDLE hFile = CreateFileA(pPath, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+
+		if (hFile == INVALID_HANDLE_VALUE)
+			return false;
+
+		LARGE_INTEGER fileSize {};
+
+		if (!GetFileSizeEx(hFile, &fileSize) || static_cast<size_t>(fileSize.QuadPart) != IntentPlanFileSize)
+		{
+			CloseHandle(hFile);
+
+			return false;
+		}
+
+		std::array<uint8_t, IntentPlanFileSize> buffer {};
+		DWORD read = 0;
+		const bool ok = ReadFile(hFile, buffer.data(), static_cast<DWORD>(buffer.size()), &read, NULL) != FALSE;
+
+		CloseHandle(hFile);
+
+		return ok && ParseIntentPlan(buffer.data(), read, out);
+	}
+
+	bool LoadIntentPlanFromSharedMemory(const char* pName, NeuralIntentPlan& out)
+	{
+		HANDLE hMapping = OpenFileMappingA(FILE_MAP_READ, FALSE, pName);
+
+		if (!hMapping)
+			return false;
+
+		bool ok = false;
+
+		if (auto const pView = static_cast<const uint8_t*>(MapViewOfFile(hMapping, FILE_MAP_READ, 0, 0, IntentPlanFileSize)))
+		{
+			ok = ParseIntentPlan(pView, IntentPlanFileSize, out);
+			UnmapViewOfFile(pView);
+		}
+
+		CloseHandle(hMapping);
+
+		return ok;
+	}
+
+	// An opponent in headless training never falls back to the challenger's intent plan when it has none.
+	const NeuralIntentPlan& IntentPlanFor(const HouseClass* pHouse)
+	{
+		if (NeuralAI::HeadlessMode)
+		{
+			auto const pExt = HouseExt::TryFetch(pHouse);
+
+			if (pExt && pExt->NeuralAI_PolicySlot == 1)
+				return OpponentIntentPlan;
+		}
+
+		return IntentPlan;
+	}
+
+	// How much of the milestone of `archetype` at `checkpoint` the snapshot has, 0..100. 50 when the
+	// milestone has no target yet.
+	int IntentFit(const NeuralIntentPlan& plan, int checkpoint, int archetype, const uint8_t snapshot[IntentQuantities])
+	{
+		int sum = 0;
+		int known = 0;
+
+		for (int k = 0; k < IntentQuantities; ++k)
+		{
+			const int target = plan.Milestones[checkpoint][archetype][k];
+
+			if (target == IntentNoTarget)
+				continue;
+
+			known++;
+			sum += target == 0 ? 100 : std::min(100, snapshot[k] * 100 / target);
+		}
+
+		return known > 0 ? sum / known : 50;
+	}
+
+	void IntentWorths(HouseClass* pHouse, int& knownFoe, int& kills, int& losses);
+	void TakeIntentSnapshot(HouseClass* pHouse, uint8_t out[IntentQuantities]);
+	void ReviewIntent(HouseClass* pHouse);
+
 	// Expert choices and fair gain per game phase (trainer only, never read by AI decisions), so
 	// the trainer can credit the context routing per phase; the match gives the map class.
 	std::array<std::array<std::array<int, NeuralAI::NumSpecialists>, NumRoutingPhases>, 32> ExpertTicksByPhase {};

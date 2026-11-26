@@ -520,6 +520,54 @@ static void LoadContextRoutingTables()
 		OpponentContextRouting.Loaded ? "loaded" : "shared");
 }
 
+static void LoadIntentPlans()
+{
+	IntentPlan = NeuralIntentPlan {};
+	OpponentIntentPlan = NeuralIntentPlan {};
+
+	char path[MAX_PATH];
+
+	if (NeuralAI::HeadlessMode)
+	{
+		std::snprintf(path, sizeof(path), "Local\\PhobosAIIntent_%d", NeuralAI::TrainSlotIndex);
+
+		if (!LoadIntentPlanFromSharedMemory(path, IntentPlan))
+		{
+			std::snprintf(path, sizeof(path), "Resources\\AI\\ai_intent_slot_%d.dat", NeuralAI::TrainSlotIndex);
+			LoadIntentPlanFile(path, IntentPlan);
+		}
+
+		std::snprintf(path, sizeof(path), "Local\\PhobosAIIntentOpp_%d", NeuralAI::TrainSlotIndex);
+
+		if (!LoadIntentPlanFromSharedMemory(path, OpponentIntentPlan))
+		{
+			std::snprintf(path, sizeof(path), "Resources\\AI\\ai_intent_opp_slot_%d.dat", NeuralAI::TrainSlotIndex);
+			LoadIntentPlanFile(path, OpponentIntentPlan);
+		}
+	}
+	else
+	{
+		for (const char* pPath : { "Resources\\AI\\ai_intent.dat", "AI\\ai_intent.dat" })
+		{
+			if (LoadIntentPlanFile(pPath, IntentPlan))
+				break;
+		}
+
+		OpponentIntentPlan = IntentPlan;
+	}
+
+	auto const statusOf = [](const NeuralIntentPlan& plan) -> const char*
+	{
+		if (!plan.Loaded)
+			return "none";
+
+		return plan.Enabled ? "enabled" : "disabled";
+	};
+
+	Debug::Log("[NeuralAI] Intent plan: challenger %s, opponent %s.\n",
+		statusOf(IntentPlan), statusOf(OpponentIntentPlan));
+}
+
 static bool LoadSlotBaseFromSharedMemory(const char* pName, SlotBaseMapping& outBase)
 {
 	outBase.Close();
@@ -674,6 +722,8 @@ void NeuralAI::LoadOrResetBackpack()
 	// No context routing unless this match loads it below (campaign and human multiplayer never do).
 	ContextRouting = NeuralContextRouting {};
 	OpponentContextRouting = NeuralContextRouting {};
+	IntentPlan = NeuralIntentPlan {};
+	OpponentIntentPlan = NeuralIntentPlan {};
 
 	// Campaign and standard Multiplayer use only the shared deterministic base
 	// brain.
@@ -747,6 +797,7 @@ void NeuralAI::LoadOrResetBackpack()
 		Debug::Log("[NeuralAI] Headless policy source: %s\n", challengerFromShm ? "shared memory" : "files");
 
 		LoadContextRoutingTables();
+		LoadIntentPlans();
 
 		std::snprintf(policyPath, sizeof(policyPath), "Local\\PhobosAIBase_%d", NeuralAI::TrainSlotIndex);
 		if (!LoadSlotBaseFromSharedMemory(policyPath, ChallengerSlotBase))
@@ -814,6 +865,7 @@ void NeuralAI::LoadOrResetBackpack()
 	}
 
 	LoadContextRoutingTables();
+	LoadIntentPlans();
 
 	if (!valid)
 	{
@@ -1207,6 +1259,7 @@ void NeuralAI::OnScenarioStart()
 			}
 
 			const int sideMeanX100 = sideMatches > 0 ? sideDeltaSum * 100 / sideMatches : 0;
+			const NeuralIntentPlan& intentPlan = IntentPlanFor(pHouse);
 			int bestArchScore = -999999;
 
 			for (int a = 0; a < NeuralAI::NumArchetypes; ++a)
@@ -1219,7 +1272,13 @@ void NeuralAI::OnScenarioStart()
 					: 0;
 				const int exploreJitter = ScenarioClass::Instance->Random.RandomRanged(-90, 90);
 				const int archBiasSlot = (a < 5) ? (48 + a) : (86 + (a - 5));
-				const int aScore = static_cast<int>(policy.OutputBias[archBiasSlot]) + memBonus + tryBonus + exploreJitter;
+				const int intentBonus = intentPlan.Enabled
+					? static_cast<int>(intentPlan.SegmentValue[0][a])
+						+ ((intentPlan.MapClass >= 0 && intentPlan.MapClass < NumMapClasses)
+							? static_cast<int>(intentPlan.MapValue[intentPlan.MapClass][a])
+							: 0)
+					: 0;
+				const int aScore = static_cast<int>(policy.OutputBias[archBiasSlot]) + memBonus + tryBonus + exploreJitter + intentBonus;
 
 				if (aScore > bestArchScore)
 				{
@@ -1231,6 +1290,7 @@ void NeuralAI::OnScenarioStart()
 		}
 
 		pExt->NeuralAI_Archetype = FocusedArchetype(bestArch, pExt->NeuralAI_PolicySlot);
+		GetMacroState(pHouse).IntentHeld[0] = static_cast<int8_t>(std::clamp(pExt->NeuralAI_Archetype, 0, NeuralAI::NumArchetypes - 1));
 
 		std::array<int, 5> openingTrained {};
 
@@ -1426,7 +1486,8 @@ void NeuralAI::OnScenarioEnd(bool playerWon)
 				NeuralAI::Backpack.EstimatedELO = std::max(800, NeuralAI::Backpack.EstimatedELO - 4);
 			}
 
-			const int arch = std::clamp(pExt->NeuralAI_Archetype, 0, 7);
+			const int startArch = GetMacroState(pHouse).IntentHeld[0];
+			const int arch = std::clamp(startArch >= 0 ? static_cast<int>(startArch) : pExt->NeuralAI_Archetype, 0, 7);
 			// Fair credit: the result is shared by every expert that ran for at least 5% of this
 			// house's expert choices, in proportion (twice its share, up to the full delta), not
 			// given whole to the expert in charge when the match ended. The most used one carries

@@ -1957,6 +1957,14 @@ namespace
 		int TrajSpecOpsLosses { 0 };
 		int ExpertKeptTicks { 0 };
 		int ExpertSwitchedTicks { 0 };
+		int8_t IntentHeld[IntentSegments] { -1, -1, -1, -1, -1, -1, -1, -1 };
+		uint8_t IntentSnapshots[IntentCheckpoints][IntentQuantities] {};
+		int8_t IntentProgress[IntentCheckpoints] { -1, -1, -1, -1, -1, -1, -1 };
+		int8_t IntentStanding[IntentCheckpoints] { -1, -1, -1, -1, -1, -1, -1 };
+		bool IntentExplored[IntentCheckpoints] {};
+		int IntentReviewsDone { 0 };
+		int IntentSwitches { 0 };
+		uint8_t IntentStepProgress { 0 };
 
 		void NoteStalledDeployCell(const CellStruct& cell, int untilFrame)
 		{
@@ -2098,6 +2106,14 @@ namespace
 			this->CrawlFromAlly = false;
 			this->CrawlKind = 0;
 			this->LastCrawlFrame = -1;
+			std::fill_n(this->IntentHeld, IntentSegments, static_cast<int8_t>(-1));
+			std::memset(this->IntentSnapshots, 0, sizeof(this->IntentSnapshots));
+			std::fill_n(this->IntentProgress, IntentCheckpoints, static_cast<int8_t>(-1));
+			std::fill_n(this->IntentStanding, IntentCheckpoints, static_cast<int8_t>(-1));
+			std::fill_n(this->IntentExplored, IntentCheckpoints, false);
+			this->IntentReviewsDone = 0;
+			this->IntentSwitches = 0;
+			this->IntentStepProgress = 0;
 			this->LastCrawlType = -1;
 			this->LastCrawlBefore = 0;
 			this->LastCrawlAfter = 0;
@@ -6144,6 +6160,200 @@ namespace
 	NeuralWaveTimingState& GetWaveTimingState(const HouseClass* pHouse)
 	{
 		return WaveTimingStates[pHouse ? std::clamp(pHouse->ArrayIndex, 0, 31) : 0];
+	}
+
+	void IntentWorths(HouseClass* pHouse, int& knownFoe, int& kills, int& losses)
+	{
+		knownFoe = 0;
+		kills = 0;
+		losses = 0;
+
+		if (!pHouse)
+			return;
+
+		auto const& hMacro = GetMacroState(pHouse);
+		auto const& hWave = GetWaveTimingState(pHouse);
+
+		for (auto const& foe : hWave.Enemies)
+			knownFoe = std::max(knownFoe, foe.Army + foe.DefenseValue + foe.KnownBuildings * 120);
+
+		kills = pHouse->TotalKilledUnits * 200 + pHouse->TotalKilledBuildings * 500
+			+ pHouse->StolenBuildingsCredits + hMacro.TrajSpecOpsWorth;
+		losses = hMacro.DefenseLostValue + hMacro.TrajSpecOpsLosses * 300;
+
+		for (const int n : hMacro.TankCensusLost)
+			losses += n * 400;
+	}
+
+	void TakeIntentSnapshot(HouseClass* pHouse, uint8_t out[IntentQuantities])
+	{
+		std::memset(out, 0, IntentQuantities);
+
+		if (!pHouse)
+			return;
+
+		auto const& macro = GetMacroState(pHouse);
+		int knownFoe = 0;
+		int kills = 0;
+		int losses = 0;
+		IntentWorths(pHouse, knownFoe, kills, losses);
+
+		auto const clampByte = [](int v) -> uint8_t
+		{
+			return static_cast<uint8_t>(std::clamp(v, 0, 254));
+		};
+
+		out[0] = clampByte(pHouse->CountResourceDestinations);
+		out[1] = clampByte(pHouse->NumConYards);
+		out[2] = clampByte(pHouse->NumWarFactories);
+		out[3] = clampByte(std::max(0, macro.BankIncomeRate) / 100);
+		out[4] = clampByte(macro.OwnArmyValue / 500);
+		out[5] = clampByte(pHouse->OwnedAircraft);
+		out[6] = clampByte(macro.TechCoveragePct);
+		out[7] = clampByte(pHouse->Buildings.Count);
+		out[8] = clampByte(pHouse->TotalKilledBuildings);
+		out[9] = clampByte(kills / 1000);
+		out[10] = clampByte(100 * kills / std::max(1, kills + knownFoe));
+		out[11] = clampByte(100 * kills / std::max(1, kills + losses));
+	}
+
+	void ReviewIntent(HouseClass* pHouse)
+	{
+		if (!pHouse)
+			return;
+
+		auto const pExt = HouseExt::TryFetch(pHouse);
+
+		if (!pExt)
+			return;
+
+		auto& macro = GetMacroState(pHouse);
+		const int nextFrame = macro.IntentReviewsDone < IntentCheckpoints
+			? IntentCheckpointFrames[macro.IntentReviewsDone]
+			: IntentCheckpointFrames[IntentCheckpoints - 1]
+				+ (macro.IntentReviewsDone - (IntentCheckpoints - 1)) * IntentLateReviewFrames;
+
+		if (Unsorted::CurrentFrame < nextFrame)
+			return;
+
+		const bool late = macro.IntentReviewsDone >= IntentCheckpoints;
+		const int c = std::min(macro.IntentReviewsDone, IntentCheckpoints - 1);
+		const int s = std::min(macro.IntentReviewsDone + 1, IntentSegments - 1);
+		const int held = std::clamp(pExt->NeuralAI_Archetype, 0, NeuralAI::NumArchetypes - 1);
+
+		uint8_t localSnap[IntentQuantities] {};
+		uint8_t* pSnap = late ? localSnap : macro.IntentSnapshots[c];
+		TakeIntentSnapshot(pHouse, pSnap);
+
+		int knownFoe = 0;
+		int kills = 0;
+		int losses = 0;
+		IntentWorths(pHouse, knownFoe, kills, losses);
+
+		const int own = HouseMatchScore(pHouse);
+		const int standing = std::clamp(100 * own / std::max(1, own + knownFoe), 0, 100);
+
+		if (!late)
+			macro.IntentStanding[c] = static_cast<int8_t>(standing);
+
+		const NeuralIntentPlan& plan = IntentPlanFor(pHouse);
+
+		if (!plan.Enabled)
+		{
+			macro.IntentHeld[s] = static_cast<int8_t>(held);
+			macro.IntentReviewsDone++;
+
+			return;
+		}
+
+		int fit[NeuralAI::NumArchetypes] {};
+
+		for (int a = 0; a < NeuralAI::NumArchetypes; ++a)
+			fit[a] = IntentFit(plan, c, a, pSnap);
+
+		if (!late)
+			macro.IntentProgress[c] = static_cast<int8_t>(fit[held]);
+
+		macro.IntentStepProgress = static_cast<uint8_t>(fit[held] + 1);
+
+		const int mapClass = IntentMapClass(plan);
+		int value[NeuralAI::NumArchetypes] {};
+
+		for (int a = 0; a < NeuralAI::NumArchetypes; ++a)
+		{
+			const int mapTerm = (mapClass >= 0 && mapClass < NumMapClasses)
+				? static_cast<int>(plan.MapValue[mapClass][a])
+				: 0;
+			value[a] = static_cast<int>(plan.SegmentValue[s][a]) + mapTerm
+				+ IntentFitWeight * (fit[a] - 50) + (a == held ? IntentStayBonus : 0);
+		}
+
+		int best = 0;
+
+		for (int a = 1; a < NeuralAI::NumArchetypes; ++a)
+		{
+			if (value[a] > value[best])
+				best = a;
+		}
+
+		int next = held;
+
+		if (best != held && value[best] >= value[held] + IntentSwitchMargin)
+			next = best;
+
+		bool explored = false;
+
+		if (NeuralAI::TrainingMode)
+		{
+			const int draw = ScenarioClass::Instance->Random.RandomRanged(0, IntentExploreOneIn - 1);
+
+			if (draw == 0)
+			{
+				int alt = ScenarioClass::Instance->Random.RandomRanged(0, NeuralAI::NumArchetypes - 2);
+
+				if (alt >= held)
+					alt += 1;
+
+				next = alt;
+				explored = true;
+
+				if (!late)
+					macro.IntentExplored[c] = true;
+			}
+		}
+
+		bool refusedByLimit = false;
+
+		if (next != held && (macro.IntentSwitches >= IntentMaxSwitches || pHouse->NumConYards <= 0))
+		{
+			next = held;
+			refusedByLimit = true;
+		}
+
+		const int finalArch = FocusedArchetype(next, pExt->NeuralAI_PolicySlot);
+		pExt->NeuralAI_Archetype = finalArch;
+
+		if (finalArch != held)
+			macro.IntentSwitches++;
+
+		macro.IntentHeld[s] = static_cast<int8_t>(finalArch);
+		macro.IntentReviewsDone++;
+
+		const char* pReason = "kept";
+
+		if (finalArch != next)
+			pReason = "focus";
+		else if (refusedByLimit)
+			pReason = "limit";
+		else if (finalArch != held)
+			pReason = explored ? "explored" : "switched";
+
+		Debug::Log(
+			"[NeuralAI] House %d intent review %d at frame %d: held %d, progress %d, standing %d, fit %d %d %d %d %d %d %d %d, value %d %d %d %d %d %d %d %d, now %d (%s).\n",
+			pHouse->ArrayIndex, macro.IntentReviewsDone, Unsorted::CurrentFrame, held, fit[held], standing,
+			fit[0], fit[1], fit[2], fit[3], fit[4], fit[5], fit[6], fit[7],
+			value[0], value[1], value[2], value[3], value[4], value[5], value[6], value[7],
+			finalArch, pReason);
 	}
 
 } // namespace
