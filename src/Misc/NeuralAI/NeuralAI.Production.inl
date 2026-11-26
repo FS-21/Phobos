@@ -2960,6 +2960,13 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			: heldRefineryCap + (reachedNewOreField ? 1 : 0);
 		const bool permanentRefineryCapReached = ownedRefineries >= fieldRefineryCap;
 
+		// The held fields fill their room at a steady pace (HeldFieldRefineryFrames) once the first war
+		// factory stands. Not while the income falls or the gatherers bring nothing in: a field that
+		// thins wants no more of them, the next ones come with the expansion.
+		const bool heldFieldRefinery = ownedRefineries >= 1 && ownedRefineries < heldRefineryCap && ownedWarFactories >= 1
+			&& !slotMacro.IncomeFalling && !slotMacro.DryEconomyActive
+			&& Unsorted::CurrentFrame - slotMacro.LastRefineryPlacedFrame >= HeldFieldRefineryFrames;
+
 		// TEMP diagnostic (expansion refineries, 2026-11-18): the refinery cap of each house.
 		if (IsAITickWindow(4500, 0))
 		{
@@ -3323,12 +3330,23 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		// The second one (user, 2026-11-18: the FreeUnit takes no war factory time): while the war
 		// factory builds a unit that gathers nothing and the income is not falling (a thinning field
 		// wants no more harvesters).
+		// Read from the factories themselves, as the bank governor does (queueFactoryIdle): the primary
+		// factory of the house read "builds the army" in 9.6% of 788 samples after minute 10 while the
+		// governor found the vehicle queue at work, so the second harvester was wanted in 3.9% of them.
 		bool warFactoryBuildsArmy = false;
 
-		if (auto const pArmyFactory = pHouse->GetPrimaryFactory(AbstractType::UnitType, false, BuildCat::DontCare))
+		for (auto const pArmyFactory : FactoryClass::Array)
 		{
-			if (auto const pQueued = abstract_cast<UnitClass*>(pArmyFactory->Object))
-				warFactoryBuildsArmy = pQueued->Type && !pQueued->Type->Harvester && !pQueued->Type->ResourceGatherer;
+			if (!pArmyFactory || pArmyFactory->Owner != pHouse || !pArmyFactory->Object || pArmyFactory->OnHold)
+				continue;
+
+			auto const pQueued = abstract_cast<UnitClass*>(pArmyFactory->Object);
+
+			if (pQueued && pQueued->Type && !pQueued->Type->Naval && !pQueued->Type->Harvester && !pQueued->Type->ResourceGatherer)
+			{
+				warFactoryBuildsArmy = true;
+				break;
+			}
 		}
 
 		const bool wantsSecondHarvesterViaRefinery = warFactoryBuildsArmy && !GetMacroState(pHouse).IncomeFalling
@@ -3940,6 +3958,13 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 					if (GetMacroState(pHouse).IncomeFalling && slotFieldCell != CellStruct::Empty)
 						score += IncomeFallingRefineryBonus;
+				}
+				else if (heldFieldRefinery && !isHarvRecoveryCandidate)
+				{
+					// A field we hold with room for one more (HeldFieldRefineryFrames).
+					score = std::max(static_cast<int>(scores[1]), 300) + HeldFieldRefineryBonus
+						- std::max(0, ownedRefineries - 4) * HeldFieldRefineryStep;
+					candFree = scores[1] > 300;
 				}
 				else if (isHarvRecoveryCandidate
 					&& (orphanRefineryZoneNeedsReplacement >= 0 || ownedHarvestersCount < staticRefineriesCount))
@@ -6038,12 +6063,15 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			&& (features[20] > 6 || hasUncolonizedIslandTarget) && (scores[30] >= 450 || wantsArchipelagoExpansion)
 			&& (!needsCrossIslandMCV || ownedHeavyIslandTransports >= 1 || canFerryAnyMCVAcrossWater)
 			&& (features[19] < 24 || pHouse->Buildings.Count >= 14 || wantsArchipelagoExpansion || SlotGate(scores[81], 85, 81)));
+	// An income pays for the expansion MCV as it is built (user: the AI pays as it goes, never gated on
+	// cash saved): a house that spends all it earns never held the 1400 credits asked for here.
 	const bool canSafelySaveForExpansionMCV
 		= (pHouse->NumConYards >= 1 && pHouse->NumConYards < maxAllowedConYards && !ownsUndeployedMCV && !islandMcvWaitsAsYard
 			&& (features[20] > 6 || hasUncolonizedIslandTarget || fieldsRunningDry)
 			&& (scores[30] >= 450 || wantsArchipelagoExpansion || fieldsRunningDry || islandOreRunningOut)
 			&& (!needsCrossIslandMCV || ownedHeavyIslandTransports >= 1 || canFerryAnyMCVAcrossWater)
-			&& (money >= 1400 || desperateIslandOrOreExpansion || fieldsRunningDry || islandOreRunningOut));
+			&& (money >= 1400 || (ownedEconomyUnits > 0 && trueRefineries > 0) || desperateIslandOrOreExpansion || fieldsRunningDry
+				|| islandOreRunningOut));
 	const bool canSafelySaveForMCV = canSafelySaveForReplacementMCV || canSafelySaveForExpansionMCV;
 
 	// Fields dry (or the island ones running out) and an expansion MCV wanted: the price of the

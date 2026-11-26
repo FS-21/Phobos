@@ -3218,6 +3218,14 @@ namespace
 	// A newly reached ore field gets a refinery past what we own (and past the held fields' room) at
 	// most once in this many frames (user, 2026-11-18: capping refineries is a synonym of future defeat).
 	constexpr int RefineryNewFieldFrames = 3000;
+	// The fields a house holds take the refineries they have room for at this pace once its first war
+	// factory stands, not only one per field reached (user, 2026-11-26: «acaparado recursos como un
+	// loco porque el dinero NUNCA debería ser suficiente»): in 40 matches the median house had 3
+	// refineries at minute 20 on fields with room for 8. Such a refinery scores HeldFieldRefineryBonus
+	// over its learned slot, less HeldFieldRefineryStep for each refinery past four.
+	constexpr int HeldFieldRefineryFrames = 2700;
+	constexpr int HeldFieldRefineryBonus = 1500;
+	constexpr int HeldFieldRefineryStep = 65;
 	// A refinery for a remote yard without one stands within this many cells of it, on its land
 	// (production counts a yard's refinery within 18 cells, the footprint corner is not its centre),
 	// its search starts at the yard's own field, within RefineryHubOreCells of it.
