@@ -3581,6 +3581,33 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 		const bool firstFactoryPending = groundWarFactoryBuildableNow || navalFirst;
 
+		// The first barracks comes before the second refinery too (user approved, 2026-11-26, «Todos»):
+		// many sides need it for the war factory. In 40 matches the houses kept 5800 of their 10000
+		// starting credits through minutes 1 to 5 and built the first war factory at minute 6.5.
+		bool firstBarracksPending = false;
+
+		if (ownedBarracks == 0 && ownedWarFactories == 0)
+		{
+			auto const& barracksCooldowns = GetMacroState(pHouse).BuildingPlacementCooldownUntilFrame;
+
+			for (auto const pBarracksType : BuildingTypeClass::Array)
+			{
+				if (pBarracksType && pBarracksType->Factory == AbstractType::InfantryType && !pBarracksType->UndeploysInto
+					&& CanBuildUnderHumanRules(pHouse, pBarracksType))
+				{
+					auto const cooldown = barracksCooldowns.find(pBarracksType->ArrayIndex);
+
+					if (cooldown != barracksCooldowns.end() && Unsorted::CurrentFrame < cooldown->second)
+						continue;
+
+					firstBarracksPending = true;
+					break;
+				}
+			}
+		}
+
+		const bool openingFactoryPending = firstFactoryPending || firstBarracksPending;
+
 		// Buildings a deployer of ours can bring (NeuralAI.MobileFactory.inl; user approved, 2026-11-21,
 		// «Apruebo el plan»): of the deployers our vehicle factories can build now the cheapest of each
 		// building, a mobile factory only with a spot waiting for it (HouseWantsMobileFactory). Such a
@@ -3934,14 +3961,11 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					score += 450;
 				}
 
-				// Opening order (firstFactoryPending): after two refineries, or after one when the next
-				// refinery has just failed to find a cell, the first war factory (or shipyard) comes first. Applied
-				// after every branch above, the new-field one included.
-				if (firstFactoryPending && !isHarvRecoveryCandidate
-					&& (ownedRefineries >= 2 || (ownedRefineries >= 1 && GetMacroState(pHouse).RefineryReachFailures > 0)))
-				{
+				// Opening order (openingFactoryPending): after the first refinery the first barracks and the
+				// first war factory (or shipyard) come before the second (user approved, 2026-11-26, «Todos»;
+				// they came after two refineries). Applied after every branch above, the new-field one included.
+				if (openingFactoryPending && !isHarvRecoveryCandidate && ownedRefineries >= 1)
 					score -= 2500;
-				}
 
 				// Expert 0 after a raid: refineries back to their peak first.
 				if (pExt->NeuralAI_ActiveExpert == 0 && GetMacroState(pHouse).EconomyRecoveryActive
@@ -3992,6 +4016,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					score = scores[2] - owned * (bankSteps > 0 ? 420 : 820) + (bankSteps > 0 ? 250 + 120 * std::min(6, bankSteps) : 0);
 					candSlot = 2;
 					candFree = true;
+
+					// The first barracks once a refinery stands, like the first war factory.
+					if (ownedBarracks == 0 && ownedRefineries >= 1)
+						score += 1200;
 
 					if (ownedBarracks < maxEnemyBarracks && hasTechCenter && money > 1500)
 						score += 420;
@@ -4532,7 +4560,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				// 6000 credits and more stood without one until frame 20000 (14 of 126 houses).
 				constexpr int towerBeforeFirstFactoryPenalty = 3000;
 
-				if (firstFactoryPending && ownedRefineries >= 1 && !wasRecentlyAttacked && !fillsAirDeficit
+				if (openingFactoryPending && ownedRefineries >= 1 && !wasRecentlyAttacked && !fillsAirDeficit
 					&& !fillsIslandHold && !(airRaid && isAntiAir) && !isBldInProgress)
 				{
 					score -= towerBeforeFirstFactoryPenalty;
@@ -4980,9 +5008,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				auto const pPicked = bestBldIdx >= 0 ? BuildingTypeClass::Array.GetItem(bestBldIdx) : nullptr;
 				// The tech floor yields to the refinery (expansion is crucial) until it has waited
 				// TechStepRefineryYieldFrames, then takes one building between refineries.
-				const bool isFirstCoreFactoryPick = firstFactoryPending && ownedRefineries >= 2
-					&& pPicked->Factory == AbstractType::UnitType
-					&& (pPicked->Naval ? ownedShipyards == 0 : ownedWarFactories == 0);
+				const bool isFirstCoreFactoryPick = pPicked && ownedRefineries >= 1
+					&& ((firstFactoryPending && pPicked->Factory == AbstractType::UnitType
+							&& (pPicked->Naval ? ownedShipyards == 0 : ownedWarFactories == 0))
+						|| (firstBarracksPending && pPicked->Factory == AbstractType::InfantryType));
 				const bool keepPick = pPicked
 					&& (pPicked->Refinery || isFirstCoreFactoryPick
 						|| (pHouse->HasLowPower() && pPicked->PowerBonus > pPicked->PowerDrain)
