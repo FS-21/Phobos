@@ -233,6 +233,17 @@ namespace
 		SpyInfiltrated,
 		SpyDisguisedEntry,
 		SpyLostOnWay,
+		// Detectors (the detector block of UpdateExpertAI and the places that count them): the trainer compares them per DLL
+		// stamp to find regressions; nothing in the AI reads them.
+		NoWarFactory10,
+		BuildingCancelled,
+		BuildingCancelRepeat,
+		Income10,
+		Income20,
+		WaveShort,
+		CombatIdle2m,
+		DeployerIdle2m,
+		FerrySingle,
 		Count
 	};
 
@@ -265,11 +276,37 @@ namespace
 		"mcvIdleStepOnSite", "mcvUnfoldRetry", "navalStrikeInRange", "navalPlanShipsFreed", "urbanQuietRelease",
 		"ferryDepartedStuck", "ferryMcvNowhere", "deployerIdleWatchdog", "deployerSiteFailed", "deployerGoalNoFit",
 		"navalStuckReleased", "navalPreyAttacks", "navalSweeps", "navalMassStrikes", "navalPassageWaits", "orderLeaseRefused",
-		"engineerCaptured", "enemyBldCaptured", "conYardCaptured", "engineerLostOnWay", "spyInfiltrated", "spyDisguisedEntry", "spyLostOnWay" };
+		"engineerCaptured", "enemyBldCaptured", "conYardCaptured", "engineerLostOnWay", "spyInfiltrated", "spyDisguisedEntry", "spyLostOnWay",
+		"noWarFactory10", "bldCancelled", "bldCancelRepeat", "income10", "income20", "waveShort", "combatIdle2m",
+		"deployerIdle2m", "ferrySingle" };
 
 	static_assert(std::size(NeuralDecisionNames) == static_cast<size_t>(NeuralDecision::Count));
 
 	std::array<std::array<uint32_t, static_cast<size_t>(NeuralDecision::Count)>, 32> DecisionCounts {};
+
+	// What the detectors keep per house this match: the credits earned at the first sample and at
+	// minute 10, and the last building cancellations (the units counted idle are in the macro state,
+	// DetectorIdleCounted).
+	constexpr int DetectorMinuteFrames = 900;
+	constexpr int DetectorIdleFrames = 1800;
+	constexpr int DetectorSampleFrames = 450;
+	constexpr int DetectorCancelWindowFrames = 4500;
+	constexpr int DetectorCancelRepeatLeast = 3;
+	constexpr int DetectorFerryWaitingLeast = 4;
+
+	struct NeuralDetectorState
+	{
+		int StartEarned { -1 };
+		int Earned10 { -1 };
+		bool Checked10 { false };
+		bool Checked20 { false };
+		int LastSampleFrame { -1 };
+		std::array<int, 16> CancelType {};
+		std::array<int, 16> CancelFrame {};
+		int CancelNext { 0 };
+	};
+
+	std::array<NeuralDetectorState, 32> DetectorStates {};
 
 	// Learned gate verdicts per house and slot this match ([open, closed]): the trainer finds the
 	// slots pushed so far that the gate always gives the same answer (no gradient reaches them).
@@ -1546,6 +1583,38 @@ namespace
 
 		if (idx >= 0 && idx < 32)
 			DecisionCounts[idx][static_cast<size_t>(decision)]++;
+	}
+
+	// A building the AI cancelled in production (detector): every cancellation counts, and the same type
+	// cancelled DetectorCancelRepeatLeast times or more within DetectorCancelWindowFrames counts as a
+	// repeat (the economy hold cancelling the war factory again and again).
+	__forceinline void NoteBuildingCancel(int houseIndex, const BuildingTypeClass* pType)
+	{
+		if (!pType || houseIndex < 0 || houseIndex >= 32)
+			return;
+
+		auto& state = DetectorStates[houseIndex];
+		const int now = Unsorted::CurrentFrame;
+		int recent = 1;
+
+		for (size_t i = 0; i < state.CancelType.size(); ++i)
+		{
+			if (state.CancelType[i] == pType->ArrayIndex + 1 && now >= state.CancelFrame[i]
+				&& now - state.CancelFrame[i] <= DetectorCancelWindowFrames)
+			{
+				++recent;
+			}
+		}
+
+		const size_t slot = static_cast<size_t>(state.CancelNext) % state.CancelType.size();
+		state.CancelType[slot] = pType->ArrayIndex + 1;
+		state.CancelFrame[slot] = now;
+		state.CancelNext = static_cast<int>((slot + 1) % state.CancelType.size());
+
+		CountDecision(NeuralDecision::BuildingCancelled, houseIndex);
+
+		if (recent >= DetectorCancelRepeatLeast)
+			CountDecision(NeuralDecision::BuildingCancelRepeat, houseIndex);
 	}
 
 	// Decision credit per expert (trainer only, never read by AI decisions). expertGain gives each

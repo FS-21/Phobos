@@ -5584,6 +5584,9 @@ int NeuralAI::PlaceCompletedBuilding(BuildingClass* pFactory, BuildingClass* pBu
 		if (FactoryClass* pBldFac
 			= pHouse->GetPrimaryFactory(AbstractType::BuildingType, pBuildingType->Naval, pBuildingType->BuildCat))
 		{
+			if (auto const pCancelled = abstract_cast<BuildingClass*>(pBldFac->Object))
+				NoteBuildingCancel(pHouse->ArrayIndex, pCancelled->Type);
+
 			pBldFac->AbandonProduction();
 		}
 

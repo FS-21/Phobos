@@ -1085,6 +1085,100 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	// Factories the bank can pay for (the production queues spend at a fixed rate per factory).
 	UpdateBankGovernor(pHouse);
 
+	// The sampled detectors: a war factory and the credits earned by minutes 10 and 20, and the units left
+	// idle over DetectorIdleFrames: a combat unit on guard with no role that keeps it there (tank guard,
+	// capital group, plan, operation, passenger fill), or a deployer (MCV, Nanocore). A unit counts once per
+	// stay. Nothing in the AI reads them.
+	{
+		const int idx = pHouse->ArrayIndex;
+		const int now = Unsorted::CurrentFrame;
+		auto const pState = (idx >= 0 && idx < 32) ? &DetectorStates[idx] : nullptr;
+
+		if (pState && (pState->LastSampleFrame < 0 || now < pState->LastSampleFrame
+			|| now - pState->LastSampleFrame >= DetectorSampleFrames))
+		{
+			auto& state = *pState;
+
+			state.LastSampleFrame = now;
+			const int earned = pHouse->CreditsSpent + pHouse->Available_Money();
+
+			if (state.StartEarned < 0)
+				state.StartEarned = earned;
+
+			if (!state.Checked10 && now >= 10 * DetectorMinuteFrames)
+			{
+				state.Checked10 = true;
+				state.Earned10 = earned;
+				DecisionCounts[idx][static_cast<size_t>(NeuralDecision::Income10)] = static_cast<uint32_t>(std::max(0, earned - state.StartEarned));
+
+				if (!pHouse->Defeated && pHouse->NumWarFactories <= 0)
+					CountDecision(NeuralDecision::NoWarFactory10, idx);
+			}
+
+			if (!state.Checked20 && state.Checked10 && now >= 20 * DetectorMinuteFrames)
+			{
+				state.Checked20 = true;
+				DecisionCounts[idx][static_cast<size_t>(NeuralDecision::Income20)] = static_cast<uint32_t>(std::max(0, earned - state.Earned10));
+			}
+
+			auto& macro = GetMacroState(pHouse);
+
+			for (auto const pTechno : TechnoClass::Array)
+			{
+				auto const pFoot = abstract_cast<FootClass*>(pTechno);
+
+				if (!pFoot || pFoot->Owner != pHouse || !pFoot->IsAlive || pFoot->InLimbo || pFoot->WhatAmI() == AbstractType::Aircraft
+					|| pFoot->IsInAir() || !IsFootHeldStill(pHouse, pFoot, DetectorIdleFrames)
+					|| IsInTransportOp(pHouse, pFoot->UniqueID) || IsUnitCarryallAtWork(pFoot))
+				{
+					continue;
+				}
+
+				auto const pType = pFoot->GetTechnoType();
+				auto const pUnit = abstract_cast<UnitClass*>(pFoot);
+				auto const pInf = abstract_cast<InfantryClass*>(pFoot);
+				bool isDeployer = false;
+
+				if (!pType || (pUnit && (pUnit->Type->Harvester || pUnit->Type->Weeder || pUnit->Type->ResourceGatherer)))
+					continue;
+
+				if (pUnit && pUnit->Type->DeploysInto)
+				{
+					isDeployer = true;
+				}
+				else
+				{
+					auto const pSlot = pFoot->GetWeapon(0);
+
+					if ((pUnit && (IsAmphibiousOrAirTransport(pUnit->Type) || IsImmobileUnitTypeOnLand(pUnit->Type)))
+						|| (pInf && (pInf->Type->Engineer || IsSpyInfantryType(pInf->Type)))
+						|| pType->CanDisguise || pType->PermaDisguise || !pSlot || !pSlot->WeaponType
+						|| (pFoot->CurrentMission != Mission::Guard && pFoot->CurrentMission != Mission::Area_Guard
+							&& pFoot->CurrentMission != Mission::Sleep)
+						|| macro.TankGuard.contains(pFoot->UniqueID) || macro.TankGuardEscorts.contains(pFoot->UniqueID)
+						|| macro.CapitalHeld.contains(pFoot->UniqueID) || IsPlanMember(pHouse, pFoot->UniqueID)
+						|| IsPassengerFillHeld(pHouse, pFoot))
+					{
+						continue;
+					}
+				}
+
+				auto const pClock = GetClock(macro, pFoot->UniqueID, NeuralClock::Still);
+
+				if (!pClock)
+					continue;
+
+				auto const itCounted = macro.DetectorIdleCounted.find(pFoot->UniqueID);
+
+				if (itCounted != macro.DetectorIdleCounted.end() && itCounted->second == pClock->Since)
+					continue;
+
+				macro.DetectorIdleCounted[pFoot->UniqueID] = pClock->Since;
+				CountDecision(isDeployer ? NeuralDecision::DeployerIdle2m : NeuralDecision::CombatIdle2m, idx);
+			}
+		}
+	}
+
 	// Expert 0: economy peaks and crisis actions (blackout, broke, harvester balance).
 	UpdateEconomyCrisis(pHouse);
 	TraceParkedFerries(pHouse->ArrayIndex, "economy crisis");
@@ -3235,6 +3329,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 						&& (pInProgType->Factory != AbstractType::UnitType || pInProgType->Naval)
 						&& pBldFac->GetProgress() < 42)
 					{
+						NoteBuildingCancel(pHouse->ArrayIndex, pInProgType);
 						pBldFac->AbandonProduction();
 					}
 				}

@@ -1060,6 +1060,9 @@ void NeuralAI::OnScenarioStart()
 	for (auto& counts : DecisionCounts)
 		counts.fill(0);
 
+	for (auto& detector : DetectorStates)
+		detector = NeuralDetectorState {};
+
 	for (auto& houseGates : GateCounts)
 	{
 		for (auto& slotGates : houseGates)

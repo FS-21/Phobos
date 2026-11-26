@@ -14150,6 +14150,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				if (!known)
 				{
 					shortTargets.push_back({ shortCell, -1, static_cast<int>(counted), now });
+					CountDecision(NeuralDecision::WaveShort, pHouse->ArrayIndex);
 
 					Debug::Log("[NeuralAI] Frame %d | House #%d wave short at (%d,%d): %u counted, %u sent (%u handed to transports), the place waits %d frames\n",
 						now, pHouse->ArrayIndex, shortCell.X, shortCell.Y, static_cast<unsigned>(counted),
@@ -17022,6 +17023,63 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 					pTrip->Departed = true;
 					CountDecision(NeuralDecision::FerryDeparted);
 					logFerryDeparture(pTrip->SailReason);
+
+					// Detector: a wave or economy ferry that leaves with one unit while DetectorFerryWaitingLeast
+					// idle ones wait on its shore. Special trips go alone on purpose and are left out: deployers,
+					// harvesters, engineers and spies, departures under fire, carryall jobs (rescues, evacuations).
+					constexpr int specialSail = FerrySailBaseDeployer | FerrySailStolenDeployer | FerrySailHarvester
+						| FerrySailEngineer | FerrySailUnderFire;
+					auto const pOnlyPass = pTrans->Passengers.GetFirstPassenger();
+					auto const pOnlyType = pOnlyPass ? pOnlyPass->GetTechnoType() : nullptr;
+					auto const pOnlyInf = abstract_cast<InfantryClass*>(pOnlyPass);
+					auto const pOnlyUnit = abstract_cast<UnitClass*>(pOnlyPass);
+					const bool specialCargo = !pOnlyType || (pOnlyInf && (pOnlyInf->Type->Engineer || IsSpyInfantryType(pOnlyInf->Type)))
+						|| (pOnlyUnit && (pOnlyUnit->Type->Harvester || pOnlyUnit->Type->Weeder || pOnlyUnit->Type->ResourceGatherer
+							|| pOnlyUnit->Type->DeploysInto));
+
+					if (numPass == 1 && (pTrip->SailReason & specialSail) == 0 && !specialCargo && !IsUnitCarryallAtWork(pTrans)
+						&& !AirliftJobs.contains(pTrans->UniqueID))
+					{
+						int waiting = 0;
+
+						for (auto const pWaitUnit : UnitClass::Array)
+						{
+							if (waiting >= DetectorFerryWaitingLeast)
+								break;
+
+							if (!pWaitUnit || pWaitUnit->Owner != pHouse || pWaitUnit->InLimbo || !pWaitUnit->IsAlive || !pWaitUnit->Type
+								|| pWaitUnit->Type->Harvester || pWaitUnit->Type->Weeder || pWaitUnit->Type->ResourceGatherer
+								|| pWaitUnit->Type->DeploysInto || IsAmphibiousOrAirTransport(pWaitUnit->Type)
+								|| (pWaitUnit->CurrentMission != Mission::Guard && pWaitUnit->CurrentMission != Mission::Area_Guard)
+								|| CanFootCrossWaterDirectly(pWaitUnit) || IsInTransportOp(pHouse, pWaitUnit->UniqueID)
+								|| ObjectZone(pWaitUnit, MovementZone::Normal) != pTrip->LoadZone)
+							{
+								continue;
+							}
+
+							++waiting;
+						}
+
+						for (auto const pWaitInf : InfantryClass::Array)
+						{
+							if (waiting >= DetectorFerryWaitingLeast)
+								break;
+
+							if (!pWaitInf || pWaitInf->Owner != pHouse || pWaitInf->InLimbo || !pWaitInf->IsAlive || !pWaitInf->Type
+								|| pWaitInf->Type->Engineer || IsSpyInfantryType(pWaitInf->Type)
+								|| (pWaitInf->CurrentMission != Mission::Guard && pWaitInf->CurrentMission != Mission::Area_Guard)
+								|| CanFootCrossWaterDirectly(pWaitInf) || IsInTransportOp(pHouse, pWaitInf->UniqueID)
+								|| ObjectZone(pWaitInf, MovementZone::Normal) != pTrip->LoadZone)
+							{
+								continue;
+							}
+
+							++waiting;
+						}
+
+						if (waiting >= DetectorFerryWaitingLeast)
+							CountDecision(NeuralDecision::FerrySingle, pHouse->ArrayIndex);
+					}
 				}
 			}
 		}
