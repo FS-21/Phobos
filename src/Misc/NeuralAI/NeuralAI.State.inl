@@ -1052,10 +1052,23 @@ namespace
 		// Strategic plan library (see UpdateStrategicPlans).
 		std::array<NeuralPlanInstance, static_cast<size_t>(NeuralPlanId::Count)> Plans {};
 		std::array<int, static_cast<size_t>(NeuralPlanId::Count)> PlanNextAttemptFrame {};
-		// The main wave fills first (WavePlanHoldFrames): per plan, since when the gathering wave has
-		// held it (-1 not held) and the last frame it did.
-		std::array<int, static_cast<size_t>(NeuralPlanId::Count)> PlanWaveHeldSince {};
-		std::array<int, static_cast<size_t>(NeuralPlanId::Count)> PlanWaveHeldLast {};
+		// Mission queue (Mission*): per plan that marches, the request it waits in the queue with: since
+		// when (-1 none), the last frame its plan asked again, the units it waits for, the group it
+		// offered and the idle army there was at its last try, and the kinds of units it takes
+		// (MissionLane*).
+		std::array<int, static_cast<size_t>(NeuralPlanId::Count)> PlanRequestSince {};
+		std::array<int, static_cast<size_t>(NeuralPlanId::Count)> PlanRequestLast {};
+		std::array<int, static_cast<size_t>(NeuralPlanId::Count)> PlanRequestNeed {};
+		std::array<int, static_cast<size_t>(NeuralPlanId::Count)> PlanRequestOffered {};
+		std::array<int, static_cast<size_t>(NeuralPlanId::Count)> PlanRequestPool {};
+		std::array<int, static_cast<size_t>(NeuralPlanId::Count)> PlanRequestLanes {};
+		// The plan request the main wave waits for (-1 none), since when it has been that one, the last
+		// frame the queue was read, and the vehicles that request still lacks (the vehicle pick builds
+		// for it).
+		int MissionHeadPlan { -1 };
+		int MissionHeadSince { 0 };
+		int MissionHeadFrame { -100000 };
+		int MissionUnitsWanted { 0 };
 		std::unordered_set<DWORD> PlanMembers {};
 		// Follow-up attacks of plans that took their building target (PlanFollowUp*); their members count
 		// as plan members.
@@ -1731,9 +1744,9 @@ namespace
 		// without it is met and only it holds the wave (-1 none), and whether that wait was logged.
 		int WaveFloorWaitSince { -1 };
 		bool WaveFloorWaitLogged { false };
-		// The plans that march on the enemy wait for the main wave (WavePlanHoldFrames): since when it
-		// has been short of its count with a target and idle units that reach it (-1 not now), and the
-		// last frame its gate ran.
+		// The request of the main wave in the mission queue (Mission*): since when it has been short of
+		// its count with a target and idle units that reach it (-1 not now), and the last frame its gate
+		// ran.
 		int WaveGatherSince { -1 };
 		int WaveGatherFrame { -100000 };
 		std::vector<NeuralResistedPlace> ResistedPlaces {};
@@ -2020,8 +2033,16 @@ namespace
 			this->OpponentProfile = NeuralOpponentProfile {};
 			this->Plans.fill(NeuralPlanInstance {});
 			this->PlanNextAttemptFrame.fill(0);
-			this->PlanWaveHeldSince.fill(-1);
-			this->PlanWaveHeldLast.fill(-100000);
+			this->PlanRequestSince.fill(-1);
+			this->PlanRequestLast.fill(-100000);
+			this->PlanRequestNeed.fill(0);
+			this->PlanRequestOffered.fill(0);
+			this->PlanRequestPool.fill(0);
+			this->PlanRequestLanes.fill(0);
+			this->MissionHeadPlan = -1;
+			this->MissionHeadSince = 0;
+			this->MissionHeadFrame = -100000;
+			this->MissionUnitsWanted = 0;
 			this->PlanMembers.clear();
 			this->FollowUps.clear();
 			this->RaidTransportBanUntil.clear();
@@ -3770,13 +3791,37 @@ namespace
 	constexpr int WaveEchelonEngagedUnits = 3;
 	constexpr double WaveEchelonEngagedCells = 14.0;
 	constexpr int WaveFloorWaitMostFrames = 1800;
-	// The main wave fills first (user, 2026-11-26: «debería darse prioridad a rellenar los planes más
-	// viejos para que tengan el cupo de unidades solicitado para lanzarlos»): while it is short of its
-	// count, the plans that march on the enemy with the same idle army do not start. In 40 matches
-	// that count was met in 13% of the checks after minute 15 while the offensive plans took 6257 units in
-	// groups of 5.5. The wait has a limit here too: after WavePlanHoldFrames without a wave the plan
-	// that has waited longest leaves, and the wait starts again.
+	// Mission queue (user, 2026-11-26: «debería darse prioridad a rellenar los planes más viejos para
+	// que tengan el cupo de unidades solicitado para lanzarlos», then «Y sí adelante con lo que
+	// propusiste»; the waves are missions too). The main wave and the plans that march on the enemy
+	// with the idle ground army ask in one queue, and a request waits behind the older ones that take
+	// the same kinds of units (MissionLaneVehicles, MissionLaneInfantry): requests for other kinds
+	// fill side by side and leave when complete, as each factory feeds its own (the user: «debería
+	// poder adelantarse y lanzarse al estar llena»). Aircraft and ships have their own plans outside
+	// this queue.
+	// A plan asks when it has a target, its learned gate opens and its least group stands ready
+	// (Pincer and Three-Front Assault with half of theirs), MissionQueuePlans plans at most. With
+	// nothing before it, it leaves with MissionGroupFloor units, or with fewer when its group stops
+	// growing while the idle army grows (the plan takes no more) or after MissionHeadMostFrames as the
+	// oldest request. The wave asks while it is short of its count and does not leave while an older
+	// plan request waits; after WavePlanHoldFrames the plans behind it go first.
+	// No request keeps a dead target: a plan chooses its target again at every try, a request its plan
+	// has not asked again for within two retries is over (its target fell, its gate closed), and the
+	// oldest one that cannot leave MissionHeadMostFrames and two retries after it became the oldest is
+	// aborted, its plan waiting MissionHeadMostFrames before it asks again.
+	// Before it, each plan started at once with whatever group of free units stood ready when it
+	// tried and kept nothing otherwise: in 40 matches the wave count was met in 13% of the checks
+	// after minute 15 while the offensive plans took 6257 units in groups of 5.5.
 	constexpr int WavePlanHoldFrames = 5400;
+	constexpr int MissionQueuePlans = 2;
+	constexpr int MissionGroupFloor = 6;
+	constexpr int MissionHeadMostFrames = 2700;
+	constexpr int MissionFillRetryFrames = 300;
+	constexpr int MissionLaneVehicles = 1;
+	constexpr int MissionLaneInfantry = 2;
+	// What the vehicle pick adds for an armed ground vehicle while the request the wave waits for
+	// lacks vehicles.
+	constexpr int MissionUnitsWantedBonus = 400;
 	// A team push lasts at least the walk of its farthest member plus TeamPushMarginFrames; the team
 	// keeps its target for TeamTargetKeepFrames while it stands; a house with TeamWeakHouseBuildings
 	// known buildings or fewer is the team target only when no member picks a stronger one.

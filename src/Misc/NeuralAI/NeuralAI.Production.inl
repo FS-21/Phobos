@@ -7381,6 +7381,14 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				score += std::min(RaidRecruitMostBonus, std::max(0, pUnit->Speed) * RaidRecruitSpeedBonus);
 			}
 
+			// The plan request the main wave waits for lacks vehicles (MissionUnitsWanted): the armed ground
+			// vehicles it can take come first.
+			if (GetMacroState(pHouse).MissionUnitsWanted > 0 && pWpn && !pUnit->Naval && !isEconomyUnit && !isMCV && !isTransportClass
+				&& !isSuicideVehicle)
+			{
+				score += MissionUnitsWantedBonus;
+			}
+
 			if (logUnitPicks)
 			{
 				const char diagClass = isMCV ? 'M' : ((pUnit->Harvester || pUnit->ResourceGatherer) ? 'H'
