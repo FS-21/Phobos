@@ -4628,6 +4628,7 @@ namespace
 				macro.EconomyHoldCancels++;
 				macro.EconomyHoldLineCancels++;
 				macro.BrokeHeldObjects.erase(held);
+				NoteBuildingCancel(pHouse->ArrayIndex, abstract_cast<BuildingTypeClass*>(pType));
 				pFactory->AbandonProduction();
 				continue;
 			}
@@ -4677,6 +4678,7 @@ namespace
 					holdForHarvester ? "broke" : "economy hold", pType->ID);
 				macro.EconomyHoldCancels++;
 				macro.EconomyHoldLineCancels++;
+				NoteBuildingCancel(pHouse->ArrayIndex, pBldType);
 				pFactory->AbandonProduction();
 			}
 			else

@@ -1564,6 +1564,9 @@ namespace
 		int TankCensusLifeFrames { 0 };
 		int TankCensusLifeCount { 0 };
 		std::unordered_map<DWORD, int> TankCensusBirth {};
+		// Detector: the still clock start of each unit already counted idle (detector block of UpdateExpertAI), so a
+		// unit counts once per stay. Nothing in the AI reads it.
+		std::unordered_map<DWORD, int> DetectorIdleCounted {};
 		// ConYard count wanted by the governor for the building queue (0 when none).
 		int BankWantedYards { 0 };
 		// Until when a unit that lost its boarding turn, or held a transport's radio link without
@@ -2334,6 +2337,7 @@ namespace
 			this->TankCensusLifeFrames = 0;
 			this->TankCensusLifeCount = 0;
 			this->TankCensusBirth.clear();
+			this->DetectorIdleCounted.clear();
 			this->BankWantedYards = 0;
 			this->FerryBlockedUntil.clear();
 			this->FerryBoardTurns.clear();
