@@ -5241,6 +5241,50 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	const bool seaControlAcross = seaControl && seaMacro.EnemyAcrossWater;
 	// Army first (ArmyFirstShortCredits), for the unit queues.
 	const bool armyFirstShortUnits = pHouse->NumWarFactories >= 1 && money < ArmyFirstShortCredits;
+	// Enemy buildings an engineer can take at little risk (EngineerSoftCapture*), and what the engineer
+	// assault that takes them lacks.
+	int softEnemyCaptures = 0;
+	int ownedCaptureEngineers = 0;
+	bool ownsClosedLandTransport = false;
+
+	for (auto const pEnemyBld : GetKnownEnemyBuildingCache(pHouse).Buildings)
+	{
+		if (!pEnemyBld || pEnemyBld->InLimbo || !pEnemyBld->IsAlive || !pEnemyBld->Type || !pEnemyBld->Type->Capturable
+			|| !pEnemyBld->Owner || pEnemyBld->Owner == pHouse || pEnemyBld->Owner->IsNeutral() || pHouse->IsAlliedWith(pEnemyBld->Owner)
+			|| !IsEnemyBuildingKnown(pHouse, pEnemyBld))
+		{
+			continue;
+		}
+
+		const CellStruct captureCell = pEnemyBld->GetMapCoords();
+
+		if (CountKnownEnemyDefensesNear(pHouse, captureCell, 8.0, false) <= EngineerSoftCaptureDefenses
+			&& VisibleEnemyThreatNear(pHouse, captureCell, 7) <= 0)
+		{
+			softEnemyCaptures++;
+		}
+	}
+
+	if (softEnemyCaptures > 0)
+	{
+		for (auto const pOwnInf : InfantryClass::Array)
+		{
+			if (pOwnInf && pOwnInf->Owner == pHouse && pOwnInf->IsAlive && pOwnInf->Type && pOwnInf->Type->Engineer)
+				ownedCaptureEngineers++;
+		}
+
+		for (auto const pOwnUnit : UnitClass::Array)
+		{
+			if (pOwnUnit && pOwnUnit->Owner == pHouse && pOwnUnit->IsAlive && pOwnUnit->Type && !pOwnUnit->Type->Naval
+				&& !pOwnUnit->Type->OpenTopped && pOwnUnit->Type->Passengers >= 2 && !IsAmphibiousOrAirTransport(pOwnUnit->Type))
+			{
+				ownsClosedLandTransport = true;
+				break;
+			}
+		}
+	}
+
+	const bool engineerAssaultWantsTransport = softEnemyCaptures > 0 && ownedCaptureEngineers > 0 && !ownsClosedLandTransport;
 	seaMacro.SeaControlLongRangeShip = false;
 	// Land control (LandControl*): the opposite, the enemy's remnants are at sea.
 	UpdateLandControl(pHouse);
@@ -7207,6 +7251,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 					score += scores[28] + (features[21] > 0 ? -500 : 0);
 					candSlot = 28;
 					candFree = true;
+
+					// The engineer assault lacks its closed land transport (EngineerTransportBonus).
+					if (engineerAssaultWantsTransport && !pUnit->OpenTopped && pUnit->Passengers >= 2)
+						score += EngineerTransportBonus;
 				}
 				else
 				{
@@ -8013,17 +8061,19 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				= (neutralCashDerrickCount > ownedEngineers) ? 880 : (moreTechThanEngineers ? 680 : 320);
 			const int techBonus = hasCapturableTechOnMap ? cashDerrickBonus : 0;
 			const int mechanicBonus = (alsoRepairsUnitsOrBlds && ownedEngineers < mechanicQuota) ? 450 : 0;
+			// An enemy building it can take at little risk (EngineerSoftCapture*).
+			const int softCaptureBonus = softEnemyCaptures > ownedEngineers ? EngineerSoftCaptureBonus : 0;
 
 			// Army first: no engineer without a capture left for it or a repair quota to fill.
-			if (armyFirstShortUnits && !isInfInProgress && !moreTechThanEngineers && mechanicBonus == 0)
+			if (armyFirstShortUnits && !isInfInProgress && !moreTechThanEngineers && mechanicBonus == 0 && softCaptureBonus == 0)
 				continue;
 
-			if (pHouse->OwnedInfantry < 3 && !hasCapturableTechOnMap && mechanicBonus == 0 && scores[36] <= 80)
+			if (pHouse->OwnedInfantry < 3 && !hasCapturableTechOnMap && mechanicBonus == 0 && softCaptureBonus == 0 && scores[36] <= 80)
 				score -= 300;
 			else
-				score += scores[18] + std::max(techBonus, mechanicBonus);
+				score += scores[18] + std::max({ techBonus, mechanicBonus, softCaptureBonus });
 
-			if (!(pHouse->OwnedInfantry < 3 && !hasCapturableTechOnMap && mechanicBonus == 0 && scores[36] <= 80))
+			if (!(pHouse->OwnedInfantry < 3 && !hasCapturableTechOnMap && mechanicBonus == 0 && softCaptureBonus == 0 && scores[36] <= 80))
 			{
 				candSlot = 18;
 				candFree = true;
