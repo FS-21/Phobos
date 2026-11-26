@@ -2,6 +2,7 @@
 #include <Ext/Anim/Body.h>
 #include <Ext/Techno/Body.h>
 #include <Ext/WeaponType/Body.h>
+#include <Misc/SyncLogging.h>
 #include <unordered_set>
 
 // has everything inited except SpawnNextAnim at this point
@@ -53,6 +54,9 @@ namespace BulletAITemp
 DEFINE_HOOK(0x4666F7, BulletClass_AI, 0x6)
 {
 	GET(BulletClass*, pThis, EBP);
+
+	// Sync log: where every homing projectile is and what it steers at, frame by frame.
+	SyncLogger::AddBulletStepSyncLogEvent(pThis);
 
 	const auto pBulletExt = BulletExt::Fetch(pThis);
 	const auto pBulletTypeExt = pBulletExt->TypeExtData;
@@ -575,6 +579,14 @@ DEFINE_HOOK(0x6FF008, TechnoClass_Fire_BeforeMoveTo, 0x8)
 
 		const auto crdTgt = crdOffset + fireCoords;
 		BulletExt::ApplyArcingFix(pBullet, crdSrc, crdTgt, velocity);
+	}
+
+	// Sync log: the launch as the engine is about to make it.
+	{
+		REF_STACK(const BulletVelocity, launchVelocity, STACK_OFFSET(0xB0, -0x60));
+		REF_STACK(const CoordStruct, launchCoords, STACK_OFFSET(0xB0, -0x6C));
+
+		SyncLogger::AddBulletLaunchSyncLogEvent(pBullet, launchCoords, launchVelocity.X, launchVelocity.Y, launchVelocity.Z);
 	}
 
 	return 0;
