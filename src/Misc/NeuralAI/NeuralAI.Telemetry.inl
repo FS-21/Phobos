@@ -1558,6 +1558,21 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 				}
 			}
 
+			// The knob steps this house plays now (its phase and map class), in the order of NeuralKnob. Only
+			// once the AI has worked out the map class: this snapshot must not be what computes it.
+			char knobsText[80] = "";
+
+			if (pOwner && MapInfo.Computed)
+			{
+				size_t knobsUsed = 0;
+
+				for (int k = 0; k < static_cast<int>(NeuralKnob::Count) && knobsUsed + 6 < sizeof(knobsText); ++k)
+				{
+					knobsUsed += static_cast<size_t>(sprintf_s(knobsText + knobsUsed, sizeof(knobsText) - knobsUsed, "%s%d", k ? ", " : "",
+						KnobStep(pOwner, static_cast<NeuralKnob>(k))));
+				}
+			}
+
 			const NeuralTerritoryStat terr
 				= (h.ArrayIndex >= 0 && h.ArrayIndex < 32) ? TerritoryStats[h.ArrayIndex] : NeuralTerritoryStat {};
 
@@ -1782,7 +1797,7 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 				"\"warFactories\": %d, \"barracks\": %d, "
 				"\"defenses\": %d, \"territory\": %d, \"territoryAvg\": %.1f, \"oreFields\": %d, \"oreFieldsAvg\": %.1f, "
 				"\"bldValue\": %d, \"blds\": \"%s\", \"units\": \"%s\", \"prod\": [%s], \"airThreat\": %d, "
-				"\"ownAA\": %d, \"aiMsAvg\": %.2f, \"aiMsMax\": %.2f, \"aiSections\": {%s}, \"aiPeaks\": [%s], \"expertTicks\": [%s], \"expertGain\": [%s], \"expertTicksByPhase\": [%s], \"expertGainByPhase\": [%s], \"expertCredit\": [%s], \"expertCreditByPhase\": [%s], \"expertCreditParts\": [%s], \"defense\": [%s], \"enemyMix\": \"%s\", \"claim\": %s, \"team\": %s, \"econ\": [%s], \"bank\": [%s], \"army\": [%s], \"coalition\": [%s], \"truces\": [%s], \"diplomacy\": {%s}, \"decisions\": {%s}, \"plans\": {%s}, \"gates\": {%s}}%s\n",
+				"\"ownAA\": %d, \"aiMsAvg\": %.2f, \"aiMsMax\": %.2f, \"aiSections\": {%s}, \"aiPeaks\": [%s], \"expertTicks\": [%s], \"expertGain\": [%s], \"expertTicksByPhase\": [%s], \"expertGainByPhase\": [%s], \"expertCredit\": [%s], \"expertCreditByPhase\": [%s], \"expertCreditParts\": [%s], \"defense\": [%s], \"enemyMix\": \"%s\", \"claim\": %s, \"team\": %s, \"econ\": [%s], \"bank\": [%s], \"army\": [%s], \"coalition\": [%s], \"truces\": [%s], \"diplomacy\": {%s}, \"decisions\": {%s}, \"plans\": {%s}, \"gates\": {%s}, \"knobs\": [%s]}%s\n",
 				h.ArrayIndex, h.SideIndex, h.CountryIndex, h.Archetype, archetypeStart, intentText.c_str(), pOwner ? GetMacroState(pOwner).Opening : 0, h.ActiveExpert, h.Credits, h.KilledUnits,
 				h.KilledBuildings, h.OwnedUnits, h.OwnedBuildings, h.NetWorthScore, h.IsWinner, h.IsDefeated,
 				h.PolicySlot, pOwner ? WaveMassPermille(PolicyFor(pOwner).OutputBias[37]) : 1000, pOwner ? pOwner->NumConYards : 0, pOwner ? pOwner->CountResourceGatherers : 0,
@@ -1793,7 +1808,7 @@ void NeuralAI::UpdateTelemetrySnapshot(bool matchEnded, int winnerHouseIdx, bool
 				(h.ArrayIndex >= 0 && h.ArrayIndex < 32 && TickCosts[h.ArrayIndex].Ticks > 0)
 					? TickCosts[h.ArrayIndex].TotalMs / TickCosts[h.ArrayIndex].Ticks
 					: 0.0,
-				(h.ArrayIndex >= 0 && h.ArrayIndex < 32) ? TickCosts[h.ArrayIndex].MaxMs : 0.0, sectionsText.c_str(), peaksText.c_str(), expertTicksText.c_str(), expertGainText.c_str(), expertTicksByPhaseText.c_str(), expertGainByPhaseText.c_str(), expertCreditText.c_str(), expertCreditByPhaseText.c_str(), expertCreditPartsText.c_str(), defenseText, enemyMixText.c_str(), claimText, teamText, econText, bankText, armyText, coalitionText, truceText, diplomacyText, decisionsText.c_str(), plansText.c_str(), gatesText.c_str(), (i + 1 < dst->NumHouses) ? "," : "");
+				(h.ArrayIndex >= 0 && h.ArrayIndex < 32) ? TickCosts[h.ArrayIndex].MaxMs : 0.0, sectionsText.c_str(), peaksText.c_str(), expertTicksText.c_str(), expertGainText.c_str(), expertTicksByPhaseText.c_str(), expertGainByPhaseText.c_str(), expertCreditText.c_str(), expertCreditByPhaseText.c_str(), expertCreditPartsText.c_str(), defenseText, enemyMixText.c_str(), claimText, teamText, econText, bankText, armyText, coalitionText, truceText, diplomacyText, decisionsText.c_str(), plansText.c_str(), gatesText.c_str(), knobsText, (i + 1 < dst->NumHouses) ? "," : "");
 
 			if (lineLen > 0)
 				jsonBuf.append(lineBuf, std::min<size_t>(static_cast<size_t>(lineLen), sizeof(lineBuf) - 1));

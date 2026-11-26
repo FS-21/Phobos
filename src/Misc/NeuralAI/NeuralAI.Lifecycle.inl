@@ -520,6 +520,47 @@ static void LoadContextRoutingTables()
 		OpponentContextRouting.Loaded ? "loaded" : "shared");
 }
 
+// Knob tables (see NeuralKnobTable), from the same places as the context routing tables:
+// Local\PhobosAIKnobs_<slot> and its Opp twin in training, Resources\AI\ai_knobs.dat (or AI\ai_knobs.dat)
+// otherwise. With none, every knob is the constant of the code.
+static void LoadKnobTables()
+{
+	KnobTable = NeuralKnobTable {};
+	OpponentKnobTable = NeuralKnobTable {};
+
+	char path[MAX_PATH];
+
+	if (NeuralAI::HeadlessMode)
+	{
+		std::snprintf(path, sizeof(path), "Local\\PhobosAIKnobs_%d", NeuralAI::TrainSlotIndex);
+
+		if (!LoadKnobTableFromSharedMemory(path, KnobTable))
+		{
+			std::snprintf(path, sizeof(path), "Resources\\AI\\ai_knobs_slot_%d.dat", NeuralAI::TrainSlotIndex);
+			LoadKnobTableFile(path, KnobTable);
+		}
+
+		std::snprintf(path, sizeof(path), "Local\\PhobosAIKnobsOpp_%d", NeuralAI::TrainSlotIndex);
+
+		if (!LoadKnobTableFromSharedMemory(path, OpponentKnobTable))
+		{
+			std::snprintf(path, sizeof(path), "Resources\\AI\\ai_knobs_opp_slot_%d.dat", NeuralAI::TrainSlotIndex);
+			LoadKnobTableFile(path, OpponentKnobTable);
+		}
+	}
+	else
+	{
+		for (const char* pPath : { "Resources\\AI\\ai_knobs.dat", "AI\\ai_knobs.dat" })
+		{
+			if (LoadKnobTableFile(pPath, KnobTable))
+				break;
+		}
+	}
+
+	Debug::Log("[NeuralAI] Knob table: %s, opponent %s.\n", KnobTable.Loaded ? "loaded" : "none",
+		OpponentKnobTable.Loaded ? "loaded" : "shared");
+}
+
 static void LoadIntentPlans()
 {
 	IntentPlan = NeuralIntentPlan {};
@@ -719,9 +760,12 @@ void NeuralAI::LoadOrResetBackpack()
 
 	NeuralAI::CurrentBaseSignature = HashValueFNV1a(baseModelHash, NeuralAI::CurrentRulesSignature);
 
-	// No context routing unless this match loads it below (campaign and human multiplayer never do).
+	// No context routing and no knob table unless this match loads them below (campaign and human
+	// multiplayer never do).
 	ContextRouting = NeuralContextRouting {};
 	OpponentContextRouting = NeuralContextRouting {};
+	KnobTable = NeuralKnobTable {};
+	OpponentKnobTable = NeuralKnobTable {};
 	IntentPlan = NeuralIntentPlan {};
 	OpponentIntentPlan = NeuralIntentPlan {};
 
@@ -797,6 +841,7 @@ void NeuralAI::LoadOrResetBackpack()
 		Debug::Log("[NeuralAI] Headless policy source: %s\n", challengerFromShm ? "shared memory" : "files");
 
 		LoadContextRoutingTables();
+		LoadKnobTables();
 		LoadIntentPlans();
 
 		std::snprintf(policyPath, sizeof(policyPath), "Local\\PhobosAIBase_%d", NeuralAI::TrainSlotIndex);
@@ -865,6 +910,7 @@ void NeuralAI::LoadOrResetBackpack()
 	}
 
 	LoadContextRoutingTables();
+	LoadKnobTables();
 	LoadIntentPlans();
 
 	if (!valid)

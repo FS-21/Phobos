@@ -3791,7 +3791,7 @@ namespace
 
 		// The reserve (BankReserveCredits) covers a raid on the harvesters: above it the bank is surplus
 		// the queues should spend.
-		const int reserve = BankReserveCredits;
+		const int reserve = KnobScaled(pHouse, NeuralKnob::BankReserve, BankReserveCredits);
 		const int64_t surplus = static_cast<int64_t>(money) - reserve;
 		const int64_t needed = macro.BankIncomeRate + std::max<int64_t>(0, surplus) * 1000 / 9000;
 		macro.BankSpendCapacity = static_cast<int>(std::min<int64_t>(capacity, INT_MAX));

@@ -2322,7 +2322,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		}
 
 		const bool effectiveFrontlineThreat = frontlineThreatActive || (frontlineDefenseDeficit > 0);
-		const int defDensityMod = std::clamp(static_cast<int>(scores[14]) / 200, 0, 4);
+		const int defDensityMod = std::clamp(static_cast<int>(scores[14]) / 200, 0, 4)
+			+ KnobUnits(pHouse, NeuralKnob::DefenseDensity, KnobDefenseReach);
 		const int enemyArmorPressureBonus = (features[65] >= 24) ? 3 : ((features[65] >= 12) ? 2 : (features[80] > 0 ? 1 : 0));
 
 		const int baseGroundDefCap = 2 + ownedRefineries * 2 + ownedWarFactories + ownedTechStructures
@@ -5092,7 +5093,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			&& techMacro.LastRefineryPlacedFrame > techMacro.TechStepWaitSince
 			&& techStepWaited >= 600 && bestBldIdx == awaitedRefineryIdx;
 		const bool techFloorPick = bestTechStepIdx >= 0
-			&& (techStepWaited >= TechStepFloorFrames || techAlternatesWithRefinery)
+			&& (techStepWaited >= KnobScaled(pHouse, NeuralKnob::TechFloor, TechStepFloorFrames) || techAlternatesWithRefinery)
 			&& hasActiveBuildingIncome && !bestFillsAirDeficit && inProgressBldIdx < 0 && inProgressDefIdx < 0;
 
 		if (techFloorPick && bestBldIdx != bestTechStepIdx)
@@ -6158,7 +6159,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	const int economyUnitCap = (trueRefineries > 0)
 		? (GetMacroState(pHouse).IncomeFalling
 			? std::max(2, trueRefineries + 1)
-			: std::max(2, money >= 50000 ? trueRefineries + 1 : 2 * trueRefineries + 1 + ecoBiasMod))
+			: std::max(2, money >= 50000 ? trueRefineries + 1
+				: 2 * trueRefineries + 1 + ecoBiasMod + KnobUnits(pHouse, NeuralKnob::Harvesters, KnobHarvestersReach)))
 		: 4;
 
 	// Mobile refineries: a house mining with deployed miners, each one refinery and harvesters in
@@ -6966,9 +6968,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	// The tank floor (TankFloor*): base defense + escorts (kept in TankFloorBasePart/EscortPart up to
 	// TankFloorMost so Wide Guard never locks extra offensive tanks at home), plus a macro-bank offensive
 	// armor target when the house is rich or runs multiple War Factories so super-economies field real tank armies.
-	const int baseTankFloor = std::min(TankFloorMost, std::max(TankFloorMin
+	const int baseTankFloor = KnobScaled(pHouse, NeuralKnob::TankFloor, std::min(TankFloorMost, std::max(TankFloorMin
 		+ std::clamp(trueRefineries - TankFloorRefineries, 0, TankFloorEconomyMost), ownedGroundCombatUnits / TankFloorShare)
-		+ ownedArtilleryVehicles + ownedEscortedAntiAirVehicles + ownedEscortedSupportVehicles);
+		+ ownedArtilleryVehicles + ownedEscortedAntiAirVehicles + ownedEscortedSupportVehicles));
 	const bool homeIslandArmyBacklog = features[21] > 0
 		&& waitingBattalionSizeOnIslands > ownedTransportTotalCapacity + 8;
 	const int macroBankTankSurge = (!homeIslandArmyBacklog && (money >= 15000 || GetMacroState(pHouse).BankSurplus > 0))
