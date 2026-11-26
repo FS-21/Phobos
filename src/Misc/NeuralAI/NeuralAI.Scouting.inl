@@ -54,14 +54,16 @@ namespace
 		int Cost { 0 };
 	};
 
-	// A mobile sensor array on its way to a lookout (SensorLookoutMinSight), and the frames its trip
-	// may take (SensorTrip*).
+	// A mobile sensor array on its way to a lookout (SensorLookoutMinSight): the nearest it came to
+	// its goal (cells) and the frame it did (SensorTrip*), where it was last seen and its type.
 	struct NeuralSensorTrip
 	{
 		DWORD ID { 0 };
 		CellStruct Target { CellStruct::Empty };
 		int Frame { 0 };
-		int LateFrames { 0 };
+		int Nearest { 0 };
+		CellStruct LastCell { CellStruct::Empty };
+		UnitTypeClass* Type { nullptr };
 	};
 
 	// A link of the sensor chain (SensorChain*): where a sensor array of ours stands unfolded or is
@@ -1791,6 +1793,12 @@ namespace
 		return !pGoal || CellClass::Coord2Cell(pGoal->GetCoords()).DistanceFrom(pUnit->GetMapCoords()) <= 1.5;
 	}
 
+	// The frames a sensor vehicle that many cells from its goal may take to come nearer it (SensorTrip*).
+	int SensorTripFramesFor(const UnitClass* pUnit, int cells)
+	{
+		return SensorTripBaseFrames + cells * SensorTripFramesPerCellSpeed / std::max(1, pUnit->Type->Speed);
+	}
+
 	// Sensor lookouts (SensorLookoutMinSight), every scouting update: a mobile sensor array on its way
 	// unfolds once there (or steps onto the nearest deployable cell free of ore/slopes), and an idle
 	// packed sensor vehicle ALWAYS deploys: at a post of the sensor chain (SensorChain*) while a
@@ -1808,10 +1816,44 @@ namespace
 		{
 			auto const pUnit = abstract_cast<UnitClass*>(FindOwnFootByID(pHouse, trip.ID));
 
+			// Its vehicle is gone. Unfolded, the array stands where it was last seen and nothing is
+			// told; destroyed, no longer ours or taken off the map, its trip ends with a line (match
+			// #18872: a trip vanished from the log and another one to the same post followed it).
 			if (!pUnit || pUnit->InLimbo || !IsSensorLookoutType(pUnit->Type))
+			{
+				bool unfolded = false;
+
+				for (auto const pBld : pHouse->Buildings)
+				{
+					if (pBld && pBld->IsAlive && pBld->Type == trip.Type->DeploysInto
+						&& pBld->GetMapCoords().DistanceFrom(trip.LastCell) <= 2.0)
+					{
+						unfolded = true;
+						break;
+					}
+				}
+
+				if (!unfolded)
+				{
+					Debug::Log("[NeuralAI] House %d Sensor: %s %u is %s, its trip to (%d,%d) ends %d cells short at (%d,%d), frame %d.\n",
+						houseIdx, trip.Type->ID, trip.ID, !pUnit ? "gone (destroyed or no longer ours)"
+						: (pUnit->InLimbo ? "off the map (aboard a transport or inside a building)" : "no sensor vehicle any more"),
+						trip.Target.X, trip.Target.Y, static_cast<int>(trip.LastCell.DistanceFrom(trip.Target)), trip.LastCell.X,
+						trip.LastCell.Y, now);
+				}
+
 				continue;
+			}
 
 			const double dist = pUnit->GetMapCoords().DistanceFrom(trip.Target);
+			trip.LastCell = pUnit->GetMapCoords();
+
+			// Nearer its goal than it ever was: the frames it may take start anew, for the cells left.
+			if (static_cast<int>(dist) < trip.Nearest)
+			{
+				trip.Nearest = static_cast<int>(dist);
+				trip.Frame = now;
+			}
 
 			// Hurt on its way, the repair retreat of the vehicle micro took it: its trip ends here. The
 			// move ordered again below and the repair station called it by turns (first matches with the
@@ -1819,11 +1861,12 @@ namespace
 			// 28 times, and it gave up three trips). The lookouts take it again after its repairs.
 			if (IsOnRepairTrip(pHouse, trip.ID))
 			{
-				Debug::Log("[NeuralAI] House %d Sensor: %s leaves its trip to (%d,%d) for repairs at %d%% health, %d cells short, frame %d.\n",
-					houseIdx, pUnit->Type->ID, trip.Target.X, trip.Target.Y, static_cast<int>(pUnit->GetHealthPercentage() * 100),
+				Debug::Log("[NeuralAI] House %d Sensor: %s %u leaves its trip to (%d,%d) for repairs at %d%% health, %d cells short, frame %d.\n",
+					houseIdx, pUnit->Type->ID, trip.ID, trip.Target.X, trip.Target.Y, static_cast<int>(pUnit->GetHealthPercentage() * 100),
 					static_cast<int>(dist), now);
 				continue;
 			}
+
 			const bool moving = pUnit->CurrentMission == Mission::Move || pUnit->QueuedMission == Mission::Move;
 
 			if (pUnit->IsDeploying || pUnit->CurrentMission == Mission::Unload || pUnit->QueuedMission == Mission::Unload
@@ -1846,13 +1889,16 @@ namespace
 				pUnit->ClearNavigationList();
 				pUnit->SetTarget(nullptr);
 				pUnit->QueueMission(Mission::Unload, true);
-				Debug::Log("[NeuralAI] House %d Sensor: %s unfolds at (%d,%d), frame %d.\n", houseIdx, pUnit->Type->ID,
+				Debug::Log("[NeuralAI] House %d Sensor: %s %u unfolds at (%d,%d), frame %d.\n", houseIdx, pUnit->Type->ID, trip.ID,
 					pUnit->GetMapCoords().X, pUnit->GetMapCoords().Y, now);
 			}
-			else if (now - trip.Frame > trip.LateFrames)
+			else if (now - trip.Frame > SensorTripFramesFor(pUnit, trip.Nearest))
 			{
-				Debug::Log("[NeuralAI] House %d Sensor: %s gave up on (%d,%d), %d cells short, frame %d.\n", houseIdx, pUnit->Type->ID,
-					trip.Target.X, trip.Target.Y, static_cast<int>(dist), now);
+				// No nearer its goal for the frames the cells left allow: dropped, however long it has
+				// been on its way. A hop to a clean cell nearby (below) is the same trip, its count goes on.
+				Debug::Log("[NeuralAI] House %d Sensor: %s %u gave up on (%d,%d), %d cells short, no nearer than %d cells for %d frames, "
+					"frame %d.\n", houseIdx, pUnit->Type->ID, trip.ID, trip.Target.X, trip.Target.Y, static_cast<int>(dist), trip.Nearest,
+					now - trip.Frame, now);
 				continue;
 			}
 			else if (there)
@@ -2094,8 +2140,7 @@ namespace
 
 			const int cells = static_cast<int>(from.DistanceFrom(next));
 			OrderSensorMove(pUnit, pNext);
-			state.SensorTrips.push_back({ pUnit->UniqueID, next, now,
-				SensorTripBaseFrames + cells * SensorTripFramesPerCellSpeed / std::max(1, pUnit->Type->Speed) });
+			state.SensorTrips.push_back({ pUnit->UniqueID, next, now, cells, from, pUnit->Type });
 			macro.PlanMembers.insert(pUnit->UniqueID);
 			taken.push_back(next);
 
@@ -2106,14 +2151,14 @@ namespace
 
 			if (forChain)
 			{
-				Debug::Log("[NeuralAI] House %d Sensor: %s to a chain post (%d,%d), %d cells, for the stealth sighting (%d,%d) %d cells from "
-					"the post, %d links on its land, frame %d.\n", houseIdx, pUnit->Type->ID, next.X, next.Y, cells, chainSighting.X,
-					chainSighting.Y, static_cast<int>(next.DistanceFrom(chainSighting)), static_cast<int>(chain.size()), now);
+				Debug::Log("[NeuralAI] House %d Sensor: %s %u to a chain post (%d,%d), %d cells, for the stealth sighting (%d,%d) %d cells "
+					"from the post, %d links on its land, frame %d.\n", houseIdx, pUnit->Type->ID, pUnit->UniqueID, next.X, next.Y, cells,
+					chainSighting.X, chainSighting.Y, static_cast<int>(next.DistanceFrom(chainSighting)), static_cast<int>(chain.size()), now);
 			}
 			else
 			{
-				Debug::Log("[NeuralAI] House %d Sensor: %s to a lookout (%d,%d), %d cells, frame %d.\n", houseIdx, pUnit->Type->ID,
-					next.X, next.Y, cells, now);
+				Debug::Log("[NeuralAI] House %d Sensor: %s %u to a lookout (%d,%d), %d cells, frame %d.\n", houseIdx, pUnit->Type->ID,
+					pUnit->UniqueID, next.X, next.Y, cells, now);
 			}
 		}
 

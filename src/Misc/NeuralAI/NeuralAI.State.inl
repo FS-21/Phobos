@@ -4558,8 +4558,13 @@ namespace
 	// while enemy stealth units were seen in the last SensorLookoutSightingFrames where no sensor of
 	// ours covers; with none, a forward post or the place its sensors would cover the most ground no
 	// sensor of ours covers. It unfolds there and stays: packed it finds nothing, so no lookout packs
-	// it up again (only the reversible pack-up does, when it is about to fall). Its trip is dropped by
-	// the scouts' rule: SensorTripBaseFrames and SensorTripFramesPerCellSpeed a cell over its speed.
+	// it up again (only the reversible pack-up does, when it is about to fall). Its trip is dropped
+	// once it has not come nearer its goal for SensorTripBaseFrames plus SensorTripFramesPerCellSpeed
+	// over its speed for each cell still left: the scouts' rule, counted anew from every cell it comes
+	// nearer and not once from the start by the straight distance (user, 2026-11-26: «Sí, hazlo» to
+	// a limit of no progress; matches #18872 and #19310: three vehicles on a winding way were dropped
+	// 3, 5 and 11 cells from their posts after 3285 to 4410 frames, and with their trips forgotten the
+	// chain no longer counted their posts as links).
 	constexpr int SensorLookoutMinSight = 10;
 	constexpr int SensorLookoutSightingFrames = 5400;
 	constexpr int SensorTripBaseFrames = 900;
