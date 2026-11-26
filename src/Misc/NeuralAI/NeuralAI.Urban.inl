@@ -12,6 +12,14 @@ namespace
 	// Seats the barracks are asked to fill at a time: a squad for the best positions, or a city.
 	constexpr int UrbanSquadSeats = 12;
 	constexpr int UrbanCitySeats = 60;
+	// The city fills more slowly as it fills (user, 2026-11-26: the priority goes down as many are
+	// taken, like the airfields past a dock count): holding more than UrbanTaperFromGarrisons civilian
+	// buildings, a soldier starts another one only UrbanTaperFramesPerGarrison frames per building
+	// over that count after the last one was started, UrbanTaperMostFrames at most. A building we
+	// hold is filled at once, and so is a bunker the house built.
+	constexpr int UrbanTaperFromGarrisons = 4;
+	constexpr int UrbanTaperFramesPerGarrison = 450;
+	constexpr int UrbanTaperMostFrames = 5400;
 	// A tank for an empty tank bunker is built on purpose only with this much money left after it.
 	constexpr int GarrisonTrainingReserve = 600;
 	// Below this health a building is not garrisoned (it throws its soldiers out before it falls).
@@ -106,6 +114,10 @@ namespace
 		int OwnOccupierInfantry { 0 };
 		int OwnGarrisons { 0 };
 		int OwnOccupants { 0 };
+		// Civilian buildings we hold (not the bunkers the house builds), and the last frame a soldier
+		// was sent to start a new one (UrbanTaper*).
+		int OwnCivilGarrisons { 0 };
+		int LastCivilStartFrame { -100000 };
 		int GarrisonWorth { 0 };
 		// Known buildings worth holding at the last scan; 6 or more make an urban map.
 		int WorthyBuildings { 0 };
@@ -578,6 +590,7 @@ namespace
 		// building at red health, often with the occupants already dead.
 		state.OwnGarrisons = 0;
 		state.OwnOccupants = 0;
+		state.OwnCivilGarrisons = 0;
 		state.GarrisonsInDanger = 0;
 		state.BunkersToMan = 0;
 
@@ -601,6 +614,9 @@ namespace
 
 			state.OwnGarrisons++;
 			state.OwnOccupants += pBld->Occupants.Count;
+
+			if (!pBld->Type->IsBaseDefense)
+				state.OwnCivilGarrisons++;
 
 			auto const pKnown = FindKnownUrbanBuilding(state, pBld->UniqueID);
 
@@ -965,7 +981,7 @@ namespace
 	// (6+ known buildings worth holding) has no share (user: a city is filled with soldiers): every
 	// idle occupier goes in while a building worth holding has room, and the barracks train the
 	// soldiers for the seats left (GetUrbanProductionNeeds). Filling a building we hold ignores the
-	// share anywhere.
+	// share anywhere. New civilian buildings come more slowly as we hold more of them (UrbanTaper*).
 	// A building is taken by a squad (user: many soldiers at once, not one or two; once it is full
 	// the next building, the rest back to the pool): the soldier picks the building and the idle
 	// occupiers within 20 cells of it go along, as many as there is room for. A building out of the
@@ -991,6 +1007,10 @@ namespace
 		const int sharePercent = expertActive ? 60 : 40;
 		const int cap = std::max(expertActive ? 4 : 2, state.OwnOccupierInfantry * sharePercent / 100);
 		const bool overCap = !urbanMap && state.OwnOccupants + pendingTotal >= cap;
+		// The taper of the civilian buildings (UrbanTaper*): the next new one waits.
+		const int civilOver = state.OwnCivilGarrisons - UrbanTaperFromGarrisons;
+		const bool newCivilWaits = civilOver > 0
+			&& Unsorted::CurrentFrame - state.LastCivilStartFrame < std::min(UrbanTaperMostFrames, civilOver * UrbanTaperFramesPerGarrison);
 		state.TriesSinceReport++;
 
 		if (overCap)
@@ -1076,6 +1096,9 @@ namespace
 			const bool partlyOurs = (own && inside > 0) || (pEntering && pEntering->Own > 0);
 
 			if (overCap && !partlyOurs)
+				continue;
+
+			if (newCivilWaits && !partlyOurs && !pBld->Type->IsBaseDefense)
 				continue;
 
 			// Off urban maps only a building with a seen enemy near is held (user approved, 2026-11-19):
@@ -1192,6 +1215,10 @@ namespace
 			state.SmallSquadSinceReport++;
 			return false;
 		}
+
+		// A new civilian building starts here: the next one waits for the taper.
+		if (bestTaken == 0 && !pBest->Type->IsBaseDefense)
+			state.LastCivilStartFrame = now;
 
 		state.Orders.erase(std::remove_if(state.Orders.begin(), state.Orders.end(),
 			[now](const NeuralUrbanOrder& order) { return now - order.Frame > 900 || now < order.Frame; }), state.Orders.end());
