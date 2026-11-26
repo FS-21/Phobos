@@ -13419,8 +13419,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	const bool massOverflow = tankMassWaves && waveAbleUnits >= static_cast<size_t>(TankMassOverflowVehicles);
 	const bool waveStrengthReady = (waveCheck.Launch && !waveAwaitsEscort) || massOverflow;
 
-	// The plans that march on the enemy wait for this wave while it is short of its count
-	// (WavePlanHoldFrames): since when, with a target and idle units that reach it.
+	// The request of this wave in the mission queue (Mission*): since when it has been short of its
+	// count, with a target and idle units that reach it.
 	{
 		const int gatherNow = Unsorted::CurrentFrame;
 		const bool gathering = pWaveTargetCell && !endgameRemnantHunt && !waveCountReady && waveAbleUnits + waveAbleInf > 0;
@@ -13433,12 +13433,17 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		waveMacro.WaveGatherFrame = gatherNow;
 	}
 
+	// Mission queue (Mission*): a plan request older than this wave's is filling, the wave leaves
+	// after it. Not the endgame hunt nor a base overflowing with vehicles.
+	const bool missionPlanAhead = waveMacro.MissionHeadPlan >= 0 && Unsorted::CurrentFrame - waveMacro.MissionHeadFrame <= 60
+		&& !massOverflow;
+
 	// Coordinated Multi-Squadron Offensive Strike Wave (Slot 37: Rush vs Mass
 	// Timing) Splits forces into parallel Squadron Alpha (pWaveTargetCell) and
 	// Squadron Bravo (pSecondaryWaveTargetCell)
 	if (pWaveTargetCell && !teamOrder.Hold
 		&& (endgameRemnantHunt || ((waveAbleUnits >= waveUnitsNeeded
-			|| (waveAbleUnits + waveAbleInf >= waveUnitsNeeded + 4)) && waveStrengthReady)))
+			|| (waveAbleUnits + waveAbleInf >= waveUnitsNeeded + 4)) && waveStrengthReady && !missionPlanAhead)))
 	{
 		const int waveTargetZone
 			= MapClass::Instance.GetMovementZoneType(pWaveTargetCell->MapCoords, MovementZone::Normal, false);

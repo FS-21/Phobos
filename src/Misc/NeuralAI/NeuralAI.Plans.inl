@@ -3103,13 +3103,62 @@ namespace
 			return false;
 		};
 
-		// The main wave fills first (WavePlanHoldFrames): its gate ran lately and found it short of its
-		// count, and whether the limit of that wait is still ahead.
-		const bool waveGathersNow = macro.WaveGatherSince >= 0 && Unsorted::CurrentFrame - macro.WaveGatherFrame <= 60;
-		const bool waveHoldsPlans = waveGathersNow && Unsorted::CurrentFrame - macro.WaveGatherSince < WavePlanHoldFrames;
+		// Mission queue (Mission*): the wave asks while its gate, run lately, finds it short of its
+		// count; past WavePlanHoldFrames the plans behind it go first.
+		const int missionNow = Unsorted::CurrentFrame;
+		const bool waveGathersNow = macro.WaveGatherSince >= 0 && missionNow - macro.WaveGatherFrame <= 60;
+		const bool waveHoldsPlans = waveGathersNow && missionNow - macro.WaveGatherSince < WavePlanHoldFrames;
+		// The plan requests: one whose plan runs, or has not asked again for within two retries, is over;
+		// the oldest one older than the wave's is the one the wave waits for.
+		int missionHeadPlan = -1;
+		int missionHeadSince = waveHoldsPlans ? macro.WaveGatherSince : INT_MAX;
+		int missionPlansQueued = 0;
 
-		if (!waveGathersNow)
-			macro.PlanWaveHeldSince.fill(-1);
+		for (size_t i = 0; i < macro.PlanRequestSince.size(); ++i)
+		{
+			if (macro.PlanRequestSince[i] < 0)
+				continue;
+
+			if (macro.Plans[i].Active || missionNow - macro.PlanRequestLast[i] > 2 * PlanGateRetryFrames)
+			{
+				macro.PlanRequestSince[i] = -1;
+				continue;
+			}
+
+			missionPlansQueued++;
+
+			if (macro.PlanRequestSince[i] < missionHeadSince)
+			{
+				missionHeadSince = macro.PlanRequestSince[i];
+				missionHeadPlan = static_cast<int>(i);
+			}
+		}
+
+		if (missionHeadPlan != macro.MissionHeadPlan)
+		{
+			macro.MissionHeadPlan = missionHeadPlan;
+			macro.MissionHeadSince = missionNow;
+		}
+
+		// The oldest request that cannot leave gives way: aborted, and its plan waits before it asks again.
+		if (missionHeadPlan >= 0 && missionNow - macro.MissionHeadSince >= MissionHeadMostFrames + 2 * PlanGateRetryFrames)
+		{
+			// TEMP diagnostic (mission queue, 2026-11-26): every request aborted.
+			Debug::Log("[NeuralAI] House %d mission queue (TEMP): %s aborted after %d frames as the oldest request, it waited for %d units "
+				"and offered %d, frame %d.\n", houseIdx, NeuralPlanNames[missionHeadPlan], missionNow - macro.MissionHeadSince,
+				macro.PlanRequestNeed[missionHeadPlan], macro.PlanRequestOffered[missionHeadPlan], missionNow);
+			macro.PlanRequestSince[missionHeadPlan] = -1;
+			macro.PlanNextAttemptFrame[missionHeadPlan] = missionNow + MissionHeadMostFrames;
+			macro.MissionHeadPlan = -1;
+			macro.MissionHeadSince = missionNow;
+			missionHeadPlan = -1;
+			missionPlansQueued--;
+		}
+
+		macro.MissionHeadFrame = missionNow;
+		macro.MissionUnitsWanted = (missionHeadPlan >= 0 && (macro.PlanRequestLanes[missionHeadPlan] & MissionLaneVehicles) != 0)
+			? std::max(0, macro.PlanRequestNeed[missionHeadPlan] - macro.PlanRequestOffered[missionHeadPlan])
+			: 0;
 
 		auto startPlan = [&](NeuralPlanId id, std::vector<FootClass*> const& group, const CellStruct& target,
 			const CellStruct& staging, DWORD targetID, int durationFrames)
@@ -3141,43 +3190,96 @@ namespace
 				return pFoot && pFoot->WhatAmI() != AbstractType::Aircraft && !pFoot->IsInAir() && !pFoot->GetTechnoType()->Naval;
 			};
 
-			// The main wave fills first (WavePlanHoldFrames): a plan that marches on the enemy with the
-			// same idle army waits while the wave gathers. Past the limit of that wait the plan that has
-			// waited longest leaves (one held within the last two retries counts), and the wait starts
-			// again. Not Counter Squad, which answers an enemy force, nor a plan the trainer watches.
-			if (marches && id != NeuralPlanId::CounterSquad && !TrainingFocus().Plans[static_cast<size_t>(id)])
+			// Mission queue (Mission*): a plan that marches on the enemy with the idle ground army asks
+			// here, with its target, its gate open and its least group ready, and leaves when nothing is
+			// before it and its group is complete. Not Counter Squad nor Preemptive Strike, which answer an
+			// enemy force, nor a plan the trainer watches.
+			if (marches && id != NeuralPlanId::CounterSquad && id != NeuralPlanId::PreemptiveStrike
+				&& !TrainingFocus().Plans[static_cast<size_t>(id)])
 			{
 				const size_t self = static_cast<size_t>(id);
-				const int now = Unsorted::CurrentFrame;
+				const int offered = static_cast<int>(group.size());
+				// The armed idle ground army now, and the kinds of units this group takes.
+				int pool = 0;
+				int lanes = 0;
 
-				if (waveGathersNow)
+				for (auto const& [uid, pFoot] : ownFoots)
 				{
-					if (macro.PlanWaveHeldSince[self] < 0)
-						macro.PlanWaveHeldSince[self] = now;
+					auto const pType = pFoot->GetTechnoType();
 
-					macro.PlanWaveHeldLast[self] = now;
-					bool leaves = !waveHoldsPlans;
+					if (pType && pFoot->WhatAmI() != AbstractType::Aircraft && !pType->Naval && GroundRangeOf(pType) > 0 && isFreeForPlan(pFoot))
+						pool++;
+				}
 
-					for (size_t other = 0; leaves && other < macro.PlanWaveHeldSince.size(); ++other)
+				for (auto const pFoot : group)
+					lanes |= pFoot->WhatAmI() == AbstractType::Infantry ? MissionLaneInfantry : MissionLaneVehicles;
+
+				if (macro.PlanRequestSince[self] < 0)
+				{
+					// The queue is full: it asks again later.
+					if (missionPlansQueued >= MissionQueuePlans)
 					{
-						leaves = other == self || macro.PlanWaveHeldSince[other] < 0
-							|| now - macro.PlanWaveHeldLast[other] > 2 * PlanGateRetryFrames
-							|| macro.PlanWaveHeldSince[other] >= macro.PlanWaveHeldSince[self];
-					}
-
-					if (!leaves)
-					{
-						macro.PlanNextAttemptFrame[self] = now + PlanGateRetryFrames;
+						macro.PlanNextAttemptFrame[self] = missionNow + PlanGateRetryFrames;
 						return;
 					}
 
-					// TEMP diagnostic (fast pace, 2026-11-26): the plans the limit of the wait lets through.
-					Debug::Log("[NeuralAI] House %d plan %s leaves past the wave: it gathered for %d frames, the plan waited %d, frame %d.\n",
-						houseIdx, NeuralPlanNames[self], now - macro.WaveGatherSince, now - macro.PlanWaveHeldSince[self], now);
-					macro.WaveGatherSince = now;
+					missionPlansQueued++;
+					macro.PlanRequestSince[self] = missionNow;
+					macro.PlanRequestNeed[self] = std::max(offered, MissionGroupFloor);
+					macro.PlanRequestOffered[self] = offered;
+					macro.PlanRequestPool[self] = pool;
+					macro.PlanRequestLanes[self] = 0;
 				}
 
-				macro.PlanWaveHeldSince[self] = -1;
+				macro.PlanRequestLast[self] = missionNow;
+				macro.PlanRequestLanes[self] |= lanes;
+
+				// What is before it: the wave that began to gather earlier, and an older request that takes
+				// the same kinds of units (the lower plan on a tie).
+				bool ahead = waveHoldsPlans && macro.WaveGatherSince <= macro.PlanRequestSince[self];
+
+				for (size_t other = 0; !ahead && other < macro.PlanRequestSince.size(); ++other)
+				{
+					ahead = other != self && macro.PlanRequestSince[other] >= 0
+						&& (macro.PlanRequestLanes[other] & macro.PlanRequestLanes[self]) != 0
+						&& (macro.PlanRequestSince[other] < macro.PlanRequestSince[self]
+							|| (macro.PlanRequestSince[other] == macro.PlanRequestSince[self] && other < self));
+				}
+
+				if (ahead)
+				{
+					macro.PlanNextAttemptFrame[self] = missionNow + PlanGateRetryFrames;
+					return;
+				}
+
+				// Nothing before it: it leaves complete, when its group stopped growing while the idle army
+				// grew, or after MissionHeadMostFrames as the oldest request.
+				const bool noMoreTaken = missionNow > macro.PlanRequestSince[self] && offered <= macro.PlanRequestOffered[self]
+					&& pool > macro.PlanRequestPool[self];
+				const bool outstayed = macro.MissionHeadPlan == static_cast<int>(self)
+					&& missionNow - macro.MissionHeadSince >= MissionHeadMostFrames;
+
+				if (offered < macro.PlanRequestNeed[self] && !noMoreTaken && !outstayed)
+				{
+					macro.PlanRequestOffered[self] = offered;
+					macro.PlanRequestPool[self] = pool;
+					macro.PlanNextAttemptFrame[self] = missionNow + MissionFillRetryFrames;
+					return;
+				}
+
+				// TEMP diagnostic (mission queue, 2026-11-26): every request that leaves.
+				Debug::Log("[NeuralAI] House %d mission queue (TEMP): %s leaves with %d of %d units after %d frames in the queue (%s), "
+					"idle army %d, wave gathering %d, frame %d.\n", houseIdx, NeuralPlanNames[self], offered, macro.PlanRequestNeed[self],
+					missionNow - macro.PlanRequestSince[self],
+					offered >= macro.PlanRequestNeed[self] ? "complete" : (noMoreTaken ? "takes no more" : "outstayed"), pool,
+					waveGathersNow ? missionNow - macro.WaveGatherSince : -1, missionNow);
+
+				// The wave behind it asks again from now, after the plans that were waiting.
+				if (waveGathersNow)
+					macro.WaveGatherSince = missionNow;
+
+				macro.PlanRequestSince[self] = -1;
+				missionPlansQueued--;
 			}
 
 			if (marches
@@ -7652,8 +7754,10 @@ namespace
 				std::vector<FootClass*> army = collectIdleGround(false);
 				BuildingClass* pTarget = nullptr;
 				double bestDist = 1e9;
+				// Its least group, or half of it to ask the mission queue for the rest (Mission*).
+				const bool pincerShort = army.size() < 10;
 
-				if (army.size() >= 10)
+				if (!pincerShort || (army.size() >= 5 && !TrainingFocus().Plans[static_cast<size_t>(NeuralPlanId::Pincer)]))
 				{
 					for (auto const pBld : knownEnemyBuildingList)
 					{
@@ -7689,7 +7793,30 @@ namespace
 
 				const int utility = (pTarget && pFlankStage) ? (300 + std::min(200, static_cast<int>(army.size()) * 10)) : -1000;
 
-				if (utility > 0 && shouldTryStart(NeuralPlanId::Pincer, utility))
+				if (utility > 0 && pincerShort)
+				{
+					// The mission queue keeps its place while the rest of its group comes.
+					const size_t self = static_cast<size_t>(NeuralPlanId::Pincer);
+
+					if (shouldTryStart(NeuralPlanId::Pincer, utility))
+					{
+						if (macro.PlanRequestSince[self] < 0 && missionPlansQueued < MissionQueuePlans)
+						{
+							missionPlansQueued++;
+							macro.PlanRequestSince[self] = missionNow;
+							macro.PlanRequestPool[self] = static_cast<int>(army.size());
+						}
+
+						if (macro.PlanRequestSince[self] >= 0)
+						{
+							macro.PlanRequestLast[self] = missionNow;
+							macro.PlanRequestNeed[self] = 10;
+							macro.PlanRequestOffered[self] = static_cast<int>(army.size());
+							macro.PlanRequestLanes[self] = MissionLaneVehicles | MissionLaneInfantry;
+						}
+					}
+				}
+				else if (utility > 0 && shouldTryStart(NeuralPlanId::Pincer, utility))
 				{
 					army.resize(std::min<size_t>(army.size(), 16));
 					const int directCount = static_cast<int>(army.size() / 2);
@@ -10841,8 +10968,9 @@ namespace
 					// After a lesson the bigger group is recruited (RaidRecruitFrames), not waited for.
 					const int utility = (haveTargets && (lesson || group.size() >= raidSize)) ? 280 : -1000;
 
-					// Its recruits stay out of the waves: none while the main wave gathers (WavePlanHoldFrames).
-					if (utility > 0 && !waveHoldsPlans && shouldTryStart(NeuralPlanId::RotatingRaids, utility))
+					// Its recruits stay out of the waves: none while the main wave gathers or the wave waits
+					// for a plan request (Mission*).
+					if (utility > 0 && !waveHoldsPlans && missionHeadPlan < 0 && shouldTryStart(NeuralPlanId::RotatingRaids, utility))
 					{
 						recruits.clear();
 						recruitFrom(group);
@@ -11722,8 +11850,10 @@ namespace
 				std::vector<FootClass*> army = collectIdleGround(false);
 				BuildingClass* pTarget = nullptr;
 				double bestDist = 1e9;
+				// Its least group, or half of it to ask the mission queue for the rest (Mission*).
+				const bool threeFrontShort = army.size() < 15;
 
-				if (army.size() >= 15)
+				if (!threeFrontShort || (army.size() >= 8 && !TrainingFocus().Plans[static_cast<size_t>(NeuralPlanId::ThreeFrontAssault)]))
 				{
 					for (auto const pBld : knownEnemyBuildingList)
 					{
@@ -11743,7 +11873,30 @@ namespace
 
 				const int utility = pTarget ? (320 + std::min(200, static_cast<int>(army.size()) * 8)) : -1000;
 
-				if (utility > 0 && shouldTryStart(NeuralPlanId::ThreeFrontAssault, utility))
+				if (utility > 0 && threeFrontShort)
+				{
+					// The mission queue keeps its place while the rest of its group comes.
+					const size_t self = static_cast<size_t>(NeuralPlanId::ThreeFrontAssault);
+
+					if (shouldTryStart(NeuralPlanId::ThreeFrontAssault, utility))
+					{
+						if (macro.PlanRequestSince[self] < 0 && missionPlansQueued < MissionQueuePlans)
+						{
+							missionPlansQueued++;
+							macro.PlanRequestSince[self] = missionNow;
+							macro.PlanRequestPool[self] = static_cast<int>(army.size());
+						}
+
+						if (macro.PlanRequestSince[self] >= 0)
+						{
+							macro.PlanRequestLast[self] = missionNow;
+							macro.PlanRequestNeed[self] = 15;
+							macro.PlanRequestOffered[self] = static_cast<int>(army.size());
+							macro.PlanRequestLanes[self] = MissionLaneVehicles | MissionLaneInfantry;
+						}
+					}
+				}
+				else if (utility > 0 && shouldTryStart(NeuralPlanId::ThreeFrontAssault, utility))
 				{
 					army.resize(std::min<size_t>(army.size(), 24));
 					const DWORD third = static_cast<DWORD>(army.size() / 3);
