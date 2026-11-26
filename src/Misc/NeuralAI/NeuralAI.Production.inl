@@ -2416,6 +2416,17 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		int bestTechStepScore = -32000;
 		bool techStepInProgress = false;
 		std::vector<int> techStepTypes;
+		// For the governor's window after the loop: the first shipyard of a house that needs a navy and has
+		// none, and the best of the buildings its MCV lacks. And how far the shipyards got in this pick
+		// (TEMP diagnostic): 0 none seen, 1 not buildable, 2 placement cooldown, 3 skipped before its
+		// scoring, 4 over the cap, 5 no cell, 6 scored.
+		int firstShipyardIdx = -1;
+		int firstShipyardScore = -32000;
+		int bestMcvPrerequisiteIdx = -1;
+		int bestMcvPrerequisiteScore = -32000;
+		int shipyardDiagStage = 0;
+		int shipyardDiagIdx = -1;
+		int shipyardDiagScore = -32000;
 		// The buildings the yards of this house build now, read from the factories: GetPrimaryFactory
 		// finds none for an AI house (inProgressBldIdx was none in all 8893 samples of 2026-11-20).
 		std::vector<int> yardBuildIdxs;
@@ -3664,6 +3675,13 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				continue;
 
 			const bool yardBuildsIt = CanBuildUnderHumanRules(pHouse, pBld);
+			const bool isShipyardType = pBld->Factory == AbstractType::UnitType && pBld->Naval;
+
+			if (isShipyardType && !yardBuildsIt && shipyardDiagStage < 1)
+			{
+				shipyardDiagStage = 1;
+				shipyardDiagIdx = pBld->ArrayIndex;
+			}
 
 			if (!yardBuildsIt && !deployerOfBuilding.contains(pBld->ArrayIndex))
 				continue;
@@ -3682,7 +3700,21 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			auto const& cooldownMap = GetMacroState(pHouse).BuildingPlacementCooldownUntilFrame;
 			auto const cdIt = cooldownMap.find(pBld->ArrayIndex);
 			if (cdIt != cooldownMap.end() && Unsorted::CurrentFrame < cdIt->second)
+			{
+				if (isShipyardType && shipyardDiagStage < 2)
+				{
+					shipyardDiagStage = 2;
+					shipyardDiagIdx = pBld->ArrayIndex;
+				}
+
 				continue;
+			}
+
+			if (isShipyardType && shipyardDiagStage < 3)
+			{
+				shipyardDiagStage = 3;
+				shipyardDiagIdx = pBld->ArrayIndex;
+			}
 
 			const bool isBldInProgress = (pBld->ArrayIndex == inProgressBldIdx || pBld->ArrayIndex == inProgressDefIdx);
 			const bool isRefineryOrSlaveMiner = pBld->Refinery || pBld->ResourceGatherer || pBld->ResourceDestination;
@@ -4120,7 +4152,15 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				const int bankShipyards = bankGovernorBuilds ? BankFactoryDeficit(pHouse, BankQueue::Naval, pHouse->NumShipyards) : 0;
 
 				if (owned >= maxShipyards + (islandYardNeedsShipyard ? 1 : 0) && (bankShipyards == 0 || !islandNavalWar))
+				{
+					if (shipyardDiagStage < 4)
+					{
+						shipyardDiagStage = 4;
+						shipyardDiagIdx = pBld->ArrayIndex;
+					}
+
 					continue;
+				}
 
 				if (minimumFirst && owned >= 1 && !islandYardNeedsShipyard)
 					continue;
@@ -4133,6 +4173,12 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				if (!(HouseNeedsNaval(pHouse) || islandYardNeedsShipyard || crossingNeedsYard)
 					|| CachedTetrisBuildCell(pHouse, pBld) == CellStruct::Empty)
 				{
+					if (shipyardDiagStage < 5)
+					{
+						shipyardDiagStage = 5;
+						shipyardDiagIdx = pBld->ArrayIndex;
+					}
+
 					continue;
 				}
 
@@ -4153,6 +4199,21 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 				if (bankShipyards > 0)
 					rememberBankFactory(pBld, score, bankShipyards);
+
+				// The first shipyard of a house that needs a navy and has none (navalFirst): remembered for
+				// the governor's window after the loop.
+				if (navalFirst && score > firstShipyardScore)
+				{
+					firstShipyardScore = score;
+					firstShipyardIdx = pBld->ArrayIndex;
+				}
+
+				if (shipyardDiagStage < 6 || score > shipyardDiagScore)
+				{
+					shipyardDiagStage = 6;
+					shipyardDiagIdx = pBld->ArrayIndex;
+					shipyardDiagScore = score;
+				}
 			}
 			else if (pBld->Factory == AbstractType::AircraftType)
 			{
@@ -4707,6 +4768,12 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 				if (GetMacroState(pHouse).IslandExpansionUrgent)
 					score = std::max(score, 5000);
+
+				if (score > bestMcvPrerequisiteScore)
+				{
+					bestMcvPrerequisiteScore = score;
+					bestMcvPrerequisiteIdx = pBld->ArrayIndex;
+				}
 			}
 
 			if (!crossingPrerequisites.empty() && pHouse->CountOwnedNow(pBld) == 0
@@ -4838,6 +4905,22 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		{
 			bestBldIdx = bestPriorityAirfieldIdx;
 			bestBldScore = std::max(bestBldScore, bestPriorityAirfieldScore);
+		}
+
+		// What no factory copy answers comes first in the governor's windows (user approved, 2026-11-26,
+		// «Sí, aplícalo»): the first shipyard of a house that needs a navy and has none, then the building
+		// its MCV lacks while the expansion asks for one. The governor only adds to a queue that already
+		// has a factory (UpdateBankGovernor), so a house that lost its last shipyard had nothing to ask
+		// for one with, and from 50000 credits of surplus the governor holds three or four of every four
+		// building turns. Match #19650 (Eriond, an island map): a GDI house lost both shipyards at minute
+		// 25 and picked none in the 40 minutes after, with 65000 to 140000 credits and six war factories
+		// whose tanks cannot cross; the service depot its MCV needs never came back either.
+		if (bankFactoryIdx >= 0)
+		{
+			if (firstShipyardIdx >= 0)
+				bankFactoryIdx = firstShipyardIdx;
+			else if (bestMcvPrerequisiteIdx >= 0)
+				bankFactoryIdx = bestMcvPrerequisiteIdx;
 		}
 
 		// A gun the raid still needs keeps its window.
@@ -5115,6 +5198,24 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				GetMacroState(pHouse).IsBuildingRecoveryRefinery = false;
 				GetMacroState(pHouse).TargetRecoveryRefineryZone = -1;
 			}
+		}
+
+		// TEMP diagnostic (first shipyard, 2026-11-26): a house that needs a navy and has no shipyard,
+		// how far its shipyard got in this pick (shipyardDiagStage) and what the yard picks instead.
+		if (ownedShipyards == 0 && Unsorted::CurrentFrame >= 5400 && IsAITickWindow(900, 0) && HouseNeedsNaval(pHouse))
+		{
+			static const char* const shipyardStageNames[] = { "no shipyard type seen", "not buildable", "placement cooldown",
+				"skipped before its scoring", "over the cap", "no cell", "scored" };
+
+			Debug::Log("[NeuralAI] House %d first shipyard DIAG: %s %s (score %d), final pick %s, scored pick %s (score %d), "
+				"governor window %d with %s, MCV lacks %s, credits %d, frame %d.\n",
+				pHouse->ArrayIndex, shipyardDiagIdx >= 0 ? BuildingTypeClass::Array.GetItem(shipyardDiagIdx)->ID : "none",
+				shipyardStageNames[std::clamp(shipyardDiagStage, 0, 6)], shipyardDiagStage == 6 ? shipyardDiagScore : 0,
+				bestBldIdx >= 0 ? BuildingTypeClass::Array.GetItem(bestBldIdx)->ID : "none",
+				scoredBldIdx >= 0 ? BuildingTypeClass::Array.GetItem(scoredBldIdx)->ID : "none", bestBldScore,
+				bankFactoryWindow ? 1 : 0, bankFactoryIdx >= 0 ? BuildingTypeClass::Array.GetItem(bankFactoryIdx)->ID : "no factory",
+				bestMcvPrerequisiteIdx >= 0 ? BuildingTypeClass::Array.GetItem(bestMcvPrerequisiteIdx)->ID : "nothing",
+				money, Unsorted::CurrentFrame);
 		}
 
 		// TEMP diagnostic: what the base knows of the air threat, what it has against it and what
