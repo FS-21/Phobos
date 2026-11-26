@@ -137,9 +137,11 @@ namespace
 		std::vector<NeuralSensorTrip> SensorTrips {};
 		int SensorCheckFrame { -100000 };
 		// Sensor chain (SensorChain*): whether one more array has a post toward a stealth sighting no
-		// sensor of ours covers (production reads it), and the frame before which none is asked for.
+		// sensor of ours covers (production reads it), the frame before which none is asked for, and
+		// the last frame of the "stops short" line.
 		bool SensorChainAsks { false };
 		int SensorChainHoldUntil { -100000 };
+		int SensorChainHeldLogFrame { -100000 };
 	};
 
 	std::array<NeuralScoutState, 32> ScoutStates {};
@@ -1512,14 +1514,37 @@ namespace
 		return true;
 	}
 
+	// Whether a building of the enemy this house knows of stands nearer than `cells` to the cell,
+	// walls and insignificant ones aside. Fog-fair: the known enemy buildings only.
+	bool IsKnownEnemyBuildingWithin(HouseClass* pHouse, const CellStruct& cell, int cells)
+	{
+		for (auto const& info : GetKnownEnemyBuildingCache(pHouse).Entries)
+		{
+			if (!info.Building->Type->Wall && !info.Building->Type->Insignificant && info.Coords.DistanceFrom(cell) < cells)
+				return true;
+		}
+
+		return false;
+	}
+
 	// Nearest cell around `center` in `zone` where `pSensorBld` can genuinely deploy (no ore/tiberium,
 	// flat buildable ground, outside known enemy defense reach). Prevents LPST from picking ore patches
-	// or sloped ramps where it cannot unfold.
+	// or sloped ramps where it cannot unfold. With `enemyGap`, a cell nearer than that to a known
+	// enemy building counts as one where it cannot.
 	CellStruct FindDeployableSensorCellNear(HouseClass* pHouse, BuildingTypeClass* pSensorBld, const CellStruct& center,
-		int zone, int maxRing, UnitClass* pSelf = nullptr)
+		int zone, int maxRing, UnitClass* pSelf = nullptr, int enemyGap = 0)
 	{
 		if (!pHouse || !pSensorBld || center == CellStruct::Empty)
 			return CellStruct::Empty;
+
+		// The enemy's buildings are read cell by cell only where it changes the answer: no cell of
+		// these rings lies farther than twice maxRing from the center, so a building that near the
+		// center rules them all out, and with none within the gap and that much more none is ruled out.
+		if (enemyGap > maxRing * 2 && IsKnownEnemyBuildingWithin(pHouse, center, enemyGap - maxRing * 2))
+			return CellStruct::Empty;
+
+		if (enemyGap > 0 && !IsKnownEnemyBuildingWithin(pHouse, center, enemyGap + maxRing * 2))
+			enemyGap = 0;
 
 		const bool offsetTopLeft = pSensorBld->GetFoundationWidth() > 2 || pSensorBld->GetFoundationHeight(false) > 2;
 
@@ -1542,7 +1567,8 @@ namespace
 					if (!pCell || pCell->LandType == LandType::Water || pCell->GetContainedTiberiumIndex() >= 0
 						|| pCell->SlopeIndex != 0 || pCell->GetBuilding() != nullptr
 						|| MapClass::Instance.GetMovementZoneType(cand, MovementZone::Normal, false) != zone
-						|| IsCellInKnownEnemyDefenseReach(pHouse, cand, 2))
+						|| IsCellInKnownEnemyDefenseReach(pHouse, cand, 2)
+						|| (enemyGap > 0 && IsKnownEnemyBuildingWithin(pHouse, cand, enemyGap)))
 					{
 						continue;
 					}
@@ -1633,11 +1659,14 @@ namespace
 	// about to on that land: a deployable cell on the line from the link nearest the sighting toward
 	// it, as far from the sighting as still leaves it inside the reach of the new array (the arrays
 	// that unfolded half a radius or less from where the stealth units were seen got hit there),
-	// apart from every link and nearer the sighting than that link. With no link on that land, by
-	// our building there nearest the sighting, toward it only as far as that reach asks. Empty when
-	// there is none.
+	// apart from every link and nearer the sighting than that link, and SensorChainEnemyGapPercent of
+	// its radius from every known enemy building: the chain stops short of an enemy base (the links
+	// that unfolded inside one packed up hurt within 90 frames). With no link on that land, by our
+	// building there nearest the sighting, toward it only as far as that reach asks, wherever that
+	// building stands. Empty when there is none; `pEnemyHeld` is set when a step had a cell but for
+	// the enemy's buildings.
 	CellStruct FindSensorChainPost(HouseClass* pHouse, BuildingTypeClass* pSensorBld, int zone, int radius, const CellStruct& sighting,
-		const std::vector<CellStruct>& links, UnitClass* pSelf = nullptr)
+		const std::vector<CellStruct>& links, UnitClass* pSelf = nullptr, bool* pEnemyHeld = nullptr)
 	{
 		if (!pHouse || !pSensorBld || zone < 0 || sighting == CellStruct::Empty)
 			return CellStruct::Empty;
@@ -1701,12 +1730,19 @@ namespace
 		const int nearest = std::max(1, radius * SensorChainMinStepPercent / 100);
 		const int farthest = std::clamp(anchorDist - edge, nearest, radius * SensorChainStepPercent / 100);
 		const int apart = std::max(1, nearest - SensorChainSnapCells);
+		const int enemyGap = std::max(1, radius * SensorChainEnemyGapPercent / 100);
 
 		for (int step = farthest; step >= nearest; step -= SensorChainTryStepCells)
 		{
 			const CellStruct onLine { static_cast<short>(anchor.X + (sighting.X - anchor.X) * step / anchorDist),
 				static_cast<short>(anchor.Y + (sighting.Y - anchor.Y) * step / anchorDist) };
-			const CellStruct post = FindDeployableSensorCellNear(pHouse, pSensorBld, onLine, zone, SensorChainSnapCells, pSelf);
+			const CellStruct post = FindDeployableSensorCellNear(pHouse, pSensorBld, onLine, zone, SensorChainSnapCells, pSelf, enemyGap);
+
+			if (post == CellStruct::Empty && pEnemyHeld && !*pEnemyHeld)
+			{
+				*pEnemyHeld = FindDeployableSensorCellNear(pHouse, pSensorBld, onLine, zone, SensorChainSnapCells, pSelf)
+					!= CellStruct::Empty;
+			}
 
 			bool addsGround = post != CellStruct::Empty && static_cast<int>(post.DistanceFrom(sighting)) < anchorDist;
 
@@ -2082,9 +2118,13 @@ namespace
 		}
 
 		// One more array for the chain? Only with a post for it from the link nearest the sighting
-		// (with no link at all it is the first one, by our base).
+		// (with no link at all it is the first one, by our base). A sighting the chain stops short
+		// of, for the enemy's buildings around it, asks for none: told once per
+		// SensorLookoutSightingFrames.
 		bool wanted = false;
 		CellStruct wantedFor = CellStruct::Empty;
+		CellStruct heldFor = CellStruct::Empty;
+		const bool tellHeld = now - state.SensorChainHeldLogFrame >= SensorLookoutSightingFrames;
 
 		for (auto const& sighting : sightings)
 		{
@@ -2105,13 +2145,25 @@ namespace
 				}
 			}
 
+			bool enemyHeld = false;
+
 			if (!pNearest || FindSensorChainPost(pHouse, pNearest->Type, pNearest->Zone, pNearest->Radius, sighting,
-				linkCells(pNearest->Zone)) != CellStruct::Empty)
+				linkCells(pNearest->Zone), nullptr, tellHeld ? &enemyHeld : nullptr) != CellStruct::Empty)
 			{
 				wanted = true;
 				wantedFor = sighting;
 				break;
 			}
+
+			if (enemyHeld && heldFor == CellStruct::Empty)
+				heldFor = sighting;
+		}
+
+		if (heldFor != CellStruct::Empty)
+		{
+			state.SensorChainHeldLogFrame = now;
+			Debug::Log("[NeuralAI] House %d Sensor chain: no post clear of the known enemy buildings for the stealth sighting (%d,%d), "
+				"%d unfolded, the chain stops short of it, frame %d.\n", houseIdx, heldFor.X, heldFor.Y, unfolded, now);
 		}
 
 		// The chain has a post but a vehicle found none on its own land: one more would stray too.
