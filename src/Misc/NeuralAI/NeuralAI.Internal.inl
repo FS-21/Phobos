@@ -859,6 +859,178 @@ namespace
 		return ContextRouting;
 	}
 
+	// Knob table: constants of the rules that the trainer learns per (game phase, map class), in steps of
+	// -KnobStepMost..KnobStepMost around the value written in the code. A scaled knob multiplies its constant
+	// by 2^(step/8), from a half to twice; a unit knob adds a few units. With step 0, no table or an unknown
+	// map class every knob gives its constant, bit for bit. Nothing is drawn here: in training the trainer
+	// writes each side's table with the exploration already in it, so a real game plays the learned steps
+	// and no noise. Phases and map classes as the context routing table.
+	// File: "PHOBOSKN", uint32 version 1, uint32 phases, uint32 classes, uint32 knob slots,
+	// int8 step[phases][classes][slots].
+	enum class NeuralKnob : int
+	{
+		// Idle army the main wave waits for (WaveArmyShareDivisor, WaveArmyShareMost): scaled.
+		WaveShare,
+		// Size of the main wave (WaveMassPermille): KnobWaveMassStep per mille a step, inside its clamp.
+		WaveMass,
+		// The tank floor before the bank surge (TankFloor*): scaled.
+		TankFloor,
+		// Harvesters the refineries ask for (economyUnitCap): KnobHarvestersReach more or fewer at most.
+		Harvesters,
+		// What the bank governor leaves alone (BankReserveCredits): scaled.
+		BankReserve,
+		// Wait before the tech step is the pick (TechStepFloorFrames): scaled.
+		TechFloor,
+		// Defense caps (defDensityMod): KnobDefenseReach more or fewer at most.
+		DefenseDensity,
+		// Health a vehicle goes to repair at (0.35): KnobRetreatStep a step, inside its clamp.
+		RetreatHealth,
+		Count
+	};
+
+	constexpr int KnobSlots = 16;
+	constexpr int KnobStepMost = 8;
+	constexpr int KnobWaveMassStep = 30;
+	constexpr int KnobHarvestersReach = 2;
+	constexpr int KnobDefenseReach = 2;
+	constexpr double KnobRetreatStep = 0.0125;
+	// 2^(step/8) in 1/256 for the steps -8..8.
+	constexpr int KnobFactors[2 * KnobStepMost + 1] = { 128, 140, 152, 166, 181, 197, 215, 235, 256, 279, 304, 332, 362, 395, 431, 470, 512 };
+
+	static_assert(KnobFactors[KnobStepMost] == 256, "A knob at step 0 must give its constant");
+	static_assert(static_cast<int>(NeuralKnob::Count) <= KnobSlots);
+
+	struct NeuralKnobTable
+	{
+		bool Loaded { false };
+		std::array<std::array<std::array<int8_t, KnobSlots>, NumMapClasses>, NumRoutingPhases> Step {};
+	};
+
+	NeuralKnobTable KnobTable {};
+	NeuralKnobTable OpponentKnobTable {};
+
+	struct NeuralKnobTableHeader
+	{
+		char Magic[8];
+		uint32_t Version;
+		uint32_t Phases;
+		uint32_t Classes;
+		uint32_t Slots;
+	};
+
+	constexpr size_t KnobTableFileSize = sizeof(NeuralKnobTableHeader) + sizeof(NeuralKnobTable::Step);
+
+	bool ParseKnobTable(const uint8_t* pData, size_t size, NeuralKnobTable& out)
+	{
+		NeuralKnobTableHeader header {};
+
+		if (!pData || size < KnobTableFileSize)
+			return false;
+
+		std::memcpy(&header, pData, sizeof(header));
+
+		if (std::memcmp(header.Magic, "PHOBOSKN", 8) != 0 || header.Version != 1 || header.Phases != NumRoutingPhases
+			|| header.Classes != NumMapClasses || header.Slots != KnobSlots)
+		{
+			return false;
+		}
+
+		std::memcpy(out.Step.data(), pData + sizeof(header), sizeof(out.Step));
+		out.Loaded = true;
+
+		return true;
+	}
+
+	bool LoadKnobTableFile(const char* pPath, NeuralKnobTable& out)
+	{
+		HANDLE hFile = CreateFileA(pPath, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+
+		if (hFile == INVALID_HANDLE_VALUE)
+			return false;
+
+		std::array<uint8_t, 256> buffer {};
+		DWORD read = 0;
+		const bool ok = ReadFile(hFile, buffer.data(), static_cast<DWORD>(buffer.size()), &read, NULL) != FALSE;
+
+		CloseHandle(hFile);
+
+		return ok && ParseKnobTable(buffer.data(), read, out);
+	}
+
+	bool LoadKnobTableFromSharedMemory(const char* pName, NeuralKnobTable& out)
+	{
+		HANDLE hMapping = OpenFileMappingA(FILE_MAP_READ, FALSE, pName);
+
+		if (!hMapping)
+			return false;
+
+		bool ok = false;
+
+		if (auto const pView = static_cast<const uint8_t*>(MapViewOfFile(hMapping, FILE_MAP_READ, 0, 0, KnobTableFileSize)))
+		{
+			ok = ParseKnobTable(pView, KnobTableFileSize, out);
+			UnmapViewOfFile(pView);
+		}
+
+		CloseHandle(hMapping);
+
+		return ok;
+	}
+
+	// The table of the policy this house plays, as ContextRoutingFor.
+	const NeuralKnobTable& KnobTableFor(const HouseClass* pHouse)
+	{
+		if (NeuralAI::HeadlessMode && OpponentKnobTable.Loaded)
+		{
+			auto const pExt = HouseExt::TryFetch(pHouse);
+
+			if (pExt && pExt->NeuralAI_PolicySlot == 1)
+				return OpponentKnobTable;
+		}
+
+		return KnobTable;
+	}
+
+	// The step of a knob for this house now: 0 without a table (campaign and human multiplayer never load
+	// one) or before the map class is known.
+	int KnobStep(const HouseClass* pHouse, NeuralKnob knob)
+	{
+		const NeuralKnobTable& table = KnobTableFor(pHouse);
+
+		if (!table.Loaded)
+			return 0;
+
+		ComputeMapInfo();
+		const int mapClass = CurrentMapClass();
+
+		if (mapClass < 0)
+			return 0;
+
+		return std::clamp(static_cast<int>(table.Step[RoutingPhase(Unsorted::CurrentFrame)][mapClass][static_cast<size_t>(knob)]),
+			-KnobStepMost, KnobStepMost);
+	}
+
+	// base x 2^(step/8), rounded: base itself at step 0.
+	int KnobScaled(const HouseClass* pHouse, NeuralKnob knob, int base)
+	{
+		const int step = KnobStep(pHouse, knob);
+
+		if (step == 0 || base <= 0)
+			return base;
+
+		return static_cast<int>((static_cast<int64_t>(base) * KnobFactors[step + KnobStepMost] + 128) / 256);
+	}
+
+	// step x reach / KnobStepMost whole units, a half rounded away from zero: 0 at step 0, +-reach at the ends.
+	int KnobUnits(const HouseClass* pHouse, NeuralKnob knob, int reach)
+	{
+		const int scaled = KnobStep(pHouse, knob) * reach;
+
+		return scaled >= 0
+			? (2 * scaled + KnobStepMost) / (2 * KnobStepMost)
+			: -((-2 * scaled + KnobStepMost) / (2 * KnobStepMost));
+	}
+
 	// Archetype intent route, checkpoint milestones and segment values handed over by the trainer.
 	constexpr int IntentCheckpoints = 7;
 	constexpr int IntentSegments = 8;

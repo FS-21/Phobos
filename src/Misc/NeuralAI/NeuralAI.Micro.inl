@@ -7659,7 +7659,9 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 		// Preserve Elite vehicles (< 60% HP) and expensive vehicles by retreating
 		// to Service Depot (Slot 54 adjusts retreat HP & survival reflex)
-		const double baseRetreat = std::clamp(0.35 + static_cast<double>(scores[54]) * 0.00025, 0.22, 0.55);
+		const int retreatKnob = KnobStep(pHouse, NeuralKnob::RetreatHealth);
+		const double baseRetreat = std::clamp(0.35 + static_cast<double>(scores[54]) * 0.00025
+			+ (retreatKnob != 0 ? retreatKnob * KnobRetreatStep : 0.0), 0.22, 0.55);
 		const double repairThreshold = pUnit->Veterancy.IsElite() ? std::max(0.60, baseRetreat + 0.15) : baseRetreat;
 
 		// Slot 64 (Immediate Service Depot De-Parasiting) & Slot 54 (Repair
@@ -12619,8 +12621,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 
 	const int tacticalWaveDiscount = (counterattackWindow ? 3 : 0) + (waveMacro.PressureMode ? 2 : 0)
 		+ (secondEchelonWindow ? (baseWave + defenseMassBonus) / 2 : 0);
-	// The learned wave mass scales the count and its cap alike.
-	const int waveMass = WaveMassPermille(rushWaveBias);
+	// The learned wave mass scales the count and its cap alike; the knob moves it inside the same limits.
+	const int waveMass = std::clamp(WaveMassPermille(rushWaveBias) + KnobStep(pHouse, NeuralKnob::WaveMass) * KnobWaveMassStep, 750, 1500);
 	const int waveUnitCap = (tankMassWaves ? TankMassWaveCap : 14) * waveMass / 1000;
 	const size_t minWaveUnits = endgameRemnantHunt
 		? 1u
@@ -12790,7 +12792,8 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	const int waveArmy = static_cast<int>(idleCombatUnits.size() + idleCombatInf.size()) + notIdleBusy + notIdleInfBusy;
 	const size_t armyShareUnits = (endgameRemnantHunt || arch == 5 || waveArmy < WaveArmyMassFrom || secondEchelonWindow)
 		? 0u
-		: static_cast<size_t>(std::min(WaveArmyShareMost, waveArmy / WaveArmyShareDivisor));
+		: static_cast<size_t>(std::min(waveArmy,
+			KnobScaled(pHouse, NeuralKnob::WaveShare, std::min(WaveArmyShareMost, waveArmy / WaveArmyShareDivisor))));
 	const size_t waveUnitsWithoutShare = teamOrder.MinWaveUnits > 0
 		? std::min(minWaveUnits, static_cast<size_t>(teamOrder.MinWaveUnits))
 		: minWaveUnits;
