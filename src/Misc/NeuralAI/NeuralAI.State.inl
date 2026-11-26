@@ -4482,13 +4482,20 @@ namespace
 	// deployable cell within SensorChainSnapCells (tried every SensorChainTryStepCells back toward
 	// the array). So each array adds a link and the reach of them all adds up, until the sighting is
 	// covered. With no array on its land the first one unfolds by our building nearest the sighting,
-	// up to SensorChainBaseAheadCells toward it by the same rule. The newest
-	// SensorChainSightingsTried sightings are tried, SensorChainSightingsApartCells apart. A vehicle
-	// the chain has no post for on its land holds the asking for SensorLookoutSightingFrames. Up to
-	// SensorChainLinksMost links are weighed.
+	// up to SensorChainBaseAheadCells toward it by the same rule. No link but that first one stands
+	// nearer than SensorChainEnemyGapPercent of its sensor radius to a building of the enemy we know
+	// of, walls and insignificant ones aside (user, 2026-11-26: «Sí, hazlo» to a chain that stops a
+	// sensor radius from the known enemy buildings; match #18626: a chain walked into an enemy home
+	// base and two of its arrays packed up at 41-42% health 60 and 90 frames after unfolding, 8 and
+	// 14 cells from a known power plant): a cell that near counts as one where it cannot unfold, so
+	// the chain stops short of an enemy base and no array is asked for a sighting inside it. The
+	// newest SensorChainSightingsTried sightings are tried, SensorChainSightingsApartCells apart. A
+	// vehicle the chain has no post for on its land holds the asking for SensorLookoutSightingFrames.
+	// Up to SensorChainLinksMost links are weighed.
 	constexpr int SensorChainLinksMost = 48;
 	constexpr int SensorChainStepPercent = 150;
 	constexpr int SensorChainMinStepPercent = 50;
+	constexpr int SensorChainEnemyGapPercent = 100;
 	constexpr int SensorChainTryStepCells = 4;
 	constexpr int SensorChainSnapCells = 6;
 	constexpr int SensorChainBaseAheadCells = 6;
