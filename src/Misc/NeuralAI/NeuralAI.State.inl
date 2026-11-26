@@ -3805,17 +3805,21 @@ namespace
 	// growing while the idle army grows (the plan takes no more) or after MissionHeadMostFrames as the
 	// oldest request. The wave asks while it is short of its count and does not leave while an older
 	// plan request waits; after WavePlanHoldFrames the plans behind it go first.
+	// A request keeps its place MissionRequestKeepFrames after its plan last asked: when a wave leaves
+	// no idle unit is left, and the plan cannot ask again until its least group is back. Only a request
+	// asked again within two retries holds the wave and the requests behind it.
 	// No request keeps a dead target: a plan chooses its target again at every try, a request its plan
-	// has not asked again for within two retries is over (its target fell, its gate closed), and the
-	// oldest one that cannot leave MissionHeadMostFrames and two retries after it became the oldest is
-	// aborted, its plan waiting MissionHeadMostFrames before it asks again.
+	// stops asking for holds nothing and is dropped after MissionRequestKeepFrames (its target fell,
+	// its gate closed), and the oldest one that cannot leave MissionHeadMostFrames and two retries
+	// after it became the oldest is aborted, its plan waiting MissionHeadMostFrames before it asks again.
 	// Before it, each plan started at once with whatever group of free units stood ready when it
 	// tried and kept nothing otherwise: in 40 matches the wave count was met in 13% of the checks
 	// after minute 15 while the offensive plans took 6257 units in groups of 5.5.
 	constexpr int WavePlanHoldFrames = 5400;
 	constexpr int MissionQueuePlans = 2;
 	constexpr int MissionGroupFloor = 6;
-	constexpr int MissionHeadMostFrames = 2700;
+	constexpr int MissionHeadMostFrames = 5400;
+	constexpr int MissionRequestKeepFrames = 4500;
 	constexpr int MissionFillRetryFrames = 300;
 	constexpr int MissionLaneVehicles = 1;
 	constexpr int MissionLaneInfantry = 2;
