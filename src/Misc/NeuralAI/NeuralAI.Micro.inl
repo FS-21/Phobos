@@ -13419,6 +13419,20 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 	const bool massOverflow = tankMassWaves && waveAbleUnits >= static_cast<size_t>(TankMassOverflowVehicles);
 	const bool waveStrengthReady = (waveCheck.Launch && !waveAwaitsEscort) || massOverflow;
 
+	// The plans that march on the enemy wait for this wave while it is short of its count
+	// (WavePlanHoldFrames): since when, with a target and idle units that reach it.
+	{
+		const int gatherNow = Unsorted::CurrentFrame;
+		const bool gathering = pWaveTargetCell && !endgameRemnantHunt && !waveCountReady && waveAbleUnits + waveAbleInf > 0;
+
+		if (!gathering)
+			waveMacro.WaveGatherSince = -1;
+		else if (waveMacro.WaveGatherSince < 0 || waveMacro.WaveGatherSince > gatherNow)
+			waveMacro.WaveGatherSince = gatherNow;
+
+		waveMacro.WaveGatherFrame = gatherNow;
+	}
+
 	// Coordinated Multi-Squadron Offensive Strike Wave (Slot 37: Rush vs Mass
 	// Timing) Splits forces into parallel Squadron Alpha (pWaveTargetCell) and
 	// Squadron Bravo (pSecondaryWaveTargetCell)
