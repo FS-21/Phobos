@@ -1052,6 +1052,10 @@ namespace
 		// Strategic plan library (see UpdateStrategicPlans).
 		std::array<NeuralPlanInstance, static_cast<size_t>(NeuralPlanId::Count)> Plans {};
 		std::array<int, static_cast<size_t>(NeuralPlanId::Count)> PlanNextAttemptFrame {};
+		// The main wave fills first (WavePlanHoldFrames): per plan, since when the gathering wave has
+		// held it (-1 not held) and the last frame it did.
+		std::array<int, static_cast<size_t>(NeuralPlanId::Count)> PlanWaveHeldSince {};
+		std::array<int, static_cast<size_t>(NeuralPlanId::Count)> PlanWaveHeldLast {};
 		std::unordered_set<DWORD> PlanMembers {};
 		// Follow-up attacks of plans that took their building target (PlanFollowUp*); their members count
 		// as plan members.
@@ -1727,6 +1731,11 @@ namespace
 		// without it is met and only it holds the wave (-1 none), and whether that wait was logged.
 		int WaveFloorWaitSince { -1 };
 		bool WaveFloorWaitLogged { false };
+		// The plans that march on the enemy wait for the main wave (WavePlanHoldFrames): since when it
+		// has been short of its count with a target and idle units that reach it (-1 not now), and the
+		// last frame its gate ran.
+		int WaveGatherSince { -1 };
+		int WaveGatherFrame { -100000 };
 		std::vector<NeuralResistedPlace> ResistedPlaces {};
 		// Wave targets the count reached and the dispatch did not (WaveShort*); Failures holds the count.
 		std::vector<NeuralResistedPlace> ShortWaveTargets {};
@@ -2011,6 +2020,8 @@ namespace
 			this->OpponentProfile = NeuralOpponentProfile {};
 			this->Plans.fill(NeuralPlanInstance {});
 			this->PlanNextAttemptFrame.fill(0);
+			this->PlanWaveHeldSince.fill(-1);
+			this->PlanWaveHeldLast.fill(-100000);
 			this->PlanMembers.clear();
 			this->FollowUps.clear();
 			this->RaidTransportBanUntil.clear();
@@ -2351,6 +2362,8 @@ namespace
 			this->WaveVerdictOwner = -1;
 			this->WaveFloorWaitSince = -1;
 			this->WaveFloorWaitLogged = false;
+			this->WaveGatherSince = -1;
+			this->WaveGatherFrame = -100000;
 			this->ResistedPlaces.clear();
 			this->ShortWaveTargets.clear();
 			this->SiegeOwnersMask = 0u;
@@ -3757,6 +3770,13 @@ namespace
 	constexpr int WaveEchelonEngagedUnits = 3;
 	constexpr double WaveEchelonEngagedCells = 14.0;
 	constexpr int WaveFloorWaitMostFrames = 1800;
+	// The main wave fills first (user, 2026-11-26: «debería darse prioridad a rellenar los planes más
+	// viejos para que tengan el cupo de unidades solicitado para lanzarlos»): while it is short of its
+	// count, the plans that march on the enemy with the same idle army do not start. In 40 matches
+	// that count was met in 13% of the checks after minute 15 while the offensive plans took 6257 units in
+	// groups of 5.5. The wait has a limit here too: after WavePlanHoldFrames without a wave the plan
+	// that has waited longest leaves, and the wait starts again.
+	constexpr int WavePlanHoldFrames = 5400;
 	// A team push lasts at least the walk of its farthest member plus TeamPushMarginFrames; the team
 	// keeps its target for TeamTargetKeepFrames while it stands; a house with TeamWeakHouseBuildings
 	// known buildings or fewer is the team target only when no member picks a stronger one.

@@ -3103,6 +3103,14 @@ namespace
 			return false;
 		};
 
+		// The main wave fills first (WavePlanHoldFrames): its gate ran lately and found it short of its
+		// count, and whether the limit of that wait is still ahead.
+		const bool waveGathersNow = macro.WaveGatherSince >= 0 && Unsorted::CurrentFrame - macro.WaveGatherFrame <= 60;
+		const bool waveHoldsPlans = waveGathersNow && Unsorted::CurrentFrame - macro.WaveGatherSince < WavePlanHoldFrames;
+
+		if (!waveGathersNow)
+			macro.PlanWaveHeldSince.fill(-1);
+
 		auto startPlan = [&](NeuralPlanId id, std::vector<FootClass*> const& group, const CellStruct& target,
 			const CellStruct& staging, DWORD targetID, int durationFrames)
 		{
@@ -3132,6 +3140,45 @@ namespace
 			{
 				return pFoot && pFoot->WhatAmI() != AbstractType::Aircraft && !pFoot->IsInAir() && !pFoot->GetTechnoType()->Naval;
 			};
+
+			// The main wave fills first (WavePlanHoldFrames): a plan that marches on the enemy with the
+			// same idle army waits while the wave gathers. Past the limit of that wait the plan that has
+			// waited longest leaves (one held within the last two retries counts), and the wait starts
+			// again. Not Counter Squad, which answers an enemy force, nor a plan the trainer watches.
+			if (marches && id != NeuralPlanId::CounterSquad && !TrainingFocus().Plans[static_cast<size_t>(id)])
+			{
+				const size_t self = static_cast<size_t>(id);
+				const int now = Unsorted::CurrentFrame;
+
+				if (waveGathersNow)
+				{
+					if (macro.PlanWaveHeldSince[self] < 0)
+						macro.PlanWaveHeldSince[self] = now;
+
+					macro.PlanWaveHeldLast[self] = now;
+					bool leaves = !waveHoldsPlans;
+
+					for (size_t other = 0; leaves && other < macro.PlanWaveHeldSince.size(); ++other)
+					{
+						leaves = other == self || macro.PlanWaveHeldSince[other] < 0
+							|| now - macro.PlanWaveHeldLast[other] > 2 * PlanGateRetryFrames
+							|| macro.PlanWaveHeldSince[other] >= macro.PlanWaveHeldSince[self];
+					}
+
+					if (!leaves)
+					{
+						macro.PlanNextAttemptFrame[self] = now + PlanGateRetryFrames;
+						return;
+					}
+
+					// TEMP diagnostic (fast pace, 2026-11-26): the plans the limit of the wait lets through.
+					Debug::Log("[NeuralAI] House %d plan %s leaves past the wave: it gathered for %d frames, the plan waited %d, frame %d.\n",
+						houseIdx, NeuralPlanNames[self], now - macro.WaveGatherSince, now - macro.PlanWaveHeldSince[self], now);
+					macro.WaveGatherSince = now;
+				}
+
+				macro.PlanWaveHeldSince[self] = -1;
+			}
 
 			if (marches
 				&& ((target != CellStruct::Empty && IsPathDeadGoal(pHouse, target))
@@ -10794,7 +10841,8 @@ namespace
 					// After a lesson the bigger group is recruited (RaidRecruitFrames), not waited for.
 					const int utility = (haveTargets && (lesson || group.size() >= raidSize)) ? 280 : -1000;
 
-					if (utility > 0 && shouldTryStart(NeuralPlanId::RotatingRaids, utility))
+					// Its recruits stay out of the waves: none while the main wave gathers (WavePlanHoldFrames).
+					if (utility > 0 && !waveHoldsPlans && shouldTryStart(NeuralPlanId::RotatingRaids, utility))
 					{
 						recruits.clear();
 						recruitFrom(group);
