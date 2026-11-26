@@ -760,6 +760,87 @@ namespace
 			break;
 		}
 	}
+
+	// TEMP diagnostic (user, 2026-11-26: «Sí, añádela»; 9 of 27 hits on unfolded sensor arrays named no
+	// attacker in the log): who last hit a mobile sensor array of ours when it packs up to flee or is
+	// destroyed, what that unit was doing, and where the last wave of its house went. At most
+	// SensorHitLines lines a match.
+	void NoteSensorArrayHit(BuildingClass* pArray, TechnoClass* pAttacker, const char* event)
+	{
+		static int hitSerial = -1;
+		static int hitLines = 0;
+
+		if (hitSerial != NeuralMatchSerial)
+		{
+			hitSerial = NeuralMatchSerial;
+			hitLines = 0;
+		}
+
+		if (hitLines >= SensorHitLines)
+			return;
+
+		++hitLines;
+		const CellStruct at = pArray->GetMapCoords();
+		auto const pAttackerHouse = pAttacker ? pAttacker->Owner : nullptr;
+		const char* kind = "none";
+		const char* doing = "-";
+
+		if (pAttacker)
+		{
+			switch (pAttacker->WhatAmI())
+			{
+			case AbstractType::Building:
+				kind = static_cast<BuildingClass*>(pAttacker)->Type->IsBaseDefense ? "defense" : "building";
+				break;
+			case AbstractType::Aircraft:
+				kind = "aircraft";
+				break;
+			case AbstractType::Infantry:
+				kind = "infantry";
+				break;
+			case AbstractType::Unit:
+				kind = "vehicle";
+				break;
+			default:
+				kind = "other";
+				break;
+			}
+
+			if (auto const pFoot = abstract_cast<FootClass*>(pAttacker))
+				doing = pFoot->Team ? "in a team" : "free";
+		}
+
+		CellStruct waveCell = CellStruct::Empty;
+		int waveFrames = -1;
+
+		if (pAttackerHouse && NeuralAI::IsEnabledForHouse(pAttackerHouse))
+		{
+			auto const& attackerMacro = GetMacroState(pAttackerHouse);
+
+			for (size_t i = 0; i < attackerMacro.Plans.size(); ++i)
+			{
+				auto const& plan = attackerMacro.Plans[i];
+
+				if (plan.Active && std::find(plan.Members.begin(), plan.Members.end(), pAttacker->UniqueID) != plan.Members.end())
+				{
+					doing = NeuralPlanNames[i];
+					break;
+				}
+			}
+
+			waveCell = attackerMacro.LastWaveTargetCell;
+			waveFrames = Unsorted::CurrentFrame - attackerMacro.LastWaveDispatchFrame;
+		}
+
+		Debug::Log("[NeuralAI] House %d TEMP sensor hit: %s %u at (%d,%d) %s at %d%% health, last hit by %s %s %u of house %d %d cells away"
+			" (aimed at it %d, mission %d, %s), last wave of its house to (%d,%d) %d cells away %d frames ago, frame %d.\n",
+			pArray->Owner->ArrayIndex, pArray->Type->ID, pArray->UniqueID, at.X, at.Y, event, static_cast<int>(pArray->GetHealthPercentage() * 100),
+			kind, pAttacker ? pAttacker->GetTechnoType()->ID : "-", pAttacker ? pAttacker->UniqueID : 0u,
+			pAttackerHouse ? pAttackerHouse->ArrayIndex : -1, pAttacker ? static_cast<int>(pAttacker->GetMapCoords().DistanceFrom(at)) : -1,
+			pAttacker && pAttacker->Target == pArray ? 1 : 0, pAttacker ? static_cast<int>(pAttacker->CurrentMission) : -1, doing,
+			waveCell.X, waveCell.Y, waveCell != CellStruct::Empty ? static_cast<int>(waveCell.DistanceFrom(at)) : -1, waveFrames,
+			Unsorted::CurrentFrame);
+	}
 }
 
 // Defense ledger: kills of our towers (by UniqueID) and towers lost, from the engine's destruction
@@ -806,6 +887,13 @@ void NeuralAI::OnTechnoDestroyed(TechnoClass* pVictim, TechnoClass* pKiller)
 
 		if (pVictimBld->Type && pVictimBld->Type->ConstructionYard)
 			GetMacroState(pVictimOwner).ConYardLostFrame = Unsorted::CurrentFrame;
+
+		// TEMP diagnostic (NoteSensorArrayHit): a mobile sensor array of ours destroyed.
+		if (pVictimBld->Type && IsSensorLookoutType(pVictimBld->Type->UndeploysInto))
+		{
+			auto const pVictimExt = TechnoExt::TryFetch(pVictimBld);
+			NoteSensorArrayHit(pVictimBld, pKiller ? pKiller : (pVictimExt ? pVictimExt->LastAttacker : nullptr), "is destroyed");
+		}
 	}
 
 	// TEMP diagnostic (NoteOrderCaller): the record of a dead unit goes with it.
