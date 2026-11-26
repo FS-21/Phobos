@@ -3108,8 +3108,9 @@ namespace
 		const int missionNow = Unsorted::CurrentFrame;
 		const bool waveGathersNow = macro.WaveGatherSince >= 0 && missionNow - macro.WaveGatherFrame <= 60;
 		const bool waveHoldsPlans = waveGathersNow && missionNow - macro.WaveGatherSince < WavePlanHoldFrames;
-		// The plan requests: one whose plan runs, or has not asked again for within two retries, is over;
-		// the oldest one older than the wave's is the one the wave waits for.
+		// The plan requests: one whose plan runs, or has not asked again for MissionRequestKeepFrames, is
+		// over; the oldest one asked again within two retries and older than the wave's is the one the
+		// wave waits for.
 		int missionHeadPlan = -1;
 		int missionHeadSince = waveHoldsPlans ? macro.WaveGatherSince : INT_MAX;
 		int missionPlansQueued = 0;
@@ -3119,13 +3120,16 @@ namespace
 			if (macro.PlanRequestSince[i] < 0)
 				continue;
 
-			if (macro.Plans[i].Active || missionNow - macro.PlanRequestLast[i] > 2 * PlanGateRetryFrames)
+			if (macro.Plans[i].Active || missionNow - macro.PlanRequestLast[i] > MissionRequestKeepFrames)
 			{
 				macro.PlanRequestSince[i] = -1;
 				continue;
 			}
 
 			missionPlansQueued++;
+
+			if (missionNow - macro.PlanRequestLast[i] > 2 * PlanGateRetryFrames)
+				continue;
 
 			if (macro.PlanRequestSince[i] < missionHeadSince)
 			{
@@ -3234,13 +3238,14 @@ namespace
 				macro.PlanRequestLast[self] = missionNow;
 				macro.PlanRequestLanes[self] |= lanes;
 
-				// What is before it: the wave that began to gather earlier, and an older request that takes
-				// the same kinds of units (the lower plan on a tie).
+				// What is before it: the wave that began to gather earlier, and an older request asked again
+				// lately that takes the same kinds of units (the lower plan on a tie).
 				bool ahead = waveHoldsPlans && macro.WaveGatherSince <= macro.PlanRequestSince[self];
 
 				for (size_t other = 0; !ahead && other < macro.PlanRequestSince.size(); ++other)
 				{
 					ahead = other != self && macro.PlanRequestSince[other] >= 0
+						&& missionNow - macro.PlanRequestLast[other] <= 2 * PlanGateRetryFrames
 						&& (macro.PlanRequestLanes[other] & macro.PlanRequestLanes[self]) != 0
 						&& (macro.PlanRequestSince[other] < macro.PlanRequestSince[self]
 							|| (macro.PlanRequestSince[other] == macro.PlanRequestSince[self] && other < self));
