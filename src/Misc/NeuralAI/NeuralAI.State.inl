@@ -1242,6 +1242,9 @@ namespace
 		// Expert 0 work (UpdateEconomyCrisis, every 150 frames): the selector prior from the economy
 		// trouble there is now, and what it is made of. Own state and current sight only.
 		int EconomyTrouble { 0 };
+		// Refineries the fields we hold have room for (the building pick computes it): the work of
+		// Expert 0 counts the ones missing.
+		int HeldRefineryRoom { 0 };
 		int LowPowerSinceFrame { -1 };
 		int HarvestersUnderFire { 0 };
 		int StarvedRefineries { 0 };
@@ -2129,6 +2132,7 @@ namespace
 			this->LastRecoverySaleFrame = -100000;
 			this->LastHarvesterBalanceFrame = -100000;
 			this->EconomyTrouble = 0;
+			this->HeldRefineryRoom = 0;
 			this->LowPowerSinceFrame = -1;
 			this->HarvestersUnderFire = 0;
 			this->StarvedRefineries = 0;
@@ -3270,6 +3274,20 @@ namespace
 	// queues should spend. 15000 plus the income left 20000 to 27000 credits out of that count
 	// (user approved, 2026-11-26, «Todos»).
 	constexpr int BankReserveCredits = 5000;
+	// Expert 0 always has the economy to move (user, 2026-11-26: «debería de estar siempre moviendo la
+	// economía»; being poor gives it more priority, it is not its only work: «una economía decente
+	// produce mucha actividad militar»). Its selector prior adds, to the trouble it can fix,
+	// EconomyWorkPerRefinery for every refinery the fields we hold still have room for and
+	// EconomyWorkPerHarvester for every harvester short of two per refinery, up to EconomyWorkMost, and
+	// EconomyPoorBonus while the queues outspend the income with the bank under ArmyFirstShortCredits;
+	// EconomyPriorMost in all. It is never vetoed. In charge, it brings the refinery of a held field
+	// and the second harvester of a refinery in half the time. It ran in 1% of the recorded steps
+	// between game minutes 10 and 30, only when the economy was already in trouble.
+	constexpr int EconomyWorkPerRefinery = 60;
+	constexpr int EconomyWorkPerHarvester = 40;
+	constexpr int EconomyWorkMost = 350;
+	constexpr int EconomyPoorBonus = 250;
+	constexpr int EconomyPriorMost = 1200;
 	// A refinery for a remote yard without one stands within this many cells of it, on its land
 	// (production counts a yard's refinery within 18 cells, the footprint corner is not its centre),
 	// its search starts at the yard's own field, within RefineryHubOreCells of it.

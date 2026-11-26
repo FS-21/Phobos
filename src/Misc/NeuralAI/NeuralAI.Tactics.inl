@@ -4760,7 +4760,8 @@ namespace
 		// harvester or a refinery buildable), harvesters with no refinery, a raid that cost a third of
 		// the economy, low power that lasted 300 frames (worse the bigger the deficit), harvesters
 		// under fire, a refinery no harvester serves while another is crowded, storage nearly full.
-		// 0 = nothing to do: Expert 0 is vetoed.
+		// To that it adds the work the economy always has (EconomyWork*): what the fields we hold still
+		// lack, and plain poverty. Expert 0 is never vetoed.
 		{
 			int trouble = 0;
 			// Only harvesters that unload at a refinery need one (a slave miner is its own refinery).
@@ -4790,13 +4791,17 @@ namespace
 			if (macro.IncomeFalling)
 				trouble += 400;
 
-			macro.EconomyTrouble = std::min(950, trouble);
+			const int missingRefineries = std::max(0, macro.HeldRefineryRoom - refCount);
+			const int missingHarvesters = std::max(0, 2 * refCount - static_cast<int>(harvesters.size()));
+			int work = std::min(EconomyWorkMost, missingRefineries * EconomyWorkPerRefinery + missingHarvesters * EconomyWorkPerHarvester);
+
+			if (macro.BankIncomeRate >= 0 && macro.BankIncomeRate < macro.BankSpendCapacity && pHouse->Available_Money() < ArmyFirstShortCredits)
+				work += EconomyPoorBonus;
+
+			macro.EconomyTrouble = std::min(EconomyPriorMost, trouble + work);
 		}
 
-		if (!expertInCharge)
-			return;
-
-		// Harvester balance.
+		// Harvester balance, whoever is in charge: the economy is always looked after.
 		if (refCount >= 2 && now - macro.LastHarvesterBalanceFrame >= 450)
 		{
 			if (pCrowded && pIdle && pCrowded != pIdle)
