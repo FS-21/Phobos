@@ -3226,6 +3226,12 @@ namespace
 	constexpr int HeldFieldRefineryFrames = 2700;
 	constexpr int HeldFieldRefineryBonus = 1500;
 	constexpr int HeldFieldRefineryStep = 65;
+	// Army first (user approved, 2026-11-26, «Todos»): every factory at work takes its share of the
+	// credits as they come in, so a house that earns less than its queues spend gives the tanks one
+	// share among four or five. With a war factory standing and fewer than ArmyFirstShortCredits it
+	// starts no tower without a threat on the base, no building that opens no tech, no engineer
+	// without a capture left for it and no plain warship while the sea is ours.
+	constexpr int ArmyFirstShortCredits = 1500;
 	// A refinery for a remote yard without one stands within this many cells of it, on its land
 	// (production counts a yard's refinery within 18 cells, the footprint corner is not its centre),
 	// its search starts at the yard's own field, within RefineryHubOreCells of it.

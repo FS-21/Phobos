@@ -3625,6 +3625,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		}
 
 		const bool openingFactoryPending = firstFactoryPending || firstBarracksPending;
+		// Army first (ArmyFirstShortCredits): short of money with a war factory standing.
+		const bool armyFirstShort = ownedWarFactories >= 1 && money < ArmyFirstShortCredits;
 
 		// Buildings a deployer of ours can bring (NeuralAI.MobileFactory.inl; user approved, 2026-11-21,
 		// «Apruebo el plan»): of the deployers our vehicle factories can build now the cheapest of each
@@ -3827,6 +3829,13 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				&& !IsCoreTechBuilding(pBld) && !pBld->IsBaseDefense && pBld->Factory == AbstractType::None
 				&& !IsTunnelNetworkBuilding(pBld) && (pBld->SuperWeapon != -1 || pBld->SuperWeapon2 != -1);
 			const bool isTechStep = opensTechTypes || isCoreTechStep || isSuperWeaponStep;
+
+			// Army first (ArmyFirstShortCredits): what this house leaves for later while short, unless it
+			// opens tech or another need of the house asks for it (the MCV, a crossing, the air defense).
+			const bool armyFirstHolds = armyFirstShort && !isBldInProgress && !opensTechTypes && !isCoreTechStep
+				&& std::find(mcvPrerequisites.begin(), mcvPrerequisites.end(), pBld->ArrayIndex) == mcvPrerequisites.end()
+				&& std::find(crossingPrerequisites.begin(), crossingPrerequisites.end(), pBld->ArrayIndex) == crossingPrerequisites.end()
+				&& std::find(airDefensePrerequisites.begin(), airDefensePrerequisites.end(), pBld->ArrayIndex) == airDefensePrerequisites.end();
 
 			// Branch choices (Prerequisite.Negative: two tech labs, rival defense lines): the first of
 			// each gets a per-match taste of +-250, so one match goes one way and another the other,
@@ -4235,8 +4244,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			else if (pBld->SuperWeapon != -1 && !IsCoreTechBuilding(pBld))
 			{
 				// A tech center or radar that grants a superweapon (a force shield, a spy plane) is
-				// scored with the tech buildings below.
-				if (owned >= 1)
+				// scored with the tech buildings below. Short of money it waits (armyFirstHolds).
+				if (owned >= 1 || armyFirstHolds)
 					continue;
 
 				score = scores[10] + 450;
@@ -4263,7 +4272,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				// Support both Superweapon-deployed 2nd Tunnel Mouths (C&C: Reloaded
 				// ROBOTTUNNEL BuildLimit=1) AND mods where multiple Tunnel Mouths are
 				// built directly from the Construction Yard (owned < 3)!
-				if (!hasCoreEconomyAndProduction || owned >= 3)
+				if (!hasCoreEconomyAndProduction || owned >= 3 || armyFirstHolds)
 					continue;
 
 				const bool hasTunnelDeliverySW = (pBld->SuperWeapon != -1 || pBld->SuperWeapon2 != -1);
@@ -4299,6 +4308,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				// One the Island Hold yard still lacks: the house's caps and budget count the towers
 				// of its other bases, which do nothing for that yard, so only being broke holds it back.
 				const bool fillsIslandHold = IslandHoldWants(pHouse, pBld);
+
+				// Army first: no tower while nothing threatens the base.
+				if (armyFirstHolds && !fillsAirDeficit && !fillsIslandHold && !wasRecentlyAttacked && !frontlineThreatActive && !airRaid)
+					continue;
 
 				const bool emergencyAllowedBeforeFirstWF = !groundWarFactoryBuildableNow
 					|| (isPureAA ? (underAirAttack && totalAntiAirDefenses < 1) : (totalGroundDefenses < 1));
@@ -4629,6 +4642,11 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				const int sensorBuildingReach = pBld->SensorArray && detectionSpotUncovered
 					? DetectionReachCells(pBld, DetectionNeedStealth) : 0;
 				const int maxAllowed = ((supportRadius > 0 && hasTechCenter && money > 3000) ? 2 : 1) + (sensorBuildingReach > 0 ? 1 : 0);
+
+				// Army first: a support building that opens nothing waits, a sensor array for a stealth
+				// sighting does not.
+				if (armyFirstHolds && sensorBuildingReach == 0)
+					continue;
 
 				// Gap and cloak generators, inhibitors and radar jammers: one more while a key building
 				// is outside the network and power allows (AdvAI BuildSupport), placed to cover it
@@ -5222,6 +5240,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	auto& seaMacro = GetMacroState(pHouse);
 	const bool seaControl = seaMacro.SeaControl;
 	const bool seaControlAcross = seaControl && seaMacro.EnemyAcrossWater;
+	// Army first (ArmyFirstShortCredits), for the unit queues.
+	const bool armyFirstShortUnits = pHouse->NumWarFactories >= 1 && money < ArmyFirstShortCredits;
 	seaMacro.SeaControlLongRangeShip = false;
 	// Land control (LandControl*): the opposite, the enemy's remnants are at sea.
 	UpdateLandControl(pHouse);
@@ -7058,9 +7078,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				const bool sonarWanted = pUnit->Sensors && (detectionNeed & (DetectionNeedStealth | DetectionNeedSub));
 
 				// The sea is ours (SeaControl*): warships that neither shell from afar nor hunt with a sonar the
-				// detection need asks for stop at SeaControlWarships, escorts and the yard's guard.
+				// detection need asks for stop at SeaControlWarships, escorts and the yard's guard, and none
+				// is started while the house is short of money (ArmyFirstShortCredits).
 				if (seaControl && !isLongRangeCoastalSiegeShip && !sonarWanted && !isUnitInProgress
-					&& seaMacro.PlainWarships >= SeaControlWarships)
+					&& (seaMacro.PlainWarships >= SeaControlWarships || armyFirstShortUnits))
 				{
 					continue;
 				}
@@ -7985,6 +8006,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				= (neutralCashDerrickCount > ownedEngineers) ? 880 : (moreTechThanEngineers ? 680 : 320);
 			const int techBonus = hasCapturableTechOnMap ? cashDerrickBonus : 0;
 			const int mechanicBonus = (alsoRepairsUnitsOrBlds && ownedEngineers < mechanicQuota) ? 450 : 0;
+
+			// Army first: no engineer without a capture left for it or a repair quota to fill.
+			if (armyFirstShortUnits && !isInfInProgress && !moreTechThanEngineers && mechanicBonus == 0)
+				continue;
 
 			if (pHouse->OwnedInfantry < 3 && !hasCapturableTechOnMap && mechanicBonus == 0 && scores[36] <= 80)
 				score -= 300;
