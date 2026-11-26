@@ -1203,8 +1203,10 @@ namespace
 		bool HasBuildableTechUnlock { false };
 		int TechUnlockFrame { -100000 };
 		// Tech progression floor (TechStepFloorFrames): since when no tech step was in construction,
-		// and its TEMP diagnostic lines.
+		// and its TEMP diagnostic lines. TechStepTypes: the buildings the last structure pick counted
+		// as tech steps, kept while the yard builds one of them (it may not pass the pick any more).
 		int TechStepWaitSince { 0 };
+		std::vector<int> TechStepTypes {};
 		int TechFloorLogCount { 0 };
 		int TechFloorLogFrame { -100000 };
 		// Counter composition (UpdateCounterComposition): production score shift per buildable
@@ -1479,6 +1481,12 @@ namespace
 		// harvester while we have fewer than refineries, a refinery for a newly reached field.
 		int HarvesterSaveTarget { 0 };
 		int RefinerySaveTarget { 0 };
+		// The building the yard picked on purpose while the hold saves for a refinery (-1 none): the tech
+		// step whose turn it is, the pick of a base under counter-attack. The hold leaves it alone
+		// (UpdateEconomyCrisis), and it stays the one kept while the yard builds it. Its TEMP line is
+		// written at most once in HoldKeptLogFrames.
+		int HoldKeptBuildingIdx { -1 };
+		int HoldKeptLogFrame { -100000 };
 		// Economy hold bookkeeping: first frame of the current hold, and no hold before this frame (a
 		// hold that bought nothing for 3600 frames rests 1800).
 		int EconomyHoldSince { -1 };
@@ -2129,6 +2137,7 @@ namespace
 			this->HasBuildableTechUnlock = false;
 			this->TechUnlockFrame = -100000;
 			this->TechStepWaitSince = 0;
+			this->TechStepTypes.clear();
 			this->TechFloorLogCount = 0;
 			this->TechFloorLogFrame = -100000;
 			this->CounterBonus.clear();
@@ -2282,6 +2291,8 @@ namespace
 			this->CrossingNeedFrame = -1;
 			this->HarvesterSaveTarget = 0;
 			this->RefinerySaveTarget = 0;
+			this->HoldKeptBuildingIdx = -1;
+			this->HoldKeptLogFrame = -100000;
 			this->EconomyHoldSince = -1;
 			this->EconomyHoldPauseUntil = -1;
 			this->EconomyHoldKind = 0;
@@ -2974,6 +2985,9 @@ namespace
 	constexpr int TechUnlockTransitiveDepth = 3;
 	constexpr int TechStepFloorFrames = 2700;
 	constexpr int TechStepRefineryYieldFrames = 2700;
+	// The refinery the economy hold saves for comes before the tech step below this many refineries.
+	constexpr int TechStepRefineriesFirst = 2;
+	constexpr int HoldKeptLogFrames = 900;
 	constexpr int TechFloorLogLines = 40;
 	constexpr int TechFloorLogFrames = 900;
 	constexpr double OpTransportMinHealth = 0.5;
