@@ -9,8 +9,9 @@ namespace
 	// Cells from our structures (10 less from a garrison of ours) within which a building is ours
 	// to take without the army standing next to it.
 	constexpr int UrbanReachCells = 28;
-	// Seats the barracks are asked to fill at a time: a squad for the best positions.
+	// Seats the barracks are asked to fill at a time: a squad for the best positions, or a city.
 	constexpr int UrbanSquadSeats = 12;
+	constexpr int UrbanCitySeats = 60;
 	// A tank for an empty tank bunker is built on purpose only with this much money left after it.
 	constexpr int GarrisonTrainingReserve = 600;
 	// Below this health a building is not garrisoned (it throws its soldiers out before it falls).
@@ -897,8 +898,8 @@ namespace
 
 	// Garrison demand for the infantry selector: seats left in buildings worth holding beyond the
 	// occupiers we have outside (0 when nothing is worth it), and whether an enemy garrison near us
-	// waits for a clearer we do not own. UrbanSquadSeats at most, the squad for the best positions,
-	// on an urban map too (the share of RunUrbanGarrison holds there since 2026-11-26).
+	// waits for a clearer we do not own. On an urban map every seat counts (the city is filled);
+	// elsewhere 12 at most, the squad for the best positions.
 	void GetUrbanProductionNeeds(HouseClass* pHouse, int& outGarrisonRoom, bool& outNeedClearer)
 	{
 		auto& state = GetUrbanState(pHouse);
@@ -911,7 +912,7 @@ namespace
 				room += std::max(0, known.MaxOccupants - known.Occupants);
 		}
 
-		outGarrisonRoom = std::max(0, std::min(room, UrbanSquadSeats)
+		outGarrisonRoom = std::max(0, std::min(room, urbanMap ? UrbanCitySeats : UrbanSquadSeats)
 			- std::max(0, state.OwnOccupierInfantry - state.OwnOccupants));
 		outNeedClearer = state.ThreatGarrisons > 0;
 
@@ -961,9 +962,9 @@ namespace
 	// A full garrison is a free bunker (user): buildings we hold or already walk into are filled
 	// first, a new building is started only while none of those within reach has room. Starting new
 	// ones stops at a share of our occupiers inside: 60% under Expert 9, 40% otherwise. An urban map
-	// (6+ known buildings worth holding) had no share (user: a city is filled with soldiers) and has
-	// the same one since 2026-11-26 (user approved, «Todos»: 69 soldiers of two houses sat in
-	// buildings against 46 units outside, match #19341). Filling a building we hold ignores the
+	// (6+ known buildings worth holding) has no share (user: a city is filled with soldiers): every
+	// idle occupier goes in while a building worth holding has room, and the barracks train the
+	// soldiers for the seats left (GetUrbanProductionNeeds). Filling a building we hold ignores the
 	// share anywhere.
 	// A building is taken by a squad (user: many soldiers at once, not one or two; once it is full
 	// the next building, the rest back to the pool): the soldier picks the building and the idle
@@ -989,7 +990,7 @@ namespace
 		const bool urbanMap = state.WorthyBuildings >= 6;
 		const int sharePercent = expertActive ? 60 : 40;
 		const int cap = std::max(expertActive ? 4 : 2, state.OwnOccupierInfantry * sharePercent / 100);
-		const bool overCap = state.OwnOccupants + pendingTotal >= cap;
+		const bool overCap = !urbanMap && state.OwnOccupants + pendingTotal >= cap;
 		state.TriesSinceReport++;
 
 		if (overCap)
