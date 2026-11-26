@@ -3302,8 +3302,8 @@ namespace
 	// EconomyWorkPerHarvester for every harvester short of two per refinery, up to EconomyWorkMost, and
 	// EconomyPoorBonus while the queues outspend the income with the bank under ArmyFirstShortCredits;
 	// EconomyPriorMost in all. It is never vetoed. In charge, it brings the refinery of a held field
-	// and the second harvester of a refinery in half the time. It ran in 1% of the recorded steps
-	// between game minutes 10 and 30, only when the economy was already in trouble.
+	// in half the time. It ran in 1% of the recorded steps between game minutes 10 and 30, only when
+	// the economy was already in trouble.
 	constexpr int EconomyWorkPerRefinery = 60;
 	constexpr int EconomyWorkPerHarvester = 40;
 	constexpr int EconomyWorkMost = 350;

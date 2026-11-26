@@ -3331,29 +3331,24 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		// The second one (user, 2026-11-18: the FreeUnit takes no war factory time): while the war
 		// factory builds a unit that gathers nothing and the income is not falling (a thinning field
 		// wants no more harvesters).
-		// Read from the factories themselves, as the bank governor does (queueFactoryIdle): the primary
-		// factory of the house read "builds the army" in 9.6% of 788 samples after minute 10 while the
-		// governor found the vehicle queue at work, so the second harvester was wanted in 3.9% of them.
+		// Read through the primary factory of the house, which is empty most of the time while the
+		// engine's own AI production runs the vehicle queue: it says "builds the army" in about one
+		// sample in ten, and the second harvester is wanted about as seldom. Reading the factories
+		// themselves (6387bba50, two builds, 2026-11-26) wanted it nearly always: the refinery the economy
+		// hold then saved for cancelled the tech building in the yard's queue again and again (240 tech
+		// buildings cancelled in 37 matches), the third refinery came at minute 38 instead of 14 and the
+		// income at minute 20 fell by a fifth. The rule is back to what it did.
 		bool warFactoryBuildsArmy = false;
 
-		for (auto const pArmyFactory : FactoryClass::Array)
+		if (auto const pArmyFactory = pHouse->GetPrimaryFactory(AbstractType::UnitType, false, BuildCat::DontCare))
 		{
-			if (!pArmyFactory || pArmyFactory->Owner != pHouse || !pArmyFactory->Object || pArmyFactory->OnHold)
-				continue;
-
-			auto const pQueued = abstract_cast<UnitClass*>(pArmyFactory->Object);
-
-			if (pQueued && pQueued->Type && !pQueued->Type->Naval && !pQueued->Type->Harvester && !pQueued->Type->ResourceGatherer)
-			{
-				warFactoryBuildsArmy = true;
-				break;
-			}
+			if (auto const pQueued = abstract_cast<UnitClass*>(pArmyFactory->Object))
+				warFactoryBuildsArmy = pQueued->Type && !pQueued->Type->Harvester && !pQueued->Type->ResourceGatherer;
 		}
 
 		const bool wantsSecondHarvesterViaRefinery = warFactoryBuildsArmy && !GetMacroState(pHouse).IncomeFalling
 			&& ownedHarvestersCount >= staticRefineriesCount && ownedHarvestersCount < 2 * staticRefineriesCount
-			&& Unsorted::CurrentFrame - GetMacroState(pHouse).LastHarvesterRecoveryFrame
-				>= (pExt->NeuralAI_ActiveExpert == 0 ? SecondHarvesterRecoveryFrames / 2 : SecondHarvesterRecoveryFrames)
+			&& Unsorted::CurrentFrame - GetMacroState(pHouse).LastHarvesterRecoveryFrame >= SecondHarvesterRecoveryFrames
 			&& features[19] > 0 && money >= 900;
 		const bool wantsHarvesterRecoveryViaRefinery = (pHouse->ConYards.Count >= 1 && staticRefineriesCount >= 1
 			&& !GetMacroState(pHouse).BrokeHoldActive
@@ -4856,18 +4851,6 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			bestBldScore = std::max(bestBldScore, bestPriorityAirfieldScore);
 		}
 
-		// A field we hold has room for a refinery and its turn has come (HeldFieldRefineryFrames): it is
-		// the pick, before the routine ones, paid as it goes. On its score alone it lost to the tech steps
-		// and the towers: the first 34 houses that played it had 2 refineries at minute 20. Never over a
-		// building under construction, a gun an air raid still needs, the first war factory, a base under
-		// attack or short of power; the tech floor below still takes its turn after a refinery.
-		if (heldFieldRefinery && awaitedRefineryIdx >= 0 && bestBldIdx != awaitedRefineryIdx && hasActiveBuildingIncome
-			&& !bestFillsAirDeficit && inProgressBldIdx < 0 && inProgressDefIdx < 0 && !firstFactoryPending && !wasRecentlyAttacked
-			&& !pHouse->HasLowPower())
-		{
-			bestBldIdx = awaitedRefineryIdx;
-		}
-
 		// Tech progression floor (user approved, 2026-11-20, «se supone que ha de desarrollar todo su
 		// árbol tecnológico»): once the core economy and production stand, when no tech step (a first
 		// building that opens types of our tree or of a captured one, a radar or tech center of a group
@@ -5058,6 +5041,21 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				if (!keepPick)
 					bestBldIdx = awaitedRefineryIdx;
 			}
+		}
+
+		// A field we hold has room for a refinery and its turn has come (HeldFieldRefineryFrames): it
+		// takes the pick of the scored loop, paid as it goes. On its score alone it lost to the tech steps
+		// and the towers (2 refineries at minute 20 in the first 34 houses that played it). It comes
+		// last and only over a pick nothing above changed: placed before the tech floor (0e56b2981) it
+		// read as "the refinery leads, the tech step takes its turn" and fed a loop of tech buildings
+		// started and cancelled. Never while the economy hold saves for a refinery, over the tech floor,
+		// a building under construction, a gun an air raid still needs, the first war factory, a base
+		// under attack or short of power.
+		if (heldFieldRefinery && awaitedRefineryIdx >= 0 && bestBldIdx != awaitedRefineryIdx && bestBldIdx == scoredBldIdx
+			&& !techFloorPick && GetMacroState(pHouse).RefinerySaveTarget <= 0 && hasActiveBuildingIncome && !bestFillsAirDeficit
+			&& inProgressBldIdx < 0 && inProgressDefIdx < 0 && !firstFactoryPending && !wasRecentlyAttacked && !pHouse->HasLowPower())
+		{
+			bestBldIdx = awaitedRefineryIdx;
 		}
 
 		if (bestBldIdx >= 0)
