@@ -3232,6 +3232,10 @@ namespace
 	// starts no tower without a threat on the base, no building that opens no tech, no engineer
 	// without a capture left for it and no plain warship while the sea is ours.
 	constexpr int ArmyFirstShortCredits = 1500;
+	// What the bank governor leaves alone (UpdateBankGovernor): above it the bank is surplus the
+	// queues should spend. 15000 plus the income left 20000 to 27000 credits out of that count
+	// (user approved, 2026-11-26, «Todos»).
+	constexpr int BankReserveCredits = 5000;
 	// A refinery for a remote yard without one stands within this many cells of it, on its land
 	// (production counts a yard's refinery within 18 cells, the footprint corner is not its centre),
 	// its search starts at the yard's own field, within RefineryHubOreCells of it.
@@ -4381,6 +4385,11 @@ namespace
 	// of what the factories owned take off the next one.
 	constexpr int TankMassWarFactories = 3;
 	constexpr int TankMassFactoryPrior = 700;
+	// Every archetype builds war factories ahead of the tech as its refineries grow (user approved,
+	// 2026-11-26, «Todos»): one more for every EarlyWarFactoryRefineries refineries, up to
+	// EarlyWarFactoriesMost. In 40 matches the median house built its second war factory at minute 44.
+	constexpr int EarlyWarFactoryRefineries = 2;
+	constexpr int EarlyWarFactoriesMost = 3;
 	// The tanks: the prior of the main battle tank slot, the share of the type penalty they keep
 	// (a mass is many of one type), and the share the other front line vehicles keep (user: very
 	// little for the tanks; for the others a group of 6 or 7 of one type can happen without being

@@ -1862,11 +1862,14 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		const int tankMassWarFactories = pExt->NeuralAI_Archetype == TankMassArchetype
 			? std::clamp(ownedRefineries - TankMassRefineries + 3, 1, TankMassWarFactories)
 			: 0;
+		// Every house builds them ahead of the tech as its refineries grow (EarlyWarFactoryRefineries).
+		const int aheadWarFactories = std::max(tankMassWarFactories,
+			std::clamp(1 + ownedRefineries / EarlyWarFactoryRefineries, 1, EarlyWarFactoriesMost));
 
 		// No fixed ceiling (user: the caps nobody asked for kept a house from matching the enemy's
 		// production): the economy or one more than the known factories of the strongest enemy,
 		// whichever is more, bounded only by room, money and the difficulty cap per category.
-		const int maxWarFactories = std::max(tankMassWarFactories, (hasTechCenter || money >= 2400)
+		const int maxWarFactories = std::max(aheadWarFactories, (hasTechCenter || money >= 2400)
 			? std::max({ 2, ecoWarFactoryCap, maxEnemyWarFactories + 1 }) + bankSteps + frontFactoryRoom
 			: std::clamp(ecoWarFactoryCap, 1, 3));
 
@@ -3788,8 +3791,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 						? BankFactoryDeficit(pHouse, BankQueue::Infantry, pHouse->NumBarracks) > 0
 						: BankFactoryDeficit(pHouse, BankQueue::Vehicle, pHouse->NumWarFactories) > 0);
 
-				// The war factories of the tank mass do not wait for the tech either.
-				const bool tankMassNeedsCopy = pBld->Factory == AbstractType::UnitType && owned < tankMassWarFactories;
+				// The war factories ahead of the tech (the tank mass, EarlyWarFactoryRefineries) do not wait
+				// for it either.
+				const bool tankMassNeedsCopy = pBld->Factory == AbstractType::UnitType && owned < aheadWarFactories;
 
 				// Nor the copies that bring us level with the known factories of the strongest enemy.
 				const bool parityNeedsCopy = (pBld->Factory == AbstractType::InfantryType)
@@ -4124,6 +4128,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 					if (ownedWarFactories < ecoWarFactoryCap && money >= 2000)
 						score += 420;
+
+					// The copies ahead of the tech are not weighed down as copies (the tank mass has its prior).
+					if (owned >= 1 && ownedWarFactories < aheadWarFactories && pExt->NeuralAI_Archetype != TankMassArchetype)
+						score += owned * (bankSteps > 0 ? 300 : 620);
 				}
 
 				// The tank mass builds the war factory before the other factories the governor wants.
