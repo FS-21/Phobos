@@ -247,6 +247,8 @@ namespace
 		// Every DetectorSampleFrames: the armed combat units of the house, and those of them idle as CombatIdle2m counts.
 		CombatSamples,
 		CombatIdleSamples,
+		// A soft veto (KnobSkips) left the scored pick alone, counted at every pick evaluation it did.
+		SoftVetoSkipped,
 		Count
 	};
 
@@ -281,7 +283,7 @@ namespace
 		"navalStuckReleased", "navalPreyAttacks", "navalSweeps", "navalMassStrikes", "navalPassageWaits", "orderLeaseRefused",
 		"engineerCaptured", "enemyBldCaptured", "conYardCaptured", "engineerLostOnWay", "spyInfiltrated", "spyDisguisedEntry", "spyLostOnWay",
 		"noWarFactory10", "bldCancelled", "bldCancelRepeat", "income10", "income20", "waveShort", "combatIdle2m",
-		"deployerIdle2m", "ferrySingle", "combatSamples", "combatIdleSamples" };
+		"deployerIdle2m", "ferrySingle", "combatSamples", "combatIdleSamples", "softVetoSkipped" };
 
 	static_assert(std::size(NeuralDecisionNames) == static_cast<size_t>(NeuralDecision::Count));
 
@@ -889,6 +891,13 @@ namespace
 		HeldFieldRefinery,
 		// Money under which a house with a war factory puts its army first (ArmyFirstShortCredits): scaled.
 		ArmyFirstShort,
+		// Soft vetoes (KnobSkips): the share of the windows in which an override leaves the scored pick alone.
+		// The tech step floor of the building queue.
+		SkipTechFloor,
+		// The turn of the held-field refinery in the building queue.
+		SkipHeldFieldRefinery,
+		// The soldier for a garrison seat in the infantry queue.
+		SkipGarrisonSeat,
 		Count
 	};
 
@@ -1033,6 +1042,30 @@ namespace
 		return scaled >= 0
 			? (2 * scaled + KnobStepMost) / (2 * KnobStepMost)
 			: -((-2 * scaled + KnobStepMost) / (2 * KnobStepMost));
+	}
+
+	// A soft veto (user approved, 2026-11-27): an override family of the production loop leaves the scored
+	// pick alone in a share of its 900-frame windows, so the trainer can learn whether the rule pays. The
+	// share is 1000 x step / 16 per mille, a half at the top step, and none at step 0 or below (a real game,
+	// or a knob never learned). The window is drawn by (window, house, knob) like the training exploration:
+	// deterministic, never the game RNG.
+	bool KnobSkips(const HouseClass* pHouse, NeuralKnob knob)
+	{
+		const int step = KnobStep(pHouse, knob);
+
+		if (step <= 0)
+			return false;
+
+		const uint32_t window = static_cast<uint32_t>(Unsorted::CurrentFrame / 900);
+		uint32_t mix = (window * 2654435761u) ^ (static_cast<uint32_t>(pHouse->ArrayIndex + 1) * 40503u)
+			^ ((static_cast<uint32_t>(knob) + 1) * 0x9E3779B1u);
+		mix ^= mix >> 16;
+		mix *= 0x85EBCA6Bu;
+		mix ^= mix >> 13;
+		mix *= 0xC2B2AE35u;
+		mix ^= mix >> 16;
+
+		return static_cast<int>(mix % 1000u) < step * 1000 / (2 * KnobStepMost);
 	}
 
 	// Archetype intent route, checkpoint milestones and segment values handed over by the trainer.
