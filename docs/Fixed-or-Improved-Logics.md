@@ -349,6 +349,7 @@ This page describes all ingame logics that are fixed or improved in Phobos witho
 - Fixed a bug where units that have `MinDebris` and `MaxDebris` defined but `DebrisTypes` undefined would unconditionally spawn `MetallicDebris` once when they die.
 - Fixed the game freezing in path finding when a high bridge reaches the map edge: the bridge flags were left on the cell the game uses for every cell outside the map, and the search for the ends of a bridge could then walk outside the map forever.
 - Fixed ground units sent to a cell held by a building with no free cell around it taking a cell outside the map as their new destination.
+- Fixed a crash when two buildings share a cell (such as map buildings placed on top of each other) and the one placed first is destroyed before the other.
 
 ## Fixes / interactions with other extensions
 

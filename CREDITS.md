@@ -213,6 +213,7 @@ This page lists all the individual contributions to the project by their author.
   - Veinhole monster and veins logic fixes and ramp support
   - Building production progress bar
   - Fix the path finding freeze at high bridges reaching the map edge
+  - Fix a crash caused by buildings that share a cell
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:
