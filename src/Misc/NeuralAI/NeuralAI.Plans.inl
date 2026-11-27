@@ -3820,10 +3820,20 @@ namespace
 			return 0;
 		};
 
-		auto isKnownEnemyBuilding = [&](BuildingClass* pBld) -> bool
+		// A known enemy building, immune ones too (what an engineer may capture).
+		auto isKnownEnemyBuildingToCapture = [&](BuildingClass* pBld) -> bool
 		{
 			return pBld && !pBld->InLimbo && pBld->IsAlive && pBld->Type && pBld->Owner && pBld->Owner != pHouse
 				&& !pHouse->IsAlliedWith(pBld->Owner) && !pBld->Owner->IsNeutral() && IsEnemyBuildingKnown(pHouse, pBld);
+		};
+
+		// A known enemy building a plan may attack: not an immune one (user, 2026-11-27: «eso parece faena de un
+		// ingeniero para capturarlo por lo que las unidades deberían haber buscado otro target válido»). In match
+		// #21073 a pincer and a three-front assault took a captured tech airport (CAAIRP, Immune) for their
+		// target and their members stood a cell from it for 5400 and 6300 frames.
+		auto isKnownEnemyBuilding = [&](BuildingClass* pBld) -> bool
+		{
+			return isKnownEnemyBuildingToCapture(pBld) && !pBld->Type->Immune;
 		};
 
 		// The known enemy buildings of this tick (same order as BuildingClass::Array): the plan
@@ -10517,7 +10527,7 @@ namespace
 				{
 					for (auto const pBld : knownEnemyBuildingList)
 					{
-						if (!isKnownEnemyBuilding(pBld) || !pBld->Type->Capturable || ObjectZone(pBld, MovementZone::Normal) != homeZone)
+						if (!isKnownEnemyBuildingToCapture(pBld) || !pBld->Type->Capturable || ObjectZone(pBld, MovementZone::Normal) != homeZone)
 							continue;
 
 						const bool capturableNow = captureLevel >= 0.99 || pBld->GetHealthPercentage() <= captureLevel + 0.05;
