@@ -4806,7 +4806,8 @@ namespace
 			const int missingHarvesters = std::max(0, 2 * refCount - static_cast<int>(harvesters.size()));
 			int work = std::min(EconomyWorkMost, missingRefineries * EconomyWorkPerRefinery + missingHarvesters * EconomyWorkPerHarvester);
 
-			if (macro.BankIncomeRate >= 0 && macro.BankIncomeRate < macro.BankSpendCapacity && pHouse->Available_Money() < ArmyFirstShortCredits)
+			if (macro.BankIncomeRate >= 0 && macro.BankIncomeRate < macro.BankSpendCapacity
+				&& pHouse->Available_Money() < KnobScaled(pHouse, NeuralKnob::ArmyFirstShort, ArmyFirstShortCredits))
 				work += EconomyPoorBonus;
 
 			macro.EconomyTrouble = std::min(EconomyPriorMost, trouble + work);

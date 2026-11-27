@@ -885,6 +885,10 @@ namespace
 		DefenseDensity,
 		// Health a vehicle goes to repair at (0.35): KnobRetreatStep a step, inside its clamp.
 		RetreatHealth,
+		// Wait between the refineries of the fields we hold (HeldFieldRefineryFrames): scaled.
+		HeldFieldRefinery,
+		// Money under which a house with a war factory puts its army first (ArmyFirstShortCredits): scaled.
+		ArmyFirstShort,
 		Count
 	};
 

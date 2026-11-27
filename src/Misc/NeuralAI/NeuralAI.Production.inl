@@ -3089,11 +3089,12 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		// The held fields fill their room at a steady pace (HeldFieldRefineryFrames) once the first war
 		// factory stands. Not while the income falls or the gatherers bring nothing in: a field that
 		// thins wants no more of them, the next ones come with the expansion. With Expert 0 in charge
-		// its turn comes in half the time (EconomyWork*).
+		// its turn comes in half the time (EconomyWork*). The pace is a knob (NeuralKnob::HeldFieldRefinery).
+		const int heldFieldRefineryFrames = KnobScaled(pHouse, NeuralKnob::HeldFieldRefinery, HeldFieldRefineryFrames);
 		const bool heldFieldRefinery = ownedRefineries >= 1 && ownedRefineries < heldRefineryCap && ownedWarFactories >= 1
 			&& !slotMacro.IncomeFalling && !slotMacro.DryEconomyActive
 			&& Unsorted::CurrentFrame - slotMacro.LastRefineryPlacedFrame
-				>= (pExt->NeuralAI_ActiveExpert == 0 ? HeldFieldRefineryFrames / 2 : HeldFieldRefineryFrames);
+				>= (pExt->NeuralAI_ActiveExpert == 0 ? heldFieldRefineryFrames / 2 : heldFieldRefineryFrames);
 
 		// TEMP diagnostic (expansion refineries, 2026-11-18): the refinery cap of each house.
 		if (IsAITickWindow(4500, 0))
@@ -3723,8 +3724,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		}
 
 		const bool firstFactoryPending = groundWarFactoryBuildableNow || navalFirst;
-		// Army first (ArmyFirstShortCredits): short of money with a war factory standing.
-		const bool armyFirstShort = ownedWarFactories >= 1 && money < ArmyFirstShortCredits;
+		// Army first (ArmyFirstShortCredits, a knob): short of money with a war factory standing.
+		const bool armyFirstShort = ownedWarFactories >= 1
+			&& money < KnobScaled(pHouse, NeuralKnob::ArmyFirstShort, ArmyFirstShortCredits);
 
 		// Buildings a deployer of ours can bring (NeuralAI.MobileFactory.inl; user approved, 2026-11-21,
 		// «Apruebo el plan»): of the deployers our vehicle factories can build now the cheapest of each
@@ -5512,8 +5514,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	auto& seaMacro = GetMacroState(pHouse);
 	const bool seaControl = seaMacro.SeaControl;
 	const bool seaControlAcross = seaControl && seaMacro.EnemyAcrossWater;
-	// Army first (ArmyFirstShortCredits), for the unit queues.
-	const bool armyFirstShortUnits = pHouse->NumWarFactories >= 1 && money < ArmyFirstShortCredits;
+	// Army first (ArmyFirstShortCredits, a knob), for the unit queues.
+	const bool armyFirstShortUnits = pHouse->NumWarFactories >= 1
+		&& money < KnobScaled(pHouse, NeuralKnob::ArmyFirstShort, ArmyFirstShortCredits);
 	// The building a strike lacks units for (StrikeWanted*), while it stands in enemy hands.
 	BuildingClass* pStrikeWantedTarget = nullptr;
 

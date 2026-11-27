@@ -3299,7 +3299,8 @@ namespace
 	// factory stands, not only one per field reached (user, 2026-11-26: «acaparado recursos como un
 	// loco porque el dinero NUNCA debería ser suficiente»): in 40 matches the median house had 3
 	// refineries at minute 20 on fields with room for 8. Such a refinery scores HeldFieldRefineryBonus
-	// over its learned slot, less HeldFieldRefineryStep for each refinery past four.
+	// over its learned slot, less HeldFieldRefineryStep for each refinery past four. The pace is a knob
+	// (NeuralKnob::HeldFieldRefinery).
 	constexpr int HeldFieldRefineryFrames = 2700;
 	constexpr int HeldFieldRefineryBonus = 1500;
 	constexpr int HeldFieldRefineryStep = 65;
@@ -3307,7 +3308,8 @@ namespace
 	// credits as they come in, so a house that earns less than its queues spend gives the tanks one
 	// share among four or five. With a war factory standing and fewer than ArmyFirstShortCredits it
 	// starts no tower without a threat on the base, no building that opens no tech, no engineer
-	// without a capture left for it and no plain warship while the sea is ours.
+	// without a capture left for it and no plain warship while the sea is ours. A knob
+	// (NeuralKnob::ArmyFirstShort).
 	constexpr int ArmyFirstShortCredits = 1500;
 	// What the bank governor leaves alone (UpdateBankGovernor): above it the bank is surplus the
 	// queues should spend. 15000 plus the income left 20000 to 27000 credits out of that count
