@@ -253,6 +253,30 @@ namespace
 		LastResortSale,
 		LastResortCrate,
 		LastResortCharge,
+		// Production starts (where the trajectory step sees a factory start something, headless training only):
+		// the rule that set the pick of the last AI tick for that factory. StartBld*: the yard (structures and
+		// base defenses), StartVeh*: the war factory; Scored: the scored pick itself; Other: the factory started
+		// a type the last pick did not ask for. The trainer prints their shares in its merge report.
+		StartBldScored,
+		StartBldAirRaid,
+		StartBldAirfield,
+		StartBldBankFactory,
+		StartBldTechFloor,
+		StartBldPlan,
+		StartBldPower,
+		StartBldRefineryHold,
+		StartBldHeldField,
+		StartBldYardNext,
+		StartBldOther,
+		StartVehScored,
+		StartVehTankFloor,
+		StartVehLight,
+		StartVehRepairer,
+		StartVehBunker,
+		StartVehBankMcv,
+		StartVehDeployer,
+		StartVehEconomyHold,
+		StartVehOther,
 		Count
 	};
 
@@ -288,11 +312,26 @@ namespace
 		"engineerCaptured", "enemyBldCaptured", "conYardCaptured", "engineerLostOnWay", "spyInfiltrated", "spyDisguisedEntry", "spyLostOnWay",
 		"noWarFactory10", "bldCancelled", "bldCancelRepeat", "income10", "income20", "waveShort", "combatIdle2m",
 		"deployerIdle2m", "ferrySingle", "combatSamples", "combatIdleSamples", "softVetoSkipped",
-		"lastResortSale", "lastResortCrate", "lastResortCharge" };
+		"lastResortSale", "lastResortCrate", "lastResortCharge",
+		"startBldScored", "startBldAirRaid", "startBldAirfield", "startBldBankFactory", "startBldTechFloor", "startBldPlan",
+		"startBldPower", "startBldRefineryHold", "startBldHeldField", "startBldYardNext", "startBldOther",
+		"startVehScored", "startVehTankFloor", "startVehLight", "startVehRepairer", "startVehBunker", "startVehBankMcv",
+		"startVehDeployer", "startVehEconomyHold", "startVehOther" };
 
 	static_assert(std::size(NeuralDecisionNames) == static_cast<size_t>(NeuralDecision::Count));
 
 	std::array<std::array<uint32_t, static_cast<size_t>(NeuralDecision::Count)>, 32> DecisionCounts {};
+
+	// The pick of the last AI tick of a house for the yard and for the war factory, with the rule that set it
+	// (a StartBld* or StartVeh* decision): a production start of that type is counted under that rule.
+	struct NeuralFactoryPick
+	{
+		int Type { -1 };
+		NeuralDecision Rule { NeuralDecision::Count };
+	};
+
+	std::array<NeuralFactoryPick, 32> LastYardPick {};
+	std::array<NeuralFactoryPick, 32> LastVehiclePick {};
 
 	// What the detectors keep per house this match: the credits earned at the first sample and at
 	// minute 10, and the last building cancellations (the units counted idle are in the macro state,

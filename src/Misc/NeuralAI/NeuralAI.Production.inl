@@ -696,6 +696,15 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				if (queue < 0)
 					continue;
 
+				// The rule behind this start (StartBld* / StartVeh*): the one that set the last pick of the yard or the
+				// war factory when the factory started that pick, Other when it started a type the pick did not ask for.
+				if (queue == 0 || queue == 2)
+				{
+					auto const& lastPick = queue == 0 ? LastYardPick[hIdx] : LastVehiclePick[hIdx];
+					const bool asked = lastPick.Rule != NeuralDecision::Count && lastPick.Type == pObjType->GetArrayIndex();
+					CountDecision(asked ? lastPick.Rule : (queue == 0 ? NeuralDecision::StartBldOther : NeuralDecision::StartVehOther), hIdx);
+				}
+
 				// A base defense comes from its own factory, with its own evaluation.
 				const int evalQueue = (queue == 0 && static_cast<BuildingTypeClass*>(pObjType)->BuildCat == BuildCat::Combat)
 					? PickEvalDefenses : queue;
@@ -4982,6 +4991,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 		const int scoredBldIdx = bestBldIdx;
 		scoredBuildingScore = bestBldScore;
+		// The rule that sets the yard's pick from here on (StartBld*), counted when the yard starts it.
+		NeuralDecision yardRule = NeuralDecision::StartBldScored;
 
 		// A raid with nothing of ours that shoots up: the best such defense comes before any other
 		// pick, except restoring income and a building the yard is already working on.
@@ -4989,6 +5000,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			&& hasActiveBuildingIncome && inProgressBldIdx < 0 && inProgressDefIdx < 0)
 		{
 			bestBldIdx = bestAirDefenseIdx;
+			yardRule = NeuralDecision::StartBldAirRaid;
 			bestBldScore = std::max(bestBldScore, bestAirDefenseScore);
 			bestFillsAirDeficit = true;
 		}
@@ -5024,6 +5036,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		{
 			bestBldIdx = bestPriorityAirfieldIdx;
 			bestBldScore = std::max(bestBldScore, bestPriorityAirfieldScore);
+			yardRule = NeuralDecision::StartBldAirfield;
 		}
 
 		// What no factory copy answers comes first in the governor's windows (user approved, 2026-11-26,
@@ -5046,6 +5059,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		if (bankFactoryIdx >= 0 && bestBldIdx != bankFactoryIdx && bankFactoryWindow && hasActiveBuildingIncome && !bestFillsAirDeficit)
 		{
 			bestBldIdx = bankFactoryIdx;
+			yardRule = NeuralDecision::StartBldBankFactory;
 
 			if (IsAITickWindow(450, evalDelay))
 				CountDecision(NeuralDecision::BankFactoryPick, pHouse->ArrayIndex);
@@ -5055,6 +5069,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		{
 			bestBldIdx = bestPriorityAirfieldIdx;
 			bestBldScore = std::max(bestBldScore, bestPriorityAirfieldScore);
+			yardRule = NeuralDecision::StartBldAirfield;
 		}
 
 		// Tech progression floor (user approved, 2026-11-20, «se supone que ha de desarrollar todo su
@@ -5140,6 +5155,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 			bestBldIdx = bestTechStepIdx;
 			bestBldScore = std::max(bestBldScore, bestTechStepScore);
+			yardRule = NeuralDecision::StartBldTechFloor;
 		}
 
 		// Forward Repair: the second repair station comes before the other picks, the bank governor's
@@ -5152,6 +5168,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		{
 			bestBldIdx = bestForwardRepairIdx;
 			bestBldScore = std::max(bestBldScore, bestForwardRepairScore);
+			yardRule = NeuralDecision::StartBldPlan;
 		}
 
 		// A crossing our units wait for: the building its transport lacks comes before the other picks,
@@ -5166,6 +5183,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		{
 			bestBldIdx = bestCrossingIdx;
 			bestBldScore = std::max(bestBldScore, bestCrossingScore);
+			yardRule = NeuralDecision::StartBldPlan;
 		}
 
 		// An urgent capture site (UpdateCaptureBarracks: our engineers failed on the way to its tech, or
@@ -5176,6 +5194,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		{
 			bestBldIdx = bestCaptureBarracksIdx;
 			bestBldScore = std::max(bestBldScore, bestCaptureBarracksScore);
+			yardRule = NeuralDecision::StartBldPlan;
 		}
 
 		// Island Hold: the defense its yard still lacks comes before the other picks, the bank
@@ -5189,6 +5208,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		{
 			bestBldIdx = bestIslandHoldIdx;
 			bestBldScore = std::max(bestBldScore, bestIslandHoldScore);
+			yardRule = NeuralDecision::StartBldPlan;
 		}
 
 		// Ally site plans (Ally Backup, Ally Forward Outpost) ask for one building next to an ally's
@@ -5209,6 +5229,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				if (pSiteType && !coolingDown && !HouseExt::IsDisabledFromShell(pHouse, pSiteType)
 					&& CanBuildUnderHumanRules(pHouse, pSiteType) && money >= pSiteType->GetActualCost(pHouse))
 				{
+					if (bestBldIdx != siteMacro.AllySiteBuildType)
+						yardRule = NeuralDecision::StartBldPlan;
+
 					bestBldIdx = siteMacro.AllySiteBuildType;
 					bestBldScore = 2700;
 				}
@@ -5233,7 +5256,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 						: 50;
 
 					if (pHouse->HasLowPower() || hasUnpoweredBuildings || projectedSurplus < minSafeAfterBuild)
+					{
 						bestBldIdx = bestPowerPlantIdx;
+						yardRule = NeuralDecision::StartBldPower;
+					}
 				}
 			}
 		}
@@ -5284,9 +5310,14 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 							&& (techAlternatesWithRefinery || techStepWaited >= TechStepRefineryYieldFrames)));
 
 				if (!keepPick)
+				{
 					bestBldIdx = awaitedRefineryIdx;
+					yardRule = NeuralDecision::StartBldRefineryHold;
+				}
 				else
+				{
 					holdKeptIdx = bestBldIdx;
+				}
 			}
 		}
 
@@ -5303,9 +5334,14 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			&& inProgressBldIdx < 0 && inProgressDefIdx < 0 && !firstFactoryPending && !wasRecentlyAttacked && !pHouse->HasLowPower())
 		{
 			if (KnobSkips(pHouse, NeuralKnob::SkipHeldFieldRefinery))
+			{
 				CountDecision(NeuralDecision::SoftVetoSkipped, pHouse->ArrayIndex);
+			}
 			else
+			{
 				bestBldIdx = awaitedRefineryIdx;
+				yardRule = NeuralDecision::StartBldHeldField;
+			}
 		}
 
 		if (bestBldIdx >= 0)
@@ -5428,7 +5464,10 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			}
 
 			if (deployerBrings || !yardBuildsPick)
+			{
 				bestBldIdx = yardNextIdx;
+				yardRule = NeuralDecision::StartBldYardNext;
+			}
 		}
 
 		// The second queue (DeployerSameTypeMost, user, 2026-11-22: a Nanocore nearly doubles how fast a base
@@ -5516,6 +5555,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		}
 
 		pExt->NeuralAI_NextBuildingTarget = bestBldIdx;
+
+		if (pHouse->ArrayIndex >= 0 && pHouse->ArrayIndex < 32)
+			LastYardPick[pHouse->ArrayIndex] = { bestBldIdx, yardRule };
 	}
 
 	productionClock.Mark(NeuralSection::ProdUnits);
@@ -7815,6 +7857,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	// TEMP diagnostic (economy hold): the scored unit pick, before the floors and complements take it.
 	const int scoredUnitIdx = bestUnitIdx;
 	const int scoredUnitScore = bestUnitScore;
+	// The rule that sets the war factory's pick from here on (StartVeh*), counted when the factory starts it.
+	NeuralDecision vehicleRule = NeuralDecision::StartVehScored;
 
 	// TEMP diagnostic: the best five candidates, and the best main battle tank when it is not one of
 	// them. Class: T tank, L light, G artillery, A anti-air, P transport, S support, H harvester, D
@@ -7898,6 +7942,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		{
 			bestUnitIdx = bestTankIdx;
 			bestUnitScore = bestTankScore;
+			vehicleRule = NeuralDecision::StartVehTankFloor;
 		}
 
 		// The light complement (LightComplement*): one armed light vehicle for each LightComplementPerTanks
@@ -7929,6 +7974,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		{
 			bestUnitIdx = bestLightIdx;
 			bestUnitScore = bestLightScore;
+			vehicleRule = NeuralDecision::StartVehLight;
 		}
 
 		// The repairer complement (user, 2026-11-19: approved «Sí, hazlo»; RepairerPerVehicles): with that
@@ -7963,6 +8009,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		{
 			bestUnitIdx = bestRepairerIdx;
 			bestUnitScore = bestRepairerScore;
+			vehicleRule = NeuralDecision::StartVehRepairer;
 		}
 	}
 
@@ -7973,6 +8020,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		&& money >= UnitTypeClass::Array.GetItem(bestBunkerTankIdx)->GetActualCost(pHouse) + GarrisonTrainingReserve)
 	{
 		bestUnitIdx = bestBunkerTankIdx;
+		vehicleRule = NeuralDecision::StartVehBunker;
 		CountDecision(NeuralDecision::GarrisonTraining, pHouse->ArrayIndex);
 	}
 
@@ -7982,6 +8030,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		&& hasActiveUnitIncome)
 	{
 		bestUnitIdx = bankYardMcvIdx;
+		vehicleRule = NeuralDecision::StartVehBankMcv;
 
 		if (IsAITickWindow(450, evalDelay))
 			CountDecision(NeuralDecision::BankYardPick, pHouse->ArrayIndex);
@@ -8032,6 +8081,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 			if (mayGo)
 			{
+				if (bestUnitIdx != build.UnitType)
+					vehicleRule = NeuralDecision::StartVehDeployer;
+
 				bestUnitIdx = build.UnitType;
 				break;
 			}
@@ -8060,7 +8112,12 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			: ((saveMacro.RefinerySaveTarget <= 0 && saveMacro.ExpansionSaveTarget > 0) ? awaitedMcvIdx : -1);
 
 		if (savedForIdx >= 0 && !saveMacro.CounterUnderAttack)
+		{
+			if (bestUnitIdx != savedForIdx)
+				vehicleRule = NeuralDecision::StartVehEconomyHold;
+
 			bestUnitIdx = savedForIdx;
+		}
 	}
 
 	// TEMP diagnostic (economy hold, 2026-11-20, matches #11905 and #11911: a war factory pick cancelled
@@ -8122,6 +8179,9 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	}
 
 	pExt->NeuralAI_NextUnitTarget = bestUnitIdx;
+
+	if (pHouse->ArrayIndex >= 0 && pHouse->ArrayIndex < 32)
+		LastVehiclePick[pHouse->ArrayIndex] = { bestUnitIdx, vehicleRule };
 
 	pExt->NeuralAI_NextNavalTarget = bestNavalIdx;
 
