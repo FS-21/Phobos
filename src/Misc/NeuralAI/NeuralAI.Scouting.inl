@@ -1878,8 +1878,13 @@ namespace
 			}
 
 			const bool there = dist <= 3.0 || (!moving && dist <= 8.0);
+			// The cell it stopped on, not the goal it was sent to, is out of every known enemy defense's
+			// reach plus 2 cells like the goal (FindDeployableSensorCellNear): it unfolds up to 8 cells
+			// off its goal, and a defense may have been seen on its way (match #20122: an array unfolded
+			// 5 cells off its post, 11 cells from an Obelisk, and fell to it 287 frames later).
+			const bool inEnemyReach = there && IsCellInKnownEnemyDefenseReach(pHouse, pUnit->GetMapCoords(), 2);
 
-			if (there && UnitExt::CanDeployIntoBuilding(pUnit)
+			if (there && !inEnemyReach && UnitExt::CanDeployIntoBuilding(pUnit)
 				&& pUnit->GetCell() && pUnit->GetCell()->GetContainedTiberiumIndex() < 0)
 			{
 				// UnitClass::TryToDeploy gives up while the unit has a destination, and a pending
@@ -1903,13 +1908,21 @@ namespace
 			}
 			else if (there)
 			{
-				// Arrived on ore, a ramp, or a blocked cell: move directly to the nearest clean deployable cell!
+				// Arrived on ore, a ramp, a blocked cell or inside a known enemy defense's reach: move directly
+				// to the nearest clean deployable cell!
 				const int uZone = ObjectZone(pUnit, MovementZone::Normal);
 				const CellStruct cleanSpot = FindDeployableSensorCellNear(pHouse, pUnit->Type->DeploysInto,
 					pUnit->GetMapCoords(), uZone, 10, pUnit);
 
 				if (cleanSpot != CellStruct::Empty && cleanSpot != pUnit->GetMapCoords())
 				{
+					if (inEnemyReach)
+					{
+						Debug::Log("[NeuralAI] House %d Sensor: %s %u stopped at (%d,%d) in a known enemy defense's reach, %d cells off (%d,%d), "
+							"hops to (%d,%d), frame %d.\n", houseIdx, pUnit->Type->ID, trip.ID, pUnit->GetMapCoords().X, pUnit->GetMapCoords().Y,
+							static_cast<int>(dist), trip.Target.X, trip.Target.Y, cleanSpot.X, cleanSpot.Y, now);
+					}
+
 					trip.Target = cleanSpot;
 					if (auto const pCleanCell = MapClass::Instance.TryGetCellAt(cleanSpot))
 						OrderSensorMove(pUnit, pCleanCell);
