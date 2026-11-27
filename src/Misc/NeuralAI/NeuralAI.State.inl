@@ -1917,6 +1917,8 @@ namespace
 		int CounterattackUntilFrame { -1 };
 		bool PressureMode { false };
 		int FocusEnemyIndex { -1 };
+		// The enemy house to finish off (UpdateMatchTactics, FinishTarget*): -1 none.
+		int FinishTargetIndex { -1 };
 		int TacticsRefreshFrame { -100000 };
 
 		// Plans 23..38: staggered retreats waiting their turn, combo boosts
@@ -2510,6 +2512,7 @@ namespace
 			this->CounterattackUntilFrame = -1;
 			this->PressureMode = false;
 			this->FocusEnemyIndex = -1;
+			this->FinishTargetIndex = -1;
 			this->TacticsRefreshFrame = -100000;
 			this->DelayedRetreats.clear();
 			this->PlanBoost.fill(0);
@@ -3311,6 +3314,16 @@ namespace
 	// without a capture left for it and no plain warship while the sea is ours. A knob
 	// (NeuralKnob::ArmyFirstShort).
 	constexpr int ArmyFirstShortCredits = 1500;
+	// Finishing off a house (UpdateMatchTactics, user approved 2026-11-27: «Sí, implementa el remate»): the
+	// enemy with this many known structures or fewer, no defense among them and no army seen. Its buildings
+	// weigh FinishTargetWaveBonus more as wave targets (the coalition target's weight) and
+	// FinishTargetAirBonus more as air wing targets; it weighs FinishTargetMainEnemyBonus in the main enemy
+	// choice, the term "weak" that c4753d620 left at zero.
+	constexpr int FinishTargetStructuresMost = 3;
+	constexpr int FinishTargetWaveBonus = 700;
+	constexpr int FinishTargetAirBonus = 300;
+	constexpr int FinishTargetMainEnemyBonus = 400;
+	constexpr int FinishTargetLogLines = 30;
 	// What the bank governor leaves alone (UpdateBankGovernor): above it the bank is surplus the
 	// queues should spend. 15000 plus the income left 20000 to 27000 credits out of that count
 	// (user approved, 2026-11-26, «Todos»).

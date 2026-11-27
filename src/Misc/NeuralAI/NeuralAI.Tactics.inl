@@ -5194,6 +5194,48 @@ namespace
 		macro.FocusEnemyIndex = (enemies >= 2 && weakestStrength * 10 <= strongestStrength * 6 && SlotGate(0, -150, -1))
 			? weakest
 			: -1;
+
+		// An enemy house to finish off (user, 2026-11-27: «se supone que la IA intentaba destruir cuanto antes
+		// los más débiles»): FinishTargetStructuresMost known structures or fewer, none of them a defense, and
+		// no army of it seen for 2700 frames (its strength is then 10 a structure). The one with the fewest
+		// structures goes first, never a truce partner. In match #21000 a house left with one reactor and no
+		// unit lasted 23 minutes against single aircraft passes. The waves, the air wings and the main enemy
+		// choice weigh it (FinishTarget*Bonus).
+		int finishTarget = -1;
+
+		for (int i = 0; i < 32; ++i)
+		{
+			if (enemyKnownBuildings[i] <= 0 || enemyKnownBuildings[i] > FinishTargetStructuresMost
+				|| enemyStrength[i] != 10 * enemyKnownBuildings[i] || IsTacitTrucePartner(pHouse, i))
+			{
+				continue;
+			}
+
+			if (finishTarget < 0 || enemyKnownBuildings[i] < enemyKnownBuildings[finishTarget])
+				finishTarget = i;
+		}
+
+		if (finishTarget != macro.FinishTargetIndex)
+		{
+			// TEMP diagnostic (finish target, 2026-11-27): every change, FinishTargetLogLines a match.
+			static int finishLogSerial = -1;
+			static int finishLogLines = 0;
+
+			if (finishLogSerial != NeuralMatchSerial)
+			{
+				finishLogSerial = NeuralMatchSerial;
+				finishLogLines = 0;
+			}
+
+			if (finishLogLines < FinishTargetLogLines)
+			{
+				++finishLogLines;
+				Debug::Log("[NeuralAI] House %d finish target (TEMP): house %d (%d known structures, no defense, no army seen), was %d, frame %d.\n",
+					pHouse->ArrayIndex, finishTarget, finishTarget >= 0 ? enemyKnownBuildings[finishTarget] : 0, macro.FinishTargetIndex, now);
+			}
+
+			macro.FinishTargetIndex = finishTarget;
+		}
 	}
 
 } // namespace

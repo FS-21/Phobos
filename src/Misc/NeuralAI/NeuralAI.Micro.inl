@@ -3275,6 +3275,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		if (pHouse->WhoLastHurtMe == pOther->ArrayIndex)
 			parts[1] = 250;
 
+		// Weak enough to finish off (FinishTarget*, UpdateMatchTactics).
+		if (pOther->ArrayIndex == GetMacroState(pHouse).FinishTargetIndex)
+			parts[2] = FinishTargetMainEnemyBonus;
+
 		// Expert 3 (UpdateFfaTargets): busy, at our door, weakest, nearest.
 		parts[3] = GetMacroState(pHouse).FfaEnemyBonus[idx];
 
@@ -11712,6 +11716,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		// Focus the clearly weakest enemy (FFA, or the weakest member of the enemy team).
 		if (pOwner->ArrayIndex == GetMacroState(pHouse).FocusEnemyIndex)
 			bldCandScore += 300;
+
+		// A house to finish off (FinishTarget*): its last structures before the rest.
+		if (pOwner->ArrayIndex == GetMacroState(pHouse).FinishTargetIndex)
+			bldCandScore += FinishTargetWaveBonus;
 
 		// Expert 3 diplomacy: the coalition target's buildings first, but not where another house's
 		// army is already hitting it (spread the fronts); see DiplomacyTargetBias for the rest.

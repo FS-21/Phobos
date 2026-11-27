@@ -5177,3 +5177,201 @@ namespace
 		return std::min(OpKindDangerMaxPenalty, macro.OpKindDanger[OpTypeFlies(pType) ? 1 : 0] * OpKindDangerPenalty);
 	}
 }
+
+namespace
+{
+	// Last resort (user approved, 2026-11-27: «la IA no sabe rendirse»): a house that can produce nothing any
+	// more plays its end as the original AI did, and the match does not drag on around a power plant. It has
+	// no construction yard, no factory of any kind and no unit that deploys into a building. Every
+	// LastResortTickFrames:
+	// - it sells every building it can: the sale brings back money and crew, and a crew soldier is one more
+	//   unit to reach a crate;
+	// - each unit goes for the nearest crate the house knows of on its own ground (a crate can hold an MCV),
+	//   one unit a crate;
+	// - the armed units left over attack-move to the nearest enemy building the house knows, a last wave.
+	// A crate that gives an MCV, or anything that can build again, ends it at once. In match #21000 a house
+	// left with two power plants and no unit stood for minutes with nothing to do.
+	constexpr int LastResortTickFrames = 300;
+	constexpr int LastResortLogLines = 20;
+
+	bool CanHouseStillProduce(HouseClass* pHouse)
+	{
+		if (pHouse->ConYards.Count > 0 || pHouse->NumBarracks > 0 || pHouse->NumWarFactories > 0 || pHouse->NumAirpads > 0
+			|| pHouse->NumShipyards > 0)
+		{
+			return true;
+		}
+
+		// An MCV or any deployer, in a transport too.
+		for (auto const pUnit : UnitClass::Array)
+		{
+			if (pUnit && pUnit->Owner == pHouse && pUnit->IsAlive && pUnit->Type && pUnit->Type->DeploysInto)
+				return true;
+		}
+
+		return false;
+	}
+
+	void UpdateLastResort(HouseClass* pHouse)
+	{
+		if (!pHouse || pHouse->Defeated || pHouse->IsNeutral() || pHouse->IsObserver() || !IsAITickWindow(LastResortTickFrames, 7)
+			|| Unsorted::CurrentFrame < LastResortTickFrames || CanHouseStillProduce(pHouse))
+		{
+			return;
+		}
+
+		// Every building it can sell.
+		std::vector<BuildingClass*> toSell;
+
+		for (auto const pBld : pHouse->Buildings)
+		{
+			if (!pBld || !pBld->IsAlive || pBld->InLimbo || !pBld->Type || pBld->Type->Unsellable || pBld->Type->Wall
+				|| pBld->CurrentMission == Mission::Selling || pBld->QueuedMission == Mission::Selling
+				|| pBld->CurrentMission == Mission::Construction)
+			{
+				continue;
+			}
+
+			toSell.push_back(pBld);
+		}
+
+		for (auto const pBld : toSell)
+		{
+			pBld->Sell(1);
+			CountDecision(NeuralDecision::LastResortSale, pHouse->ArrayIndex);
+		}
+
+		// The crates it knows of.
+		std::vector<CellClass*> crates;
+
+		for (auto const& crate : MapClass::Instance.Crates)
+		{
+			auto const pCell = MapClass::Instance.TryGetCellAt(crate.Location);
+
+			if (!pCell || pCell->OverlayTypeIndex < 0 || pCell->OverlayTypeIndex >= OverlayTypeClass::Array.Count
+				|| !IsCellVisibleToAI(pHouse, pCell))
+			{
+				continue;
+			}
+
+			if (auto const pOverlay = OverlayTypeClass::Array.GetItem(pCell->OverlayTypeIndex); pOverlay && pOverlay->Crate
+				&& std::find(crates.begin(), crates.end(), pCell) == crates.end())
+			{
+				crates.push_back(pCell);
+			}
+		}
+
+		// The enemy buildings it knows of, for the last wave.
+		auto const& knownBlds = GetKnownEnemyBuildingCache(pHouse).Entries;
+		std::vector<CellClass*> claimed;
+		int toCrates = 0;
+		int charging = 0;
+		int units = 0;
+
+		auto lead = [&](FootClass* pFoot)
+		{
+			auto const pType = pFoot->GetTechnoType();
+
+			if (!pType || pFoot->InLimbo || !pFoot->IsAlive || pFoot->WhatAmI() == AbstractType::Aircraft)
+				return;
+
+			units++;
+			const CellStruct at = pFoot->GetMapCoords();
+			const int zone = ObjectZone(pFoot, pType->MovementZone);
+			CellClass* pBestCrate = nullptr;
+			double bestCrateDist = 1e9;
+
+			for (auto const pCrate : crates)
+			{
+				if (std::find(claimed.begin(), claimed.end(), pCrate) != claimed.end()
+					|| MapClass::Instance.GetMovementZoneType(pCrate->MapCoords, pType->MovementZone, false) != zone)
+				{
+					continue;
+				}
+
+				const double dist = at.DistanceFrom(pCrate->MapCoords);
+
+				if (dist < bestCrateDist)
+				{
+					bestCrateDist = dist;
+					pBestCrate = pCrate;
+				}
+			}
+
+			if (pBestCrate)
+			{
+				claimed.push_back(pBestCrate);
+
+				if (pFoot->Destination != pBestCrate && IssueMoveOrder(pFoot, pBestCrate, 0.0))
+				{
+					toCrates++;
+					CountDecision(NeuralDecision::LastResortCrate, pHouse->ArrayIndex);
+				}
+
+				return;
+			}
+
+			if (!pType->GetWeapon(0) || !pType->GetWeapon(0)->WeaponType)
+				return;
+
+			BuildingClass* pNearest = nullptr;
+			double nearestDist = 1e9;
+
+			for (auto const& info : knownBlds)
+			{
+				if (!info.Building || !info.Building->Owner || IsTacitTrucePartner(pHouse, info.Building->Owner->ArrayIndex))
+					continue;
+
+				const double dist = at.DistanceFrom(info.Coords);
+
+				if (dist < nearestDist)
+				{
+					nearestDist = dist;
+					pNearest = info.Building;
+				}
+			}
+
+			if (!pNearest)
+				return;
+
+			auto const pTargetCell = MapClass::Instance.TryGetCellAt(pNearest->GetMapCoords());
+
+			if (pTargetCell && pFoot->Destination != pTargetCell)
+			{
+				OrderFootToAttackMove(pFoot, pTargetCell);
+				charging++;
+				CountDecision(NeuralDecision::LastResortCharge, pHouse->ArrayIndex);
+			}
+		};
+
+		for (auto const pUnit : UnitClass::Array)
+		{
+			if (pUnit && pUnit->Owner == pHouse)
+				lead(pUnit);
+		}
+
+		for (auto const pInf : InfantryClass::Array)
+		{
+			if (pInf && pInf->Owner == pHouse)
+				lead(pInf);
+		}
+
+		// TEMP diagnostic (last resort, 2026-11-27): what the house did, LastResortLogLines a match.
+		static int lastResortLogSerial = -1;
+		static int lastResortLogLines = 0;
+
+		if (lastResortLogSerial != NeuralMatchSerial)
+		{
+			lastResortLogSerial = NeuralMatchSerial;
+			lastResortLogLines = 0;
+		}
+
+		if (lastResortLogLines < LastResortLogLines && (!toSell.empty() || toCrates > 0 || charging > 0))
+		{
+			++lastResortLogLines;
+			Debug::Log("[NeuralAI] House %d last resort (TEMP): no yard, factory or deployer; sold %d buildings, %d units: %d to crates (%d known),"
+				" %d charging, frame %d.\n", pHouse->ArrayIndex, static_cast<int>(toSell.size()), units, toCrates, static_cast<int>(crates.size()),
+				charging, Unsorted::CurrentFrame);
+		}
+	}
+}
