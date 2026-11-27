@@ -5205,8 +5205,11 @@ namespace
 
 		for (int i = 0; i < 32; ++i)
 		{
+			macro.FinishPeakKnown[i] = std::max(macro.FinishPeakKnown[i], enemyKnownBuildings[i]);
+
 			if (enemyKnownBuildings[i] <= 0 || enemyKnownBuildings[i] > FinishTargetStructuresMost
-				|| enemyStrength[i] != 10 * enemyKnownBuildings[i] || IsTacitTrucePartner(pHouse, i))
+				|| enemyStrength[i] != 10 * enemyKnownBuildings[i] || IsTacitTrucePartner(pHouse, i)
+				|| (macro.FinishPeakKnown[i] < FinishTargetPeakLeast && now < FinishTargetLateFrame))
 			{
 				continue;
 			}
@@ -5230,8 +5233,9 @@ namespace
 			if (finishLogLines < FinishTargetLogLines)
 			{
 				++finishLogLines;
-				Debug::Log("[NeuralAI] House %d finish target (TEMP): house %d (%d known structures, no defense, no army seen), was %d, frame %d.\n",
-					pHouse->ArrayIndex, finishTarget, finishTarget >= 0 ? enemyKnownBuildings[finishTarget] : 0, macro.FinishTargetIndex, now);
+				Debug::Log("[NeuralAI] House %d finish target (TEMP): house %d (%d known structures of %d at most, no defense, no army seen),"
+					" was %d, frame %d.\n", pHouse->ArrayIndex, finishTarget, finishTarget >= 0 ? enemyKnownBuildings[finishTarget] : 0,
+					finishTarget >= 0 ? macro.FinishPeakKnown[finishTarget] : 0, macro.FinishTargetIndex, now);
 			}
 
 			macro.FinishTargetIndex = finishTarget;

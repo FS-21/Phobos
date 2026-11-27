@@ -1917,8 +1917,10 @@ namespace
 		int CounterattackUntilFrame { -1 };
 		bool PressureMode { false };
 		int FocusEnemyIndex { -1 };
-		// The enemy house to finish off (UpdateMatchTactics, FinishTarget*): -1 none.
+		// The enemy house to finish off (UpdateMatchTactics, FinishTarget*): -1 none. The most structures of
+		// each enemy house we knew at once this match.
 		int FinishTargetIndex { -1 };
+		std::array<int, 32> FinishPeakKnown {};
 		int TacticsRefreshFrame { -100000 };
 
 		// Plans 23..38: staggered retreats waiting their turn, combo boosts
@@ -2513,6 +2515,7 @@ namespace
 			this->PressureMode = false;
 			this->FocusEnemyIndex = -1;
 			this->FinishTargetIndex = -1;
+			this->FinishPeakKnown.fill(0);
 			this->TacticsRefreshFrame = -100000;
 			this->DelayedRetreats.clear();
 			this->PlanBoost.fill(0);
@@ -3320,6 +3323,10 @@ namespace
 	// FinishTargetAirBonus more as air wing targets; it weighs FinishTargetMainEnemyBonus in the main enemy
 	// choice, the term "weak" that c4753d620 left at zero.
 	constexpr int FinishTargetStructuresMost = 3;
+	// Only a house we knew bigger (FinishTargetPeakLeast structures at once) or, past FinishTargetLateFrame,
+	// any: at frame 1800 a scout had seen 3 structures of every enemy and each was a target to finish.
+	constexpr int FinishTargetPeakLeast = 6;
+	constexpr int FinishTargetLateFrame = 36000;
 	constexpr int FinishTargetWaveBonus = 700;
 	constexpr int FinishTargetAirBonus = 300;
 	constexpr int FinishTargetMainEnemyBonus = 400;
