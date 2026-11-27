@@ -1106,6 +1106,9 @@ void NeuralAI::OnScenarioStart()
 	for (auto& counts : DecisionCounts)
 		counts.fill(0);
 
+	LastYardPick.fill(NeuralFactoryPick {});
+	LastVehiclePick.fill(NeuralFactoryPick {});
+
 	for (auto& detector : DetectorStates)
 		detector = NeuralDetectorState {};
 
