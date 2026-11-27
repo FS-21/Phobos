@@ -5094,9 +5094,17 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 			&& ownedRefineries >= 2 && !techMacro.IncomeFalling && !conYardWithNoRefineryInZone
 			&& techMacro.LastRefineryPlacedFrame > techMacro.TechStepWaitSince
 			&& techStepWaited >= 600 && bestBldIdx == awaitedRefineryIdx;
-		const bool techFloorPick = bestTechStepIdx >= 0
+		const bool techFloorWanted = bestTechStepIdx >= 0
 			&& (techStepWaited >= KnobScaled(pHouse, NeuralKnob::TechFloor, TechStepFloorFrames) || techAlternatesWithRefinery)
 			&& hasActiveBuildingIncome && !bestFillsAirDeficit && inProgressBldIdx < 0 && inProgressDefIdx < 0;
+		// Soft veto (NeuralKnob::SkipTechFloor): in a share of the windows the floor leaves the pick alone, and
+		// the rules below see no floor.
+		const bool techFloorSkipped = techFloorWanted && bestBldIdx != bestTechStepIdx
+			&& KnobSkips(pHouse, NeuralKnob::SkipTechFloor);
+		const bool techFloorPick = techFloorWanted && !techFloorSkipped;
+
+		if (techFloorSkipped)
+			CountDecision(NeuralDecision::SoftVetoSkipped, pHouse->ArrayIndex);
 
 		if (techFloorPick && bestBldIdx != bestTechStepIdx)
 		{
@@ -5288,12 +5296,15 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		// read as "the refinery leads, the tech step takes its turn" and fed a loop of tech buildings
 		// started and cancelled. Never while the economy hold saves for a refinery, over the tech floor,
 		// a building under construction, a gun an air raid still needs, the first war factory, a base
-		// under attack or short of power.
+		// under attack or short of power. Soft veto: NeuralKnob::SkipHeldFieldRefinery.
 		if (heldFieldRefinery && awaitedRefineryIdx >= 0 && bestBldIdx != awaitedRefineryIdx && bestBldIdx == scoredBldIdx
 			&& !techFloorPick && GetMacroState(pHouse).RefinerySaveTarget <= 0 && hasActiveBuildingIncome && !bestFillsAirDeficit
 			&& inProgressBldIdx < 0 && inProgressDefIdx < 0 && !firstFactoryPending && !wasRecentlyAttacked && !pHouse->HasLowPower())
 		{
-			bestBldIdx = awaitedRefineryIdx;
+			if (KnobSkips(pHouse, NeuralKnob::SkipHeldFieldRefinery))
+				CountDecision(NeuralDecision::SoftVetoSkipped, pHouse->ArrayIndex);
+			else
+				bestBldIdx = awaitedRefineryIdx;
 		}
 
 		if (bestBldIdx >= 0)
@@ -8542,7 +8553,8 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 	// beyond the occupiers we have outside, the barracks train the best soldier for a seat ahead of
 	// the scored pick, with or without money in hand (a soldier is cheap and is paid as the money
 	// comes in; a house is often broke for minutes and the seat would go to a dearer pick). The
-	// first engineer still goes first, and under attack the answer to the threat does.
+	// first engineer still goes first, and under attack the answer to the threat does. Soft veto:
+	// NeuralKnob::SkipGarrisonSeat.
 	constexpr int GarrisonOverrideSeats = 24;
 	if (bestGarrisonIdx >= 0 && bestInfIdx != bestGarrisonIdx && !GetMacroState(pHouse).CounterUnderAttack
 		&& garrisonedInfantry < GarrisonOverrideSeats)
@@ -8551,8 +8563,15 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 
 		if (!pScoredPick || !IsCaptureInfantryType(pScoredPick) || ownedEngineers >= 1)
 		{
-			bestInfIdx = bestGarrisonIdx;
-			CountDecision(NeuralDecision::GarrisonTraining, pHouse->ArrayIndex);
+			if (KnobSkips(pHouse, NeuralKnob::SkipGarrisonSeat))
+			{
+				CountDecision(NeuralDecision::SoftVetoSkipped, pHouse->ArrayIndex);
+			}
+			else
+			{
+				bestInfIdx = bestGarrisonIdx;
+				CountDecision(NeuralDecision::GarrisonTraining, pHouse->ArrayIndex);
+			}
 		}
 	}
 
