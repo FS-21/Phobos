@@ -249,6 +249,10 @@ namespace
 		CombatIdleSamples,
 		// A soft veto (KnobSkips) left the scored pick alone, counted at every pick evaluation it did.
 		SoftVetoSkipped,
+		// Last resort (UpdateLastResort): a building sold, a unit sent to a crate, a unit sent on the last wave.
+		LastResortSale,
+		LastResortCrate,
+		LastResortCharge,
 		Count
 	};
 
@@ -283,7 +287,8 @@ namespace
 		"navalStuckReleased", "navalPreyAttacks", "navalSweeps", "navalMassStrikes", "navalPassageWaits", "orderLeaseRefused",
 		"engineerCaptured", "enemyBldCaptured", "conYardCaptured", "engineerLostOnWay", "spyInfiltrated", "spyDisguisedEntry", "spyLostOnWay",
 		"noWarFactory10", "bldCancelled", "bldCancelRepeat", "income10", "income20", "waveShort", "combatIdle2m",
-		"deployerIdle2m", "ferrySingle", "combatSamples", "combatIdleSamples", "softVetoSkipped" };
+		"deployerIdle2m", "ferrySingle", "combatSamples", "combatIdleSamples", "softVetoSkipped",
+		"lastResortSale", "lastResortCrate", "lastResortCharge" };
 
 	static_assert(std::size(NeuralDecisionNames) == static_cast<size_t>(NeuralDecision::Count));
 

@@ -114,6 +114,9 @@ namespace
 		std::vector<NeuralAirWingFlight> Flights {};
 		int WingLessonSteps { 0 };
 		int WingLessonFrame { -1 };
+		// The target of the last pass of attrition and the aircraft it flew with (AirWingAttrition*).
+		DWORD AttritionTargetID { 0 };
+		int AttritionPassSize { 0 };
 	};
 
 	std::array<NeuralAirForceState, 32> AirForceStates {};
@@ -145,6 +148,12 @@ namespace
 	// (match #18296).
 	constexpr int AirWingAttritionPasses = 6;
 	constexpr int AirWingAttritionBuildingsMost = 8;
+	// The passes of attrition at one target grow (user, 2026-11-27: «el de desgaste debería de ir de menos a
+	// más, como en otras estrategias»): the first flies with the ready aircraft, each next one at the same
+	// target with AirWingAttritionGrowth more than the last at least, the whole strike fleet at most. In
+	// match #21000 single MiGs went at the last reactor of a house one every 2300 frames, 210 of its 700
+	// each, for 20000 frames; three together took it in 660.
+	constexpr int AirWingAttritionGrowth = 1;
 
 	// How long a wing keeps flying the same strike.
 	constexpr int AirStrikeOrderFrames = 4500;
@@ -554,6 +563,10 @@ namespace
 		if (info.Building->Owner->ArrayIndex == pHouse->EnemyHouseIndex)
 			score += 30;
 
+		// A house to finish off (FinishTarget*): its last structures first.
+		if (info.Building->Owner->ArrayIndex == GetMacroState(pHouse).FinishTargetIndex)
+			score += FinishTargetAirBonus;
+
 		return std::max(0, score);
 	}
 
@@ -621,7 +634,7 @@ namespace
 	// Best known enemy structure or high-firepower ground/surface unit the ready aircraft can
 	// destroy in one pass, cutting down enemy firepower as well as bases.
 	NeuralAirWingPick PickAirWingTarget(HouseClass* pHouse, const std::vector<AircraftClass*>& ready, const CellStruct& front,
-		const std::unordered_map<DWORD, int>& committed, int lessonPercent)
+		const std::unordered_map<DWORD, int>& committed, int lessonPercent, DWORD attritionTargetId, int attritionNextSize)
 	{
 		NeuralAirWingPick pick;
 
@@ -676,6 +689,7 @@ namespace
 			const bool onePass = delivered * 100 >= need * (100 + extraMarginPct + lessonPercent);
 			const int candOwner = pCand->Owner ? pCand->Owner->ArrayIndex : -1;
 			const bool wearsDown = !onePass && mayWearDown && risk == 0 && candOwner >= 0 && candOwner < 32
+				&& strikers >= (pCand->UniqueID == attritionTargetId ? attritionNextSize : 1)
 				&& knownBuildingsOf[candOwner] <= AirWingAttritionBuildingsMost
 				&& delivered * AirWingAttritionPasses * 100 >= need * (100 + extraMarginPct);
 
@@ -1300,7 +1314,8 @@ namespace
 			if (static_cast<int>(ready.size()) < wingMin)
 				return;
 
-			const NeuralAirWingPick pick = PickAirWingTarget(pHouse, ready, state.FrontCell, committedByTarget, lessonPercent);
+			const NeuralAirWingPick pick = PickAirWingTarget(pHouse, ready, state.FrontCell, committedByTarget, lessonPercent,
+				state.AttritionTargetID, std::max(1, std::min(state.AttritionPassSize + AirWingAttritionGrowth, strikeFleet)));
 
 			if (!pick.Target)
 			{
@@ -1397,6 +1412,13 @@ namespace
 				wingDelivered, pick.Need, pick.Attrition ? ", a pass of attrition" : "");
 
 			NeuralAirWingFlight flight { pTarget->UniqueID, pTargetType, isBuildingTarget, {}, now, pick.Attrition };
+
+			// The next pass of attrition at this target brings more (AirWingAttritionGrowth).
+			if (pick.Attrition)
+			{
+				state.AttritionTargetID = pTarget->UniqueID;
+				state.AttritionPassSize = wingCount;
+			}
 
 			// Every order of the wing first, then the flights: ContinueAirStrike weighs the risk at the target
 			// against the aircraft bound for it, and given one by one each member saw a wing of itself
