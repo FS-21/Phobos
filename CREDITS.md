@@ -166,6 +166,7 @@ This page lists all the individual contributions to the project by their author.
   - Fix Tiberium types not supporting overrides in map and game mode INIs
   - Tiberium veins overlay palette fix
   - Fix desyncs caused by non-vehicle parasites reading `Parasite.AllowWaterExit` from invalid memory
+  - Fix a crash caused by buildings that share a cell
 - **Starkku**:
   - Misc. minor bugfixes & improvements
   - AI script actions:

@@ -3874,3 +3874,74 @@ DEFINE_HOOK(0x41FF00, AITriggerTypeClass_ConditionMet_ScriptReachability, 0x8)
 
 	return ScriptExt::RequiresTargetReachability(pTeamType->ScriptType) ? 0 : ReturnTrue;
 }
+
+#pragma region OverlappingBuildingsFix
+
+// A building is appended at the tail of the object list of every cell it covers, so one building
+// ends the lists of all its cells. When two buildings cover the same cell (two map buildings placed
+// on top of each other), the first one's NextObject is the second one. Lifting the first one off the
+// map then handed the second one to the first cell it covered and took it out of its own cells, and
+// once the second one died that cell kept a pointer to a deleted object. Each cell now gets the next
+// building that really covers it.
+namespace OverlappingBuildingsTemp
+{
+	ObjectClass* PickingUp = nullptr;
+	ObjectClass* NextBuilding = nullptr;
+}
+
+static bool BuildingCoversCell(ObjectClass* pBuilding, const CellStruct& cell)
+{
+	const CellStruct foundationEnd = { 0x7FFF, 0x7FFF };
+	const CellStruct topLeft = pBuilding->GetMapCoords();
+
+	for (auto pOffset = pBuilding->GetFoundationData(false); *pOffset != foundationEnd; ++pOffset)
+	{
+		if (topLeft.X + pOffset->X == cell.X && topLeft.Y + pOffset->Y == cell.Y)
+			return true;
+	}
+
+	return false;
+}
+
+// Read at the start: Ares jumps over the foundation list setup further on.
+DEFINE_HOOK(0x56880F, MapClass_PickUp_RememberNextBuilding, 0x6)
+{
+	GET(ObjectClass*, pObject, EDI);
+
+	auto const pNext = pObject->NextObject;
+	const bool chained = pNext && pObject->WhatAmI() == AbstractType::Building;
+	OverlappingBuildingsTemp::PickingUp = chained ? pObject : nullptr;
+	OverlappingBuildingsTemp::NextBuilding = chained ? pNext : nullptr;
+
+	return 0;
+}
+
+DEFINE_HOOK(0x5688E1, MapClass_PickUp_LinkNextBuildingOfCell, 0x6)
+{
+	GET(ObjectClass*, pObject, EDI);
+
+	if (pObject != OverlappingBuildingsTemp::PickingUp)
+		return 0;
+
+	GET(CellClass*, pCell, EAX);
+
+	auto pContent = pObject->OnBridge ? pCell->AltObject : pCell->FirstObject;
+
+	while (pContent && pContent != pObject)
+		pContent = pContent->NextObject;
+
+	// Not listed in this cell: the engine leaves the cell alone.
+	if (!pContent)
+		return 0;
+
+	auto pNext = OverlappingBuildingsTemp::NextBuilding;
+
+	while (pNext && (pNext->WhatAmI() != AbstractType::Building || !BuildingCoversCell(pNext, pCell->MapCoords)))
+		pNext = pNext->NextObject;
+
+	pObject->NextObject = pNext;
+
+	return 0;
+}
+
+#pragma endregion
