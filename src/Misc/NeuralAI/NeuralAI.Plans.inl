@@ -2880,6 +2880,24 @@ namespace
 				int& weight = macro.PlanEnemyWeight[static_cast<size_t>(id)][enemy];
 				const int before = weight;
 
+				// Plan escalation (PlanEscalation*): a beaten group asks the next one for more; the first defeat
+				// leaves the weight alone, a defeat of the escalated group lowers it twice.
+				const int escalationStep = KnobStep(pHouse, NeuralKnob::PlanEscalation);
+				const bool beaten = !success && !plan.Neutral && plan.InitialValue > 1 && memberValue(plan) * 2 < plan.InitialValue;
+				auto& escalation = macro.PlanEscalation[static_cast<size_t>(id)][enemy];
+				bool spared = false;
+
+				if (escalationStep > 0 && beaten)
+				{
+					escalation.Value = plan.InitialValue * (8 + escalationStep) / 8;
+					escalation.Frame = Unsorted::CurrentFrame;
+					spared = !plan.Escalated;
+				}
+				else if (success || targetFell)
+				{
+					escalation = NeuralPlanEscalation {};
+				}
+
 				if (plan.Neutral)
 				{
 					// No defeat: its targets fell to others while it destroyed and lost nothing.
@@ -2888,8 +2906,12 @@ namespace
 					weight += PlanEnemyWeightFallStep;
 				else if (success && destroyed > lost)
 					weight += PlanEnemyWeightUpStep;
+				else if (spared)
+				{
+					// The next group goes stronger before the weight moves.
+				}
 				else if (!success || lost > destroyed)
-					weight -= PlanEnemyWeightDownStep;
+					weight -= (escalationStep > 0 && beaten && plan.Escalated) ? 2 * PlanEnemyWeightDownStep : PlanEnemyWeightDownStep;
 
 				weight = std::clamp(weight, PlanEnemyWeightMin, PlanEnemyWeightMax);
 				macro.PlanLastEnemy[static_cast<size_t>(id)] = enemy;
@@ -3164,11 +3186,103 @@ namespace
 			? std::max(0, macro.PlanRequestNeed[missionHeadPlan] - macro.PlanRequestOffered[missionHeadPlan])
 			: 0;
 
-		auto startPlan = [&](NeuralPlanId id, std::vector<FootClass*> const& group, const CellStruct& target,
+		auto startPlan = [&](NeuralPlanId id, std::vector<FootClass*> const& offeredGroup, const CellStruct& target,
 			const CellStruct& staging, DWORD targetID, int durationFrames)
 		{
 			auto const pTargetBuilding = targetID != 0 ? FindBuildingByID(targetID) : nullptr;
 			const int targetOwner = (pTargetBuilding && pTargetBuilding->Owner) ? pTargetBuilding->Owner->ArrayIndex : -1;
+
+			// Plan escalation (PlanEscalation*): after a group of this plan was beaten by this enemy, free units
+			// of the same kind join the group, nearest first, up to the escalated value; it waits while there
+			// are not enough.
+			std::vector<FootClass*> group = offeredGroup;
+			bool escalated = false;
+
+			if (const int enemy = targetOwner >= 0 ? targetOwner : pHouse->EnemyHouseIndex; enemy >= 0 && enemy < 32 && !group.empty())
+			{
+				auto& escalation = macro.PlanEscalation[static_cast<size_t>(id)][enemy];
+
+				if (escalation.Value > 0 && (Unsorted::CurrentFrame - escalation.Frame > PlanLessonFrames
+					|| KnobStep(pHouse, NeuralKnob::PlanEscalation) <= 0))
+				{
+					escalation = NeuralPlanEscalation {};
+				}
+
+				if (escalation.Value > 0)
+				{
+					int value = 0;
+
+					for (auto const pFoot : group)
+						value += GetCombatValueOfType(pFoot->GetTechnoType(), false);
+
+					const bool air = group.front()->WhatAmI() == AbstractType::Aircraft;
+					const bool naval = !air && group.front()->GetTechnoType()->Naval;
+					const CellStruct centre = group.front()->GetMapCoords();
+					std::vector<std::pair<int, FootClass*>> joiners;
+
+					for (auto const& [uid, pFoot] : ownFoots)
+					{
+						auto const pType = pFoot ? pFoot->GetTechnoType() : nullptr;
+
+						if (!pType || pFoot->InLimbo || !pFoot->IsAlive || (pFoot->WhatAmI() == AbstractType::Aircraft) != air
+							|| (!air && pType->Naval != naval) || !isFreeForPlan(pFoot)
+							|| std::find(group.begin(), group.end(), pFoot) != group.end())
+						{
+							continue;
+						}
+
+						auto const pWeapon = pType->GetWeapon(0);
+
+						if (air ? (!pWeapon || !pWeapon->WeaponType) : GroundRangeOf(pType) <= 0)
+							continue;
+
+						joiners.emplace_back(static_cast<int>(centre.DistanceFrom(pFoot->GetMapCoords()) * 16), pFoot);
+					}
+
+					std::sort(joiners.begin(), joiners.end(), [](auto const& a, auto const& b)
+					{
+						return a.first != b.first ? a.first < b.first : a.second->UniqueID < b.second->UniqueID;
+					});
+
+					const int offeredValue = value;
+
+					for (auto const& [distance, pFoot] : joiners)
+					{
+						if (value >= escalation.Value)
+							break;
+
+						group.push_back(pFoot);
+						value += GetCombatValueOfType(pFoot->GetTechnoType(), false);
+					}
+
+					// TEMP diagnostic (plan escalation, 2026-11-27): each escalated start or wait, PlanEscalationLogLines a match.
+					static int escalationLogSerial = -1;
+					static int escalationLogLines = 0;
+
+					if (escalationLogSerial != NeuralMatchSerial)
+					{
+						escalationLogSerial = NeuralMatchSerial;
+						escalationLogLines = 0;
+					}
+
+					if (escalationLogLines < PlanEscalationLogLines)
+					{
+						++escalationLogLines;
+						Debug::Log("[NeuralAI] House %d plan %s escalation (TEMP): against house %d, needs %d, offered %d, %s %d with %d joined, frame %d.\n",
+							pHouse->ArrayIndex, NeuralPlanNames[static_cast<size_t>(id)], enemy, escalation.Value, offeredValue,
+							value >= escalation.Value ? "sets out at" : "waits at", value, static_cast<int>(group.size() - offeredGroup.size()),
+							Unsorted::CurrentFrame);
+					}
+
+					if (value < escalation.Value)
+					{
+						macro.PlanNextAttemptFrame[static_cast<size_t>(id)] = Unsorted::CurrentFrame + PlanGateRetryFrames;
+						return;
+					}
+
+					escalated = true;
+				}
+			}
 
 			// Held back by the raid gate: the plan is weighed again after PlanGateRetryFrames.
 			if (!raidMayStart(id, group, target, targetOwner))
@@ -3320,6 +3434,7 @@ namespace
 			plan = NeuralPlanInstance {};
 			plan.TargetOwner = targetOwner;
 			plan.Active = true;
+			plan.Escalated = escalated;
 			plan.StartFrame = Unsorted::CurrentFrame;
 			plan.Deadline = Unsorted::CurrentFrame + durationFrames;
 			plan.BaseDuration = durationFrames;
