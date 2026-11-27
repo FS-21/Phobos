@@ -139,9 +139,19 @@ namespace
 		int StartValue { 0 };
 	};
 
+	// The value the next group of a plan against an enemy house must set out with after a group of it was
+	// beaten (NeuralKnob::PlanEscalation), and the frame of that defeat: 0 none.
+	struct NeuralPlanEscalation
+	{
+		int Value { 0 };
+		int Frame { 0 };
+	};
+
 	struct NeuralPlanInstance
 	{
 		bool Active { false };
+		// It set out with the escalated value (NeuralKnob::PlanEscalation).
+		bool Escalated { false };
 		int StartFrame { 0 };
 		int Deadline { 0 };
 		int InitialValue { 0 };
@@ -1935,6 +1945,7 @@ namespace
 		// What each plan did this match against each enemy house, as a weight in percent of its
 		// utility (100 at the start, see PlanEnemyWeightMin), and the house each plan last went for.
 		std::array<std::array<int, 32>, static_cast<size_t>(NeuralPlanId::Count)> PlanEnemyWeight {};
+		std::array<std::array<NeuralPlanEscalation, 32>, static_cast<size_t>(NeuralPlanId::Count)> PlanEscalation {};
 		std::array<int, static_cast<size_t>(NeuralPlanId::Count)> PlanLastEnemy {};
 		std::map<int, int> SuperReadySinceFrame {};
 
@@ -2525,6 +2536,9 @@ namespace
 
 			for (auto& weights : this->PlanEnemyWeight)
 				weights.fill(100);
+
+			for (auto& escalations : this->PlanEscalation)
+				escalations.fill(NeuralPlanEscalation {});
 
 			this->PlanLastEnemy.fill(-1);
 			this->SuperReadySinceFrame.clear();
@@ -4180,6 +4194,15 @@ namespace
 	constexpr int PlanEnemyWeightUpStep = 15;
 	constexpr int PlanEnemyWeightFallStep = 25;
 	constexpr int PlanEnemyWeightDownStep = 20;
+	// Plan escalation (NeuralKnob::PlanEscalation, user approved 2026-11-27: «Como knob medible»): a plan
+	// group beaten by an enemy house (it failed with less than half of its value left) asks the next group
+	// of that plan against that house for (8 + step) / 8 of the beaten group's value, free units of the
+	// same kind joining it; until there are enough it waits, at most PlanLessonFrames after the defeat. That
+	// defeat does not lower the plan's weight; a defeat of the escalated group lowers it twice. Step 0 or
+	// below (every real game, every match but the knob pairs) keeps the rules of before. Over 40 archived
+	// matches a retry after a defeat set out with 1.5 times the value 38 times in 150 and ended well in 50%
+	// of them, 46% for the others: the knob pairs measure it.
+	constexpr int PlanEscalationLogLines = 30;
 	// A ground strike on a building needs this share of the strength known to guard it (defenses
 	// within PlanStrikeGuardCells, units seen there in the last PlanStrikeGuardFrames).
 	constexpr int PlanStrikeAdvantagePercent = 120;

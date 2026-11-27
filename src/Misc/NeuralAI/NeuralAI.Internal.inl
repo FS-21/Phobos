@@ -903,6 +903,9 @@ namespace
 		SkipHeldFieldRefinery,
 		// The soldier for a garrison seat in the infantry queue.
 		SkipGarrisonSeat,
+		// Plan escalation after a defeat (PlanEscalation*): the next group brings (8 + step) / 8 of the beaten
+		// one's value; none at step 0 or below.
+		PlanEscalation,
 		Count
 	};
 
