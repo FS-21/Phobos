@@ -634,6 +634,22 @@ namespace
 		return logCount++ < 30;
 	}
 
+	// The scan's walled-in lines (one per house and tech at the first scan) have a cap of their own:
+	// on a map with many walled techs they took all 30 breach lines and no breach could be read.
+	bool CanLogSpecOpsWallScan()
+	{
+		static int logSerial = -1;
+		static int logCount = 0;
+
+		if (logSerial != NeuralMatchSerial)
+		{
+			logSerial = NeuralMatchSerial;
+			logCount = 0;
+		}
+
+		return logCount++ < 40;
+	}
+
 	// Has this house seen the building as neutral the last time it was in sight?
 	bool IsKnownNeutralTech(HouseClass* pHouse, const BuildingClass* pBld)
 	{
@@ -2145,7 +2161,7 @@ namespace
 				const bool wasWalled = tech.Walled;
 				tech.Walled = wall != NeuralTechWall::Open;
 
-				if (tech.Walled != wasWalled && pTechBld && CanLogSpecOpsBreach())
+				if (tech.Walled != wasWalled && pTechBld && CanLogSpecOpsWallScan())
 				{
 					if (tech.Walled)
 					{
@@ -2346,6 +2362,22 @@ namespace
 		{
 			if (capture.EngineerID == engineerID)
 				return true;
+		}
+
+		return false;
+	}
+
+	// The unit knocks down the wall of a SpecOps capture: waves leave it there (one took a breaker
+	// standing at the wall across the water to another island, and the breach ran out of time).
+	bool IsSpecOpsBreacher(HouseClass* pHouse, DWORD uid)
+	{
+		for (auto const& capture : GetSpecOpsState(pHouse).Captures)
+		{
+			if (capture.BreachCell != CellStruct::Empty
+				&& std::find(capture.Breachers.begin(), capture.Breachers.end(), uid) != capture.Breachers.end())
+			{
+				return true;
+			}
 		}
 
 		return false;
@@ -2678,16 +2710,90 @@ namespace
 		return pBest;
 	}
 
+	// Does a transport the house owns or can build now seat the engineer and this wall breaker
+	// together (user, 2026-11-28: the wall breaker must suit the transport the engineer goes in)?
+	// Each fits its SizeLimit and both its Passengers.
+	bool CanShareTransport(HouseClass* pHouse, const TechnoTypeClass* pEngineerType, const TechnoTypeClass* pBreakerType)
+	{
+		if (!pHouse || !pEngineerType || !pBreakerType)
+			return false;
+
+		const int engineerSize = std::max(1, static_cast<int>(pEngineerType->Size));
+		const int breakerSize = std::max(1, static_cast<int>(pBreakerType->Size));
+
+		auto const seatsBoth = [&](const TechnoTypeClass* pType)
+		{
+			return static_cast<int>(pType->SizeLimit) >= std::max(engineerSize, breakerSize)
+				&& pType->Passengers >= engineerSize + breakerSize;
+		};
+
+		auto const buildable = [pHouse](TechnoTypeClass* pType)
+		{
+			return pType->TechLevel >= 0 && pType->TechLevel <= pHouse->TechLevel && HouseExt::PrerequisitesMet(pHouse, pType);
+		};
+
+		for (auto const pUnit : UnitClass::Array)
+		{
+			if (pUnit && pUnit->Owner == pHouse && pUnit->IsAlive && !pUnit->InLimbo && pUnit->Type
+				&& IsAmphibiousOrAirTransport(pUnit->Type) && !pUnit->Type->Gunner && seatsBoth(pUnit->Type))
+			{
+				return true;
+			}
+		}
+
+		for (auto const pAir : AircraftClass::Array)
+		{
+			if (pAir && pAir->Owner == pHouse && pAir->IsAlive && !pAir->InLimbo && pAir->Type && !pAir->Type->Carryall
+				&& seatsBoth(pAir->Type))
+			{
+				return true;
+			}
+		}
+
+		for (auto const pType : UnitTypeClass::Array)
+		{
+			if (pType && IsAmphibiousOrAirTransport(pType) && !pType->Gunner && seatsBoth(pType) && buildable(pType))
+				return true;
+		}
+
+		for (auto const pType : AircraftTypeClass::Array)
+		{
+			if (pType && !pType->Carryall && seatsBoth(pType) && buildable(pType))
+				return true;
+		}
+
+		return false;
+	}
+
+	// The land the transport operation that holds this unit goes to; -1 with none.
+	int TransportOpTargetZoneOf(HouseClass* pHouse, DWORD uid)
+	{
+		auto& macro = GetMacroState(pHouse);
+		auto const it = macro.TransportOpOf.find(uid);
+
+		if (it == macro.TransportOpOf.end())
+			return -1;
+
+		for (auto const& op : macro.TransportOps)
+		{
+			if (op.Id == it->second && !op.Over)
+				return op.TargetZone;
+		}
+
+		return -1;
+	}
+
 	// Idle armed ground units and soldiers of ours near a tech, nearest first (UniqueID on ties),
 	// not in a plan nor escorting or breaching for another capture (nor for pPending, the capture
 	// being set up). Specialists (engineers, spies, thieves) and harvesters never escort. With
 	// pBreachWall, only units that can knock that wall down count, from a little further away
 	// (without them the engineer cannot get in at all): those standing in breachZone (Normal), then
-	// those in ferryZone a transport of ours can take there, then the ones that crush it rather
-	// than shoot it.
+	// those in ferryZone that go over with pFerryWith (the engineer): within OpJoinStagingCells of it,
+	// so that they board the same operation, and seated with it in one transport of ours
+	// (CanShareTransport); then the ones that crush it rather than shoot it.
 	void CollectSpecOpsEscorts(HouseClass* pHouse, const CellStruct& cell, int maxCount, std::vector<FootClass*>& out,
 		const NeuralSpecOpsCapture* pPending = nullptr, const OverlayTypeClass* pBreachWall = nullptr, int breachZone = -1,
-		int ferryZone = -1)
+		int ferryZone = -1, const FootClass* pFerryWith = nullptr)
 	{
 		out.clear();
 		auto const& state = GetSpecOpsState(pHouse);
@@ -2722,8 +2828,9 @@ namespace
 
 				if (footZone != breachZone)
 				{
-					if (ferryZone < 0 || footZone != ferryZone || IsInTransportOp(pHouse, pFoot->UniqueID)
-						|| !CanHouseFerryTypeAcrossWater(pHouse, pFoot->GetTechnoType()))
+					if (ferryZone < 0 || footZone != ferryZone || !pFerryWith || IsInTransportOp(pHouse, pFoot->UniqueID)
+						|| !CanShareTransport(pHouse, pFerryWith->GetTechnoType(), pFoot->GetTechnoType())
+						|| (!pFerryWith->InLimbo && pFoot->GetMapCoords().DistanceFrom(pFerryWith->GetMapCoords()) > OpJoinStagingCells))
 					{
 						return;
 					}
@@ -2892,8 +2999,10 @@ namespace
 		}
 
 		auto const pWallCell = MapClass::Instance.TryGetCellAt(capture.BreachCell);
+		auto const pEngineer = FindOwnFootByID(pHouse, capture.EngineerID);
 		int breakers = 0;
 		int ferryRefused = 0;
+		std::vector<DWORD> taken;
 
 		for (const DWORD id : capture.Breachers)
 		{
@@ -2902,10 +3011,15 @@ namespace
 			if (!pFoot || !CanBreachWall(pFoot, pWall))
 				continue;
 
-			// Waiting for its transport or aboard: on its way.
+			// Waiting for its transport or aboard: on its way when the operation goes to the land of the
+			// wall; one going elsewhere was taken by another code and is let go.
 			if (IsInTransportOp(pHouse, id))
 			{
-				breakers++;
+				if (TransportOpTargetZoneOf(pHouse, id) == capture.BreachZone)
+					breakers++;
+				else
+					taken.push_back(id);
+
 				continue;
 			}
 
@@ -2945,6 +3059,18 @@ namespace
 			}
 		}
 
+		for (const DWORD id : taken)
+		{
+			capture.Breachers.erase(std::remove(capture.Breachers.begin(), capture.Breachers.end(), id), capture.Breachers.end());
+
+			if (CanLogSpecOpsBreach())
+			{
+				Debug::Log("[NeuralAI] House %d SpecOps: breach into %s at (%d,%d): wall breaker %u taken to zone %d by another transport "
+					"operation, let go, frame %d.\n", pHouse->ArrayIndex, pTarget->Type->ID, capture.TargetCell.X, capture.TargetCell.Y, id,
+					TransportOpTargetZoneOf(pHouse, id), now);
+			}
+		}
+
 		// The breakers on the engineer's land got no transport: the next ones would get none either.
 		if (breakers == 0 && ferryRefused > 0)
 			return fail("no transport for the wall breakers");
@@ -2952,7 +3078,7 @@ namespace
 		if (breakers == 0)
 		{
 			std::vector<FootClass*> fresh;
-			CollectSpecOpsEscorts(pHouse, capture.BreachCell, 2, fresh, nullptr, pWall, capture.BreachZone, capture.BreachFerryZone);
+			CollectSpecOpsEscorts(pHouse, capture.BreachCell, 2, fresh, nullptr, pWall, capture.BreachZone, capture.BreachFerryZone, pEngineer);
 
 			if (fresh.empty())
 				return fail("no wall breaker left");
@@ -2968,7 +3094,7 @@ namespace
 			// more breaker joins, once.
 			capture.BreachReinforced = true;
 			std::vector<FootClass*> fresh;
-			CollectSpecOpsEscorts(pHouse, capture.BreachCell, 1, fresh, nullptr, pWall, capture.BreachZone, capture.BreachFerryZone);
+			CollectSpecOpsEscorts(pHouse, capture.BreachCell, 1, fresh, nullptr, pWall, capture.BreachZone, capture.BreachFerryZone, pEngineer);
 
 			for (auto const pFoot : fresh)
 				capture.Breachers.push_back(pFoot->UniqueID);
@@ -3053,7 +3179,7 @@ namespace
 				const int zone = breach.Zone >= 0 ? breach.Zone : engineerZone;
 				std::vector<FootClass*> breachers;
 				CollectSpecOpsEscorts(pHouse, breach.Wall, 2, breachers, nullptr, GetWallOverlayAt(breach.Wall), zone,
-					zone != engineerZone ? engineerZone : -1);
+					zone != engineerZone ? engineerZone : -1, pEngineer);
 
 				if (breachers.empty())
 				{
