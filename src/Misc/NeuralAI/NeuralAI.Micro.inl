@@ -12391,7 +12391,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			// A seated fighting vehicle held at home to fill (UpdatePassengerFill) waits for its soldiers.
 			if (IsPassengerFillHeld(pHouse, pUnit))
 				++notIdlePlan;
-			else if (!IsPlanMember(pHouse, pUnit->UniqueID))
+			else if (!IsPlanMember(pHouse, pUnit->UniqueID) && !IsSpecOpsBreacher(pHouse, pUnit->UniqueID))
 				idleCombatUnits.push_back(pUnit);
 			else
 				++notIdlePlan;
@@ -12455,7 +12455,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			|| pInf->CurrentMission == Mission::AttackMove
 			|| (pInf->CurrentMission == Mission::Move && pInf->MegaMission == Mission::AttackMove) || isFinishedMove(pInf))
 		{
-			if (!IsPlanMember(pHouse, pInf->UniqueID))
+			if (!IsPlanMember(pHouse, pInf->UniqueID) && !IsSpecOpsBreacher(pHouse, pInf->UniqueID))
 			{
 				idleCombatInf.push_back(pInf);
 
@@ -12722,7 +12722,7 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		{
 			for (auto const pRecU : recallableMapUnits)
 			{
-				if (!IsPlanMember(pHouse, pRecU->UniqueID))
+				if (!IsPlanMember(pHouse, pRecU->UniqueID) && !IsSpecOpsBreacher(pHouse, pRecU->UniqueID))
 					idleCombatUnits.push_back(pRecU);
 			}
 		}
