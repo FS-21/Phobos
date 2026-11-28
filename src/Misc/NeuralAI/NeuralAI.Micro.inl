@@ -2237,9 +2237,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			return text;
 		};
 
-		// TEMP diagnostic: an unpack order the engine answered without unfolding (off the unload mission
-		// and not deploying), once an order.
-		if (order.Tries > order.UnpackLoggedTry && !pUnit->IsDeploying && pUnit->CurrentMission != Mission::Unload)
+		// TEMP diagnostic: an unpack order the engine answered without unfolding (off the unload mission,
+		// none queued behind its last move, and not deploying), once an order.
+		if (order.Tries > order.UnpackLoggedTry && !pUnit->IsDeploying && pUnit->CurrentMission != Mission::Unload
+			&& pUnit->QueuedMission != Mission::Unload)
 		{
 			order.UnpackLoggedTry = order.Tries;
 
@@ -2270,6 +2271,58 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 			order.UnpackLoggedTry = 0;
 			order.NearSince = -1;
 			CountDecision(NeuralDecision::DeployerSiteFailed, pHouse->ArrayIndex);
+		};
+
+		// A building on the foundation of its site (the yard placed one there, or another deployer unfolded
+		// on it): nothing the deployer does makes room for its own.
+		auto const siteTakenBy = [&]() -> BuildingClass*
+		{
+			if (order.Site == CellStruct::Empty)
+				return nullptr;
+
+			const int w = pBld->GetFoundationWidth();
+			const int h = pBld->GetFoundationHeight(false);
+			const CellStruct topLeft = order.Site + ((w > 2 || h > 2) ? CellStruct { -1, -1 } : CellStruct { 0, 0 });
+
+			for (auto pFoundCell = pBld->GetFoundationData(true); *pFoundCell != CellStruct { 0x7FFF, 0x7FFF }; ++pFoundCell)
+			{
+				auto const pFC = MapClass::Instance.TryGetCellAt(topLeft + *pFoundCell);
+
+				if (auto const pTaker = pFC ? pFC->GetBuilding() : nullptr)
+					return pTaker;
+			}
+
+			return nullptr;
+		};
+
+		// TEMP diagnostic: what stands on the site cell of a deployer that never stepped onto it, its
+		// occupation flags and whether the deployer could move there.
+		auto const describeSiteCell = [&]() -> std::string
+		{
+			auto const pSiteCell = MapClass::Instance.TryGetCellAt(order.Site);
+
+			if (!pSiteCell)
+				return "off the map";
+
+			std::string text = "on it";
+
+			for (ObjectClass* pObj = pSiteCell->FirstObject; pObj; pObj = pObj->NextObject)
+			{
+				auto const pObjType = pObj->GetType();
+				auto const pTechno = abstract_cast<TechnoClass*>(pObj);
+				char item[96];
+				sprintf_s(item, " %s (house %d)", pObjType ? pObjType->ID : "?", pTechno && pTechno->Owner ? pTechno->Owner->ArrayIndex : -1);
+				text += item;
+			}
+
+			if (text.size() == 5)
+				text += " nothing";
+
+			char tail[96];
+			sprintf_s(tail, ", flags 0x%X, clear to move %d", static_cast<unsigned>(pSiteCell->OccupationFlags),
+				pSiteCell->IsClearToMove(pType->SpeedType, false, false, -1, pType->MovementZone, -1, false) ? 1 : 0);
+
+			return text + tail;
 		};
 
 		// The safe route to the site (user, 2026-11-21: waypoints as the transports have; PlanOpRoute: the
@@ -2537,6 +2590,17 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		while (!order.Route.empty() && here.DistanceFrom(order.Route.front()) <= OpRouteReachCells)
 			order.Route.erase(order.Route.begin());
 
+		// Its site taken by a building on the way or on arrival: the site fails at once, not after
+		// McvIdleArriveFrames next to it (user, 2026-11-28: «A, B y C»).
+		if (auto const pTaker = siteTakenBy())
+		{
+			char why[128];
+			sprintf_s(why, "a building took the site (%s of house %d)", pTaker->Type ? pTaker->Type->ID : "?",
+				pTaker->Owner ? pTaker->Owner->ArrayIndex : -1);
+			failSite(why);
+			return;
+		}
+
 		const double siteDist = here.DistanceFrom(order.Site);
 		const int wayLeft = cellsLeft();
 
@@ -2636,9 +2700,15 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				const char* why = "it never stepped onto the site";
 
 				if (here == order.Site)
+				{
 					CanDeployerUnpackHere(pHouse, pBld, pUnit, &why);
+					failSite(why);
+					return;
+				}
 
-				failSite(why);
+				// TEMP diagnostic: what stands on the site cell it never stepped onto.
+				const std::string blocked = std::string { why } + " (" + describeSiteCell() + ")";
+				failSite(blocked.c_str());
 				return;
 			}
 
