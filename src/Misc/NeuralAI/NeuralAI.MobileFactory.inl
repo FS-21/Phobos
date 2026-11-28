@@ -337,9 +337,10 @@ namespace
 
 	// The legal deploy stand nearest originCell, within 28 rings, on requiredZone (-1: any): the building
 	// can stand there (CanCreateHere and every foundation cell), the deployer can stand on the cell, our
-	// exit corridors stay open and no other deployer or transport of ours is on the foundation. pAvoid:
-	// sites tried before; a candidate within avoidCells of one is passed over. pReach: only a stand the
-	// deployer gets to by itself (DeployerReaches).
+	// exit corridors stay open, no other deployer or transport of ours is on the foundation and it does not
+	// overlap the foundation planned at the site of another deploy order of the house. pAvoid: sites tried
+	// before; a candidate within avoidCells of one is passed over. pReach: only a stand the deployer gets
+	// to by itself (DeployerReaches).
 	CellStruct FindDeployFoundationNear(HouseClass* pHouse, BuildingTypeClass* pBldType, const CellStruct& originCell, int requiredZone,
 		UnitClass* pDeployerUnit, const std::vector<CellStruct>* pAvoid = nullptr, int avoidCells = 6,
 		const NeuralDeployerReach* pReach = nullptr)
@@ -351,6 +352,36 @@ namespace
 		const int h = pBldType->GetFoundationHeight(false);
 		const CellStruct deployOffset = (w > 2 || h > 2) ? CellStruct { -1, -1 } : CellStruct { 0, 0 };
 		const CellStruct curUnitCell = pDeployerUnit ? pDeployerUnit->GetMapCoords() : CellStruct::Empty;
+
+		// The foundations planned at the sites of the other deploy orders of the house: a site taken by one
+		// deployer is passed over by the others until it unfolds there or gives it up (matches #22470 to
+		// #22510 (user, 2026-11-28: «A, B y C»): two deployers of one goal got the same cell, and the last
+		// to come found the building of the other on it).
+		struct FoundationRect
+		{
+			int Left;
+			int Top;
+			int Right;
+			int Bottom;
+		};
+
+		std::vector<FoundationRect> takenSites;
+
+		for (auto const& [uid, order] : GetMacroState(pHouse).DeployOrders)
+		{
+			if (order.Site == CellStruct::Empty || (pDeployerUnit && uid == pDeployerUnit->UniqueID))
+				continue;
+
+			auto const pOrderBld = BuildingTypeClass::Array.GetItemOrDefault(order.BuildingType);
+
+			if (!pOrderBld)
+				continue;
+
+			const int orderW = pOrderBld->GetFoundationWidth();
+			const int orderH = pOrderBld->GetFoundationHeight(false);
+			const CellStruct orderTopLeft = order.Site + ((orderW > 2 || orderH > 2) ? CellStruct { -1, -1 } : CellStruct { 0, 0 });
+			takenSites.push_back({ orderTopLeft.X, orderTopLeft.Y, orderTopLeft.X + orderW - 1, orderTopLeft.Y + orderH - 1 });
+		}
 
 		for (int r = 0; r <= 28; ++r)
 		{
@@ -378,6 +409,15 @@ namespace
 
 					if (pReach && !DeployerReaches(*pReach, cand))
 						continue;
+
+					if (std::any_of(takenSites.begin(), takenSites.end(), [&topLeftCell, w, h](const FoundationRect& taken)
+						{
+							return topLeftCell.X <= taken.Right && topLeftCell.X + w - 1 >= taken.Left
+								&& topLeftCell.Y <= taken.Bottom && topLeftCell.Y + h - 1 >= taken.Top;
+						}))
+					{
+						continue;
+					}
 
 					if (pDeployerUnit && pDeployerUnit->Type && cand != curUnitCell)
 					{
