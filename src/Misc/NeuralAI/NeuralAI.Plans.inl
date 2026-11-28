@@ -1902,6 +1902,12 @@ namespace
 	}
 
 	bool IsSpecOpsEngineerBusy(HouseClass* pHouse, DWORD engineerID);
+	int GetEnemyWallForPlan(HouseClass* pHouse, const BuildingClass* pBld, CellStruct& outWall, CellStruct& outApproach, int& outZone,
+		bool fresh);
+	int CollectWallBreakersForPlan(HouseClass* pHouse, const CellStruct& wall, int zone, int maxCount, std::vector<FootClass*>& out);
+	bool OrderWallBreach(FootClass* pFoot, const CellStruct& cell);
+	bool IsWallPieceAt(const CellStruct& cell);
+	bool CanLogSpecOpsBreach();
 
 	// Whether a building of type idxType satisfies prerequisite entry idx: a building type index,
 	// or (negative) a group of [GenericPrerequisites], nested groups included.
@@ -10410,6 +10416,10 @@ namespace
 		// An armored ground transport carries engineers to a capturable valuable enemy building
 		// (one-engineer capture, or already damaged down to the capture level) and unloads them
 		// next to it. Members[0] = transport. AuxBaseline = phase (0 boarding, 1 driving, 2 out).
+		// A target walled in by its owner (a ring of walls around a yard): wall breakers of ours go
+		// along (Targets) and knock a piece down (Cells: the piece and our ground next to it) while the
+		// engineers board and the transport waits by that ground, AuxPeak pieces down so far; once the
+		// way is open the transport drives in as on any other assault.
 		{
 			auto& plan = planOf(NeuralPlanId::EngineerAssault);
 			const double captureLevel = RulesClass::Instance ? RulesClass::Instance->EngineerCaptureLevel : 1.0;
@@ -10418,7 +10428,68 @@ namespace
 			{
 				FootClass* const pTransport = plan.Members.empty() ? nullptr : findOwnFoot(plan.Members[0]);
 				auto const pTarget = FindBuildingByID(plan.TargetID);
-				const std::vector<DWORD> engineers(plan.Members.empty() ? plan.Members.end() : plan.Members.begin() + 1, plan.Members.end());
+				std::vector<DWORD> engineers;
+
+				for (size_t m = 1; m < plan.Members.size(); ++m)
+				{
+					if (std::find(plan.Targets.begin(), plan.Targets.end(), plan.Members[m]) == plan.Targets.end())
+						engineers.push_back(plan.Members[m]);
+				}
+
+				const char* breachFailure = nullptr;
+
+				if (pTarget && pTarget->Owner != pHouse && plan.Cells.size() >= 2)
+				{
+					// The piece is down: a fresh reading says whether the way is open or the next piece.
+					if (!IsWallPieceAt(plan.Cells[0]))
+					{
+						CellStruct nextWall = CellStruct::Empty;
+						CellStruct nextApproach = CellStruct::Empty;
+						int nextZone = -1;
+						const int wallState = GetEnemyWallForPlan(pHouse, pTarget, nextWall, nextApproach, nextZone, true);
+						plan.AuxPeak++;
+
+						if (wallState == 0)
+						{
+							if (CanLogSpecOpsBreach())
+							{
+								Debug::Log("[NeuralAI] House %d engineer assault: breach into %s at (%d,%d) open, %d wall pieces down after %d frames, frame %d.\n",
+									pHouse->ArrayIndex, pTarget->Type->ID, pTarget->GetMapCoords().X, pTarget->GetMapCoords().Y, plan.AuxPeak,
+									Unsorted::CurrentFrame - plan.StartFrame, Unsorted::CurrentFrame);
+							}
+
+							plan.Cells.clear();
+						}
+						else if (wallState == 2 || nextZone != homeZone)
+						{
+							breachFailure = "sealed";
+						}
+						else if (plan.AuxPeak >= 4)
+						{
+							breachFailure = "too many pieces";
+						}
+						else
+						{
+							plan.Cells = { nextWall, nextApproach };
+						}
+					}
+
+					if (!breachFailure && plan.Cells.size() >= 2)
+					{
+						int breaking = 0;
+
+						for (const DWORD uid : plan.Targets)
+						{
+							if (auto const pBreaker = findOwnFoot(uid); pBreaker && OrderWallBreach(pBreaker, plan.Cells[0]))
+								breaking++;
+						}
+
+						if (breaking == 0)
+							breachFailure = "no wall breaker left";
+						else if (Unsorted::CurrentFrame - plan.StartFrame > 3600)
+							breachFailure = "too long";
+					}
+				}
 
 				if (!pTarget)
 				{
@@ -10430,6 +10501,17 @@ namespace
 				}
 				else if (Unsorted::CurrentFrame >= plan.Deadline || (plan.AuxBaseline < 2 && !pTransport))
 				{
+					finishPlan(NeuralPlanId::EngineerAssault, false, true);
+				}
+				else if (breachFailure)
+				{
+					if (CanLogSpecOpsBreach())
+					{
+						Debug::Log("[NeuralAI] House %d engineer assault: breach into %s at (%d,%d) failed (%s) after %d frames, %d wall pieces down, frame %d.\n",
+							pHouse->ArrayIndex, pTarget->Type->ID, pTarget->GetMapCoords().X, pTarget->GetMapCoords().Y, breachFailure,
+							Unsorted::CurrentFrame - plan.StartFrame, plan.AuxPeak, Unsorted::CurrentFrame);
+					}
+
 					finishPlan(NeuralPlanId::EngineerAssault, false, true);
 				}
 				else if (plan.AuxBaseline == 0)
@@ -10455,6 +10537,19 @@ namespace
 					if (pTransport->Passengers.NumPassengers == 0)
 					{
 						plan.AuxBaseline = 2;
+					}
+					else if (plan.Cells.size() >= 2)
+					{
+						// The way in is still closed: it waits by our ground at the piece, out of the splash.
+						const CellStruct wallCell = plan.Cells[0];
+						const CellStruct approach = plan.Cells[1];
+						const CellStruct back { static_cast<short>(approach.X + 3 * (approach.X - wallCell.X)),
+							static_cast<short>(approach.Y + 3 * (approach.Y - wallCell.Y)) };
+						const bool backFree = MapClass::Instance.CoordinatesLegal(back) && !IsWallPieceAt(back)
+							&& MapClass::Instance.GetMovementZoneType(back, MovementZone::Normal, false) == homeZone;
+
+						if (auto const pWaitCell = MapClass::Instance.TryGetCellAt(backFree ? back : approach))
+							IssueMoveOrder(pTransport, pWaitCell, 1.5);
 					}
 					else if (pTransport->GetMapCoords().DistanceFrom(pTarget->GetMapCoords()) <= 3.0
 						|| pTransport->GetHealthPercentage() < 0.3)
@@ -10522,12 +10617,25 @@ namespace
 
 				BuildingClass* pTarget = nullptr;
 				int bestScore = INT_MIN;
+				CellStruct targetWall = CellStruct::Empty;
+				CellStruct targetApproach = CellStruct::Empty;
 
 				if (!engineers.empty())
 				{
 					for (auto const pBld : knownEnemyBuildingList)
 					{
-						if (!isKnownEnemyBuildingToCapture(pBld) || !pBld->Type->Capturable || ObjectZone(pBld, MovementZone::Normal) != homeZone)
+						if (!isKnownEnemyBuildingToCapture(pBld) || !pBld->Type->Capturable)
+							continue;
+
+						// On our ground, open or behind a wall a breach opens from our ground. A ring of walls
+						// left the cells under the building a zone of their own, so it was not taken at all.
+						CellStruct wall = CellStruct::Empty;
+						CellStruct approach = CellStruct::Empty;
+						int wallZone = -1;
+						const int wallState = GetEnemyWallForPlan(pHouse, pBld, wall, approach, wallZone, false);
+						const bool onOurGround = ObjectZone(pBld, MovementZone::Normal) == homeZone || IsBuildingEnterableFromZone(pBld, homeZone);
+
+						if (wallState == 2 || (wallState == 0 && !onOurGround) || (wallState == 1 && wallZone != homeZone))
 							continue;
 
 						const bool capturableNow = captureLevel >= 0.99 || pBld->GetHealthPercentage() <= captureLevel + 0.05;
@@ -10537,15 +10645,25 @@ namespace
 						if (!capturableNow || worth <= 0 || defenses > 2)
 							continue;
 
-						const int score = worth - defenses * 80 - static_cast<int>(pBld->GetMapCoords().DistanceFrom(homeCell));
+						const int score = worth - defenses * 80 - static_cast<int>(pBld->GetMapCoords().DistanceFrom(homeCell))
+							- (wallState == 1 ? 60 : 0);
 
 						if (score > bestScore)
 						{
 							bestScore = score;
 							pTarget = pBld;
+							targetWall = wallState == 1 ? wall : CellStruct::Empty;
+							targetApproach = wallState == 1 ? approach : CellStruct::Empty;
 						}
 					}
 				}
+
+				// A walled-in target needs a wall breaker of ours near the piece; without one there is no
+				// assault this time.
+				std::vector<FootClass*> breakers;
+
+				if (pTarget && targetWall != CellStruct::Empty && CollectWallBreakersForPlan(pHouse, targetWall, homeZone, 2, breakers) == 0)
+					pTarget = nullptr;
 
 				const int utility = pTarget ? (300 + bestScore / 4) : -1000;
 
@@ -10553,8 +10671,26 @@ namespace
 				{
 					std::vector<FootClass*> group { pTransport };
 					group.insert(group.end(), engineers.begin(), engineers.end());
-					startPlan(NeuralPlanId::EngineerAssault, group, pTarget->GetMapCoords(), CellStruct::Empty, pTarget->UniqueID, 4500);
-					planOf(NeuralPlanId::EngineerAssault).AuxBaseline = 0;
+					group.insert(group.end(), breakers.begin(), breakers.end());
+					startPlan(NeuralPlanId::EngineerAssault, group, pTarget->GetMapCoords(), CellStruct::Empty, pTarget->UniqueID,
+						targetWall != CellStruct::Empty ? 8100 : 4500);
+					auto& started = planOf(NeuralPlanId::EngineerAssault);
+					started.AuxBaseline = 0;
+
+					if (started.Active && started.StartFrame == Unsorted::CurrentFrame && targetWall != CellStruct::Empty)
+					{
+						started.Cells = { targetWall, targetApproach };
+
+						for (auto const pBreaker : breakers)
+							started.Targets.push_back(pBreaker->UniqueID);
+
+						if (CanLogSpecOpsBreach())
+						{
+							Debug::Log("[NeuralAI] House %d engineer assault: %s at (%d,%d) walled in, %d wall breakers (%s) for the piece (%d,%d), frame %d.\n",
+								pHouse->ArrayIndex, pTarget->Type->ID, pTarget->GetMapCoords().X, pTarget->GetMapCoords().Y,
+								static_cast<int>(breakers.size()), breakers.front()->GetTechnoType()->ID, targetWall.X, targetWall.Y, Unsorted::CurrentFrame);
+						}
+					}
 				}
 			}
 		}

@@ -10212,6 +10212,13 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				if (!isNeutralTech && !yardGate && !IsEnemyBuildingUnguarded(pHouse, pBld))
 					continue;
 
+				// An enemy building walled in for us (a player's wall around its yard or a superweapon): an
+				// engineer alone would stand at the wall. The engineer assault plan breaches it.
+				NeuralTechBreach enemyBreach;
+
+				if (!isNeutralTech && !knownEnemyTech && GetEnemyBuildingWallState(pHouse, pBld, enemyBreach) != NeuralTechWall::Open)
+					continue;
+
 				const bool isCashTechBld = (pBld->Type->ProduceCashAmount > 0 || pBld->Type->ProduceCashStartup > 0);
 
 				const bool isHighValueEnemyBld = !isNeutralTech
