@@ -945,10 +945,19 @@ namespace
 		// Plan escalation after a defeat (PlanEscalation*): the next group brings (8 + step) / 8 of the beaten
 		// one's value; none at step 0 or below.
 		PlanEscalation,
+		// More soft vetoes (KnobSkips, user approved, 2026-11-28, «Sí, añádelos»): the rules that replace the
+		// scored pick most often by something else (the 'pick starts' line of the trainer's merge report).
+		// The light vehicle of the light complement in the war factory queue.
+		SkipLightComplement,
+		// The bank governor's factory in its windows of the building queue.
+		SkipBankFactory,
+		// The priority airfield (AirDocksFloor*) of the building queue, below the floor or above it.
+		SkipPriorityAirfield,
 		Count
 	};
 
-	constexpr int KnobSlots = 16;
+	// Slots of the trainer's table: 24 since the knob count passed 16 (trainer and DLL go together).
+	constexpr int KnobSlots = 24;
 	constexpr int KnobStepMost = 8;
 	constexpr int KnobWaveMassStep = 30;
 	constexpr int KnobHarvestersReach = 2;
@@ -1008,7 +1017,7 @@ namespace
 		if (hFile == INVALID_HANDLE_VALUE)
 			return false;
 
-		std::array<uint8_t, 256> buffer {};
+		std::array<uint8_t, KnobTableFileSize> buffer {};
 		DWORD read = 0;
 		const bool ok = ReadFile(hFile, buffer.data(), static_cast<DWORD>(buffer.size()), &read, NULL) != FALSE;
 

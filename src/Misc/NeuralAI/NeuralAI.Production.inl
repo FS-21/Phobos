@@ -5029,8 +5029,14 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		// the routine picks, never before restoring income, a building under construction or a gun an air
 		// raid still needs. Below the floor it comes before the bank governor's factories too; above it the
 		// governor keeps its windows.
-		const bool priorityAirfieldReady = bestPriorityAirfieldIdx >= 0 && bestBldIdx != bestPriorityAirfieldIdx
+		const bool priorityAirfieldWanted = bestPriorityAirfieldIdx >= 0 && bestBldIdx != bestPriorityAirfieldIdx
 			&& !firstFactoryPending && hasActiveBuildingIncome && !bestFillsAirDeficit && inProgressBldIdx < 0 && inProgressDefIdx < 0;
+		// Soft veto (NeuralKnob::SkipPriorityAirfield): in a share of the windows the airfield leaves the pick alone.
+		const bool priorityAirfieldSkipped = priorityAirfieldWanted && KnobSkips(pHouse, NeuralKnob::SkipPriorityAirfield);
+		const bool priorityAirfieldReady = priorityAirfieldWanted && !priorityAirfieldSkipped;
+
+		if (priorityAirfieldSkipped)
+			CountDecision(NeuralDecision::SoftVetoSkipped, pHouse->ArrayIndex);
 
 		if (priorityAirfieldReady && !airDocksBelowFloor)
 		{
@@ -5047,16 +5053,29 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		// building turns. Match #19650 (Eriond, an island map): a GDI house lost both shipyards at minute
 		// 25 and picked none in the 40 minutes after, with 65000 to 140000 credits and six war factories
 		// whose tanks cannot cross; the service depot its MCV needs never came back either.
+		bool bankFactoryFillsGap = false;
+
 		if (bankFactoryIdx >= 0)
 		{
 			if (firstShipyardIdx >= 0)
 				bankFactoryIdx = firstShipyardIdx;
 			else if (bestMcvPrerequisiteIdx >= 0)
 				bankFactoryIdx = bestMcvPrerequisiteIdx;
+
+			bankFactoryFillsGap = firstShipyardIdx >= 0 || bestMcvPrerequisiteIdx >= 0;
 		}
 
-		// A gun the raid still needs keeps its window.
-		if (bankFactoryIdx >= 0 && bestBldIdx != bankFactoryIdx && bankFactoryWindow && hasActiveBuildingIncome && !bestFillsAirDeficit)
+		// A gun the raid still needs keeps its window. Soft veto (NeuralKnob::SkipBankFactory): in a share of the
+		// windows the governor's factory copy leaves the pick alone; the first shipyard and the building the MCV
+		// lacks never do.
+		const bool bankFactoryWanted = bankFactoryIdx >= 0 && bestBldIdx != bankFactoryIdx && bankFactoryWindow
+			&& hasActiveBuildingIncome && !bestFillsAirDeficit;
+		const bool bankFactorySkipped = bankFactoryWanted && !bankFactoryFillsGap && KnobSkips(pHouse, NeuralKnob::SkipBankFactory);
+
+		if (bankFactorySkipped)
+			CountDecision(NeuralDecision::SoftVetoSkipped, pHouse->ArrayIndex);
+
+		if (bankFactoryWanted && !bankFactorySkipped)
 		{
 			bestBldIdx = bankFactoryIdx;
 			yardRule = NeuralDecision::StartBldBankFactory;
@@ -7952,8 +7971,14 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 		const bool belowLight = ownedLightVehicles < lightFloor;
 		const bool newestIsTank = newestTankOrLightUid != 0 && !newestTankOrLightIsLight && !newestTankOrLightIsRepairer;
 		const bool lightTurn = !belowFloor || newestIsTank;
-		const bool lightTakes = belowLight && lightTurn && bestLightIdx >= 0 && bestUnitIdx != bestLightIdx && hasActiveUnitIncome
+		const bool lightWanted = belowLight && lightTurn && bestLightIdx >= 0 && bestUnitIdx != bestLightIdx && hasActiveUnitIncome
 			&& !bestUnitRestoresIncome && !bestUnitAnswersFerryDemand && !airAttackOnly;
+		// Soft veto (NeuralKnob::SkipLightComplement): in a share of the windows the light vehicle leaves the pick alone.
+		const bool lightSkipped = lightWanted && KnobSkips(pHouse, NeuralKnob::SkipLightComplement);
+		const bool lightTakes = lightWanted && !lightSkipped;
+
+		if (lightSkipped)
+			CountDecision(NeuralDecision::SoftVetoSkipped, pHouse->ArrayIndex);
 
 		// TEMP diagnostic: the light complement, with the vehicle pick line.
 		if (logUnitPicks && belowLight)
@@ -7964,6 +7989,7 @@ int NeuralAI::UpdateExpertAI(HouseClass* pHouse)
 				bestLightIdx >= 0 ? UnitTypeClass::Array.GetItem(bestLightIdx)->ID : "none", bestLightScore,
 				bestUnitIdx >= 0 ? UnitTypeClass::Array.GetItem(bestUnitIdx)->ID : "none", bestUnitScore,
 				lightTakes ? (belowFloor ? ", the light vehicle goes first, its turn below the tank floor" : ", the light vehicle goes first")
+					: lightSkipped ? ", kept: soft veto"
 					: (!lightTurn ? ", kept: below the tank floor, the newest was a light vehicle"
 					: (bestLightIdx < 0 ? ", kept: no light vehicle to build" : (bestUnitIdx == bestLightIdx ? ", the pick is a light vehicle"
 						: (!hasActiveUnitIncome ? ", kept: no income" : (bestUnitRestoresIncome ? ", kept: the pick restores the income"
