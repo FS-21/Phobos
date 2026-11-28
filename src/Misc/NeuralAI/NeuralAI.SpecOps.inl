@@ -49,6 +49,11 @@ namespace
 		int BreachFrame { 0 };
 		int BreachPieces { 0 };
 		bool BreachReinforced { false };
+		// A breach made from another land than the engineer's: the engineer's land (-1: same land),
+		// from where engineer and breakers go over by transport, and whether a breaker stands on the
+		// land of the wall yet (the breach's time runs from then).
+		int BreachFerryZone { -1 };
+		bool BreachLanded { false };
 		std::vector<DWORD> Breachers {};
 	};
 
@@ -308,12 +313,57 @@ namespace
 		return (pOverlay && pOverlay->Wall) ? pOverlay : nullptr;
 	}
 
-	// A breach into a walled-in tech: the wall piece to knock down and the free cell of our ground
-	// next to it.
+	// The free ground a unit from another land is set down on to reach a building: the nearest cell
+	// around the foundation, within three cells, on ground and free of walls and buildings (fixed
+	// order). The zone of the building's own cells is no such ground when a wall ring closes them off:
+	// the zone map then has a pocket under the building alone. -1 with none.
+	int BuildingApproachGround(const BuildingClass* pBld, CellStruct& outCell)
+	{
+		outCell = CellStruct::Empty;
+
+		if (!pBld || !pBld->Type)
+			return -1;
+
+		const CellStruct origin = pBld->GetMapCoords();
+		const int width = pBld->Type->GetFoundationWidth();
+		const int height = pBld->Type->GetFoundationHeight(false);
+
+		for (int ring = 1; ring <= 3; ++ring)
+		{
+			for (int dy = -ring; dy < height + ring; ++dy)
+			{
+				for (int dx = -ring; dx < width + ring; ++dx)
+				{
+					if (dx > -ring && dx < width + ring - 1 && dy > -ring && dy < height + ring - 1)
+						continue;
+
+					const CellStruct around { static_cast<short>(origin.X + dx), static_cast<short>(origin.Y + dy) };
+					auto const pCell = MapClass::Instance.CoordinatesLegal(around) ? MapClass::Instance.TryGetCellAt(around) : nullptr;
+
+					if (!pCell || pCell->GetBuilding() || GetWallOverlayAt(around))
+						continue;
+
+					const int zone = MapClass::Instance.GetMovementZoneType(around, MovementZone::Normal, false);
+
+					if (IsGroundZone(zone))
+					{
+						outCell = around;
+						return zone;
+					}
+				}
+			}
+		}
+
+		return -1;
+	}
+
+	// A breach into a walled-in tech: the wall piece to knock down, the free cell of our ground
+	// next to it and that ground's movement zone (Normal; GetTechWallStateFrom fills it).
 	struct NeuralTechBreach
 	{
 		CellStruct Wall { CellStruct::Empty };
 		CellStruct Approach { CellStruct::Empty };
+		int Zone { -1 };
 	};
 
 	enum class NeuralTechWall
@@ -468,9 +518,88 @@ namespace
 		return bestDistSq < INT_MAX ? NeuralTechWall::Breachable : NeuralTechWall::Sealed;
 	}
 
-	// Can this unit knock the wall piece down? Its primary weapon must hit the ground with a
-	// warhead that hurts walls as the engine rules it: Wall=, or Wood= on a wood wall.
-	bool CanBreachWall(FootClass* pFoot, const OverlayTypeClass* pWall)
+	// GetTechWallState for a unit standing in zone, judged from the ground the unit would enter
+	// from. A tech on that ground is judged from it. A tech on another land reads open from here
+	// (no wall stands between it and our ground), so it is judged from the free ground around it,
+	// the land a transport sets the unit down on: open from any of those lands is open. In match
+	// #21545 an engineer was ferried to a lab ringed by sandbags that read open from home.
+	// outBreach.Zone: the ground the way in is judged from.
+	NeuralTechWall GetTechWallStateFrom(HouseClass* pHouse, const BuildingClass* pBld, int zone, const CellStruct& from,
+		NeuralTechBreach& outBreach)
+	{
+		const NeuralTechWall own = GetTechWallState(pHouse, pBld, zone, from, outBreach);
+		outBreach.Zone = zone;
+
+		if (own != NeuralTechWall::Open || !pBld || !pBld->Type || IsBuildingEnterableFromZone(pBld, zone))
+			return own;
+
+		const CellStruct origin = pBld->GetMapCoords();
+		const int width = pBld->Type->GetFoundationWidth();
+		const int height = pBld->Type->GetFoundationHeight(false);
+		std::array<int, 4> lands { -1, -1, -1, -1 };
+		size_t landCount = 0;
+		NeuralTechWall result = NeuralTechWall::Open;
+
+		for (int ring = 1; ring <= 3 && landCount < lands.size(); ++ring)
+		{
+			for (int dy = -ring; dy < height + ring && landCount < lands.size(); ++dy)
+			{
+				for (int dx = -ring; dx < width + ring && landCount < lands.size(); ++dx)
+				{
+					if (dx > -ring && dx < width + ring - 1 && dy > -ring && dy < height + ring - 1)
+						continue;
+
+					const CellStruct around { static_cast<short>(origin.X + dx), static_cast<short>(origin.Y + dy) };
+					auto const pCell = MapClass::Instance.CoordinatesLegal(around) ? MapClass::Instance.TryGetCellAt(around) : nullptr;
+
+					if (!pCell || pCell->GetBuilding() || GetWallOverlayAt(around))
+						continue;
+
+					const int land = MapClass::Instance.GetMovementZoneType(around, MovementZone::Normal, false);
+
+					if (!IsGroundZone(land) || std::find(lands.begin(), lands.begin() + landCount, land) != lands.begin() + landCount)
+						continue;
+
+					lands[landCount++] = land;
+					NeuralTechBreach breach;
+					const NeuralTechWall wall = GetTechWallState(pHouse, pBld, land, from, breach);
+
+					if (wall == NeuralTechWall::Open)
+					{
+						outBreach = NeuralTechBreach {};
+						outBreach.Zone = land;
+
+						return NeuralTechWall::Open;
+					}
+
+					if (wall == NeuralTechWall::Breachable && result != NeuralTechWall::Breachable)
+					{
+						result = NeuralTechWall::Breachable;
+						outBreach = breach;
+						outBreach.Zone = land;
+					}
+					else if (wall == NeuralTechWall::Sealed && result == NeuralTechWall::Open)
+					{
+						result = NeuralTechWall::Sealed;
+					}
+				}
+			}
+		}
+
+		return result;
+	}
+
+	// Can this vehicle crush the wall piece by driving over it? Crusher= against a Crushable= wall.
+	bool CanCrushWall(FootClass* pFoot, const OverlayTypeClass* pWall)
+	{
+		auto const pType = pFoot ? pFoot->GetTechnoType() : nullptr;
+
+		return pWall && pWall->Crushable && pType && pType->Crusher && pFoot->WhatAmI() == AbstractType::Unit;
+	}
+
+	// Can this unit knock the wall piece down by its fire? Its primary weapon must hit the ground
+	// with a warhead that hurts walls as the engine rules it: Wall=, or Wood= on a wood wall.
+	bool CanShootWall(FootClass* pFoot, const OverlayTypeClass* pWall)
 	{
 		auto const pType = pFoot ? pFoot->GetTechnoType() : nullptr;
 		auto const pSlot = pType ? pType->GetWeapon(0) : nullptr;
@@ -482,6 +611,12 @@ namespace
 		auto const pWarhead = pWeapon->Warhead;
 
 		return pWarhead->Wall || pWarhead->WallAbsoluteDestroyer || (pWarhead->Wood && pWall->Armor == Armor::Wood);
+	}
+
+	// Can this unit knock the wall piece down: by its fire, or a vehicle by crushing it.
+	bool CanBreachWall(FootClass* pFoot, const OverlayTypeClass* pWall)
+	{
+		return CanShootWall(pFoot, pWall) || CanCrushWall(pFoot, pWall);
 	}
 
 	// Breach lines are capped per match so a long training match keeps them readable.
@@ -728,6 +863,15 @@ namespace
 		return pTech && pTech->OwnerIndex < 0 && !pTech->Walled && Unsorted::CurrentFrame >= pTech->BlockedUntilFrame
 			&& !IsSpecOpsCaptureTarget(pHouse, pTech->ID, engineerID) && !IsTechClaimedByAlly(pHouse, pTech->ID)
 			&& !IsCellInKnownEnemyDefenseReach(pHouse, pTech->Cell, 2);
+	}
+
+	// Was this tech walled in at the last scan (GetTechWallStateFrom, from the land an engineer gets
+	// in from)? Those are the SpecOps breach's: an engineer alone would wait at the wall.
+	bool IsKnownTechWalled(HouseClass* pHouse, const BuildingClass* pBld)
+	{
+		auto const pTech = (pHouse && pBld) ? FindKnownTech(GetSpecOpsState(pHouse), pBld->UniqueID) : nullptr;
+
+		return pTech && pTech->Walled;
 	}
 
 	bool CanEngineerReachTech(HouseClass* pHouse, const NeuralKnownTech& tech, int engineerZone, const InfantryTypeClass* pEngineerType)
@@ -1923,6 +2067,7 @@ namespace
 
 	bool UpdateSpecOpsBreach(HouseClass* pHouse, NeuralSpecOpsState& state, NeuralSpecOpsCapture& capture, BuildingClass* pTarget, int now);
 	void ReleaseSpecOpsBreachers(HouseClass* pHouse, const NeuralSpecOpsCapture& capture);
+	bool RequestTransportOperation(HouseClass* pHouse, NeuralOpClient client, FootClass* pFoot, const CellStruct& target);
 
 	// Per AI tick: tech memory (every 150 frames), opportunity summary, captures and spies upkeep.
 	void UpdateSpecOps(HouseClass* pHouse)
@@ -1992,11 +2137,11 @@ namespace
 				state.KnownNeutralTechs++;
 				state.KnownNeutralCash += tech.Cash ? 1 : 0;
 
-				// A walled-in tech counts when a single piece of its wall opens it: Expert 4 sends a
-				// wall breaker with the engineer.
+				// A walled-in tech counts when a single piece of its wall opens it: a wall breaker goes
+				// with the engineer (by transport too when the tech stands on another land).
 				NeuralTechBreach breach;
 				auto const pTechBld = FindBuildingByID(tech.ID);
-				const NeuralTechWall wall = GetTechWallState(pHouse, pTechBld, homeZone, home, breach);
+				const NeuralTechWall wall = GetTechWallStateFrom(pHouse, pTechBld, homeZone, home, breach);
 				const bool wasWalled = tech.Walled;
 				tech.Walled = wall != NeuralTechWall::Open;
 
@@ -2016,7 +2161,8 @@ namespace
 				}
 				const bool reachable = wall == NeuralTechWall::Open
 					? CanEngineerReachTech(pHouse, tech, homeZone, state.CaptureType)
-					: wall == NeuralTechWall::Breachable;
+					: wall == NeuralTechWall::Breachable
+						&& (breach.Zone == homeZone || (state.CaptureType && CanHouseFerryTypeAcrossWater(pHouse, state.CaptureType)));
 
 				if (now < tech.BlockedUntilFrame || !reachable || IsCellInKnownEnemyDefenseReach(pHouse, tech.Cell, 2))
 					continue;
@@ -2074,7 +2220,7 @@ namespace
 			auto const pEngineer = FindOwnFootByID(pHouse, capture.EngineerID);
 			auto const pTarget = FindBuildingByID(capture.TargetID);
 			// A breach first takes the walk of the wall breakers and their shots.
-			const int captureTimeout = capture.BreachFrame > 0 ? 10800 : 7200;
+			const int captureTimeout = capture.BreachFerryZone >= 0 ? 18000 : (capture.BreachFrame > 0 ? 10800 : 7200);
 			bool done = false;
 
 			if (pTarget && pTarget->Owner == pHouse)
@@ -2410,8 +2556,11 @@ namespace
 	// that lets us build around it (BaseNormal) on another landmass than ours counts 2 more: it
 	// opens an expansion without an MCV. outContested: enemies were seen near it (an escort should
 	// go first). outBreach: the wall piece to knock down first when it is walled in (a tech whose
-	// walls no single breach opens is skipped).
-	BuildingClass* PickSpecOpsCaptureTarget(HouseClass* pHouse, FootClass* pEngineer, bool& outContested, NeuralTechBreach& outBreach)
+	// walls no single breach opens is skipped), on our ground or across the water. walledOnly: only
+	// walled-in techs, which the micro's own capture leaves alone (an engineer alone would wait at
+	// the wall).
+	BuildingClass* PickSpecOpsCaptureTarget(HouseClass* pHouse, FootClass* pEngineer, bool& outContested, NeuralTechBreach& outBreach,
+		bool walledOnly)
 	{
 		outContested = false;
 		outBreach = NeuralTechBreach {};
@@ -2454,8 +2603,21 @@ namespace
 			if (ferryBlocked && std::find(pTech->Zones.begin(), pTech->Zones.end(), engineerZone) == pTech->Zones.end())
 				continue;
 
+			if (walledOnly && !pTech->Walled)
+				continue;
+
 			NeuralTechBreach breach;
-			const NeuralTechWall wall = GetTechWallState(pHouse, pBld, engineerZone, from, breach);
+			const NeuralTechWall wall = GetTechWallStateFrom(pHouse, pBld, engineerZone, from, breach);
+
+			if (walledOnly && wall != NeuralTechWall::Breachable)
+				continue;
+
+			// A breach from another land: the engineer and its wall breakers go by transport.
+			if (wall == NeuralTechWall::Breachable && breach.Zone != engineerZone
+				&& (ferryBlocked || !CanHouseFerryTypeAcrossWater(pHouse, pEngineer->GetTechnoType())))
+			{
+				continue;
+			}
 
 			// Walled in as seen from home but open as seen from here: this engineer stands on
 			// other ground and would only reach the outside of the wall (by ferry), then wait there.
@@ -2519,10 +2681,13 @@ namespace
 	// Idle armed ground units and soldiers of ours near a tech, nearest first (UniqueID on ties),
 	// not in a plan nor escorting or breaching for another capture (nor for pPending, the capture
 	// being set up). Specialists (engineers, spies, thieves) and harvesters never escort. With
-	// pBreachWall, only units standing in breachZone (Normal) that can knock that wall down count,
-	// from a little further away: without them the engineer cannot get in at all.
+	// pBreachWall, only units that can knock that wall down count, from a little further away
+	// (without them the engineer cannot get in at all): those standing in breachZone (Normal), then
+	// those in ferryZone a transport of ours can take there, then the ones that crush it rather
+	// than shoot it.
 	void CollectSpecOpsEscorts(HouseClass* pHouse, const CellStruct& cell, int maxCount, std::vector<FootClass*>& out,
-		const NeuralSpecOpsCapture* pPending = nullptr, const OverlayTypeClass* pBreachWall = nullptr, int breachZone = -1)
+		const NeuralSpecOpsCapture* pPending = nullptr, const OverlayTypeClass* pBreachWall = nullptr, int breachZone = -1,
+		int ferryZone = -1)
 	{
 		out.clear();
 		auto const& state = GetSpecOpsState(pHouse);
@@ -2546,8 +2711,29 @@ namespace
 				return;
 			}
 
-			if (pBreachWall && (!CanBreachWall(pFoot, pBreachWall) || ObjectZone(pFoot, MovementZone::Normal) != breachZone))
-				return;
+			int rank = 0;
+
+			if (pBreachWall)
+			{
+				if (!CanBreachWall(pFoot, pBreachWall))
+					return;
+
+				const int footZone = ObjectZone(pFoot, MovementZone::Normal);
+
+				if (footZone != breachZone)
+				{
+					if (ferryZone < 0 || footZone != ferryZone || IsInTransportOp(pHouse, pFoot->UniqueID)
+						|| !CanHouseFerryTypeAcrossWater(pHouse, pFoot->GetTechnoType()))
+					{
+						return;
+					}
+
+					rank += 1000;
+				}
+
+				if (!CanShootWall(pFoot, pBreachWall))
+					rank += 500;
+			}
 
 			if (pPending && isTaken(*pPending, pFoot->UniqueID))
 				return;
@@ -2561,7 +2747,7 @@ namespace
 			const int dist = static_cast<int>(pFoot->GetMapCoords().DistanceFrom(cell));
 
 			if (dist <= (pBreachWall ? 90 : 45))
-				candidates.emplace_back(dist, pFoot);
+				candidates.emplace_back(dist + rank, pFoot);
 		};
 
 		for (auto const pUnit : UnitClass::Array)
@@ -2673,18 +2859,69 @@ namespace
 			pWall = GetWallOverlayAt(next.Wall);
 		}
 
-		if (now - capture.BreachFrame > 3600)
+		// Across the water the breach's time runs from the first breaker on the land of the wall; the
+		// crossing itself has 9000 frames.
+		if (capture.BreachFerryZone >= 0 && !capture.BreachLanded)
+		{
+			for (const DWORD id : capture.Breachers)
+			{
+				auto const pFoot = FindOwnFootByID(pHouse, id);
+
+				if (pFoot && !pFoot->InLimbo && ObjectZone(pFoot, MovementZone::Normal) == capture.BreachZone)
+				{
+					capture.BreachLanded = true;
+					capture.BreachFrame = now;
+
+					if (CanLogSpecOpsBreach())
+					{
+						Debug::Log("[NeuralAI] House %d SpecOps: breach into %s at (%d,%d): wall breaker %s %u stands by the wall piece's land, "
+							"frame %d.\n", pHouse->ArrayIndex, pTarget->Type->ID, capture.TargetCell.X, capture.TargetCell.Y,
+							pFoot->GetTechnoType()->ID, pFoot->UniqueID, now);
+					}
+
+					break;
+				}
+			}
+
+			if (!capture.BreachLanded && now - capture.BreachFrame > 9000)
+				return fail("no wall breaker landed");
+		}
+		else if (now - capture.BreachFrame > 3600)
+		{
 			return fail("too long");
+		}
 
 		auto const pWallCell = MapClass::Instance.TryGetCellAt(capture.BreachCell);
 		int breakers = 0;
+		int ferryRefused = 0;
 
 		for (const DWORD id : capture.Breachers)
 		{
 			auto const pFoot = FindOwnFootByID(pHouse, id);
 
-			if (!pFoot || pFoot->InLimbo || !CanBreachWall(pFoot, pWall))
+			if (!pFoot || !CanBreachWall(pFoot, pWall))
 				continue;
+
+			// Waiting for its transport or aboard: on its way.
+			if (IsInTransportOp(pHouse, id))
+			{
+				breakers++;
+				continue;
+			}
+
+			if (pFoot->InLimbo)
+				continue;
+
+			// Still on the engineer's land: a transport takes it to our side of the wall.
+			if (capture.BreachFerryZone >= 0 && ObjectZone(pFoot, MovementZone::Normal) != capture.BreachZone)
+			{
+				if (RequestTransportOperation(pHouse, NeuralOpClient::Economy, pFoot, capture.BreachApproach))
+					breakers++;
+				else
+					ferryRefused++;
+
+				continue;
+			}
 
 			breakers++;
 
@@ -2692,15 +2929,30 @@ namespace
 			if (pFoot->Target == pWallCell || (pFoot->Target && pFoot->Target->WhatAmI() != AbstractType::Cell))
 				continue;
 
-			pFoot->ClearMegaMissionData();
-			pFoot->SetTarget(pWallCell);
-			pFoot->QueueMission(Mission::Attack, true);
+			if (CanShootWall(pFoot, pWall))
+			{
+				pFoot->ClearMegaMissionData();
+				pFoot->SetTarget(pWallCell);
+				pFoot->QueueMission(Mission::Attack, true);
+			}
+			else if (pFoot->Destination != pWallCell)
+			{
+				// A crusher drives over the piece.
+				pFoot->ClearMegaMissionData();
+				pFoot->SetDestination(pWallCell, true);
+				pFoot->QueueMission(Mission::Move, true);
+				NoteOrderCaller(pFoot, "breach");
+			}
 		}
+
+		// The breakers on the engineer's land got no transport: the next ones would get none either.
+		if (breakers == 0 && ferryRefused > 0)
+			return fail("no transport for the wall breakers");
 
 		if (breakers == 0)
 		{
 			std::vector<FootClass*> fresh;
-			CollectSpecOpsEscorts(pHouse, capture.BreachCell, 2, fresh, nullptr, pWall, capture.BreachZone);
+			CollectSpecOpsEscorts(pHouse, capture.BreachCell, 2, fresh, nullptr, pWall, capture.BreachZone, capture.BreachFerryZone);
 
 			if (fresh.empty())
 				return fail("no wall breaker left");
@@ -2716,7 +2968,7 @@ namespace
 			// more breaker joins, once.
 			capture.BreachReinforced = true;
 			std::vector<FootClass*> fresh;
-			CollectSpecOpsEscorts(pHouse, capture.BreachCell, 1, fresh, nullptr, pWall, capture.BreachZone);
+			CollectSpecOpsEscorts(pHouse, capture.BreachCell, 1, fresh, nullptr, pWall, capture.BreachZone, capture.BreachFerryZone);
 
 			for (auto const pFoot : fresh)
 				capture.Breachers.push_back(pFoot->UniqueID);
@@ -2763,14 +3015,12 @@ namespace
 			}
 		}
 
+		// Without Expert 4 only walled-in techs: the micro's own capture leaves those alone.
 		if (!pCapture)
 		{
-			if (!expertActive)
-				return false;
-
 			bool contested = false;
 			NeuralTechBreach breach;
-			pTarget = PickSpecOpsCaptureTarget(pHouse, pEngineer, contested, breach);
+			pTarget = PickSpecOpsCaptureTarget(pHouse, pEngineer, contested, breach, !expertActive);
 
 			if (!pTarget)
 				return false;
@@ -2795,11 +3045,15 @@ namespace
 
 			if (breach.Wall != CellStruct::Empty)
 			{
-				// A walled-in tech needs a wall breaker of ours on this side of the wall; without
-				// one that tech waits and another one is picked next tick.
-				const int zone = ObjectZone(pEngineer, MovementZone::Normal);
+				// A walled-in tech needs a wall breaker of ours on the outer side of the wall, or one
+				// on the engineer's land a transport takes there with it (user, 2026-11-28: a wall
+				// breaker goes along and opens the way); without one that tech waits and another one is
+				// picked next tick.
+				const int engineerZone = ObjectZone(pEngineer, MovementZone::Normal);
+				const int zone = breach.Zone >= 0 ? breach.Zone : engineerZone;
 				std::vector<FootClass*> breachers;
-				CollectSpecOpsEscorts(pHouse, breach.Wall, 2, breachers, nullptr, GetWallOverlayAt(breach.Wall), zone);
+				CollectSpecOpsEscorts(pHouse, breach.Wall, 2, breachers, nullptr, GetWallOverlayAt(breach.Wall), zone,
+					zone != engineerZone ? engineerZone : -1);
 
 				if (breachers.empty())
 				{
@@ -2819,6 +3073,7 @@ namespace
 				capture.BreachApproach = breach.Approach;
 				capture.BreachZone = zone;
 				capture.BreachFrame = now;
+				capture.BreachFerryZone = zone != engineerZone ? engineerZone : -1;
 
 				for (auto const pBreacher : breachers)
 					capture.Breachers.push_back(pBreacher->UniqueID);
@@ -2879,6 +3134,32 @@ namespace
 		// is open and the engineer then walks in as on any other capture.
 		if (pCapture->BreachCell != CellStruct::Empty)
 		{
+			// Across the water: the engineer goes over to our side of the wall by transport, with its
+			// breakers when they board on the same beach.
+			if (pCapture->BreachFerryZone >= 0 && !pEngineer->InLimbo
+				&& ObjectZone(pEngineer, MovementZone::Normal) != pCapture->BreachZone)
+			{
+				auto const pApproachCell = MapClass::Instance.TryGetCellAt(pCapture->BreachApproach);
+
+				if (!pApproachCell || !dispatch(pEngineer, pApproachCell, Mission::Move, false))
+				{
+					FailSpecOpsCapture(state, pCapture->TargetID, 1800);
+
+					if (CanLogSpecOpsBreach())
+					{
+						Debug::Log("[NeuralAI] House %d SpecOps: breach into %s at (%d,%d) failed (no transport for engineer %u), frame %d.\n",
+							pHouse->ArrayIndex, pTarget->Type->ID, pCapture->TargetCell.X, pCapture->TargetCell.Y, pEngineer->UniqueID, now);
+					}
+
+					ReleaseSpecOpsBreachers(pHouse, *pCapture);
+					state.Captures.erase(state.Captures.begin() + (pCapture - state.Captures.data()));
+
+					return false;
+				}
+
+				return true;
+			}
+
 			bool breakerNear = false;
 
 			for (const DWORD id : pCapture->Breachers)

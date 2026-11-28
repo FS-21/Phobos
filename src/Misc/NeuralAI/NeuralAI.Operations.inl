@@ -1517,13 +1517,34 @@ namespace
 			macro.CrossingBlockedUntil.erase(itBlock);
 		}
 
-		auto const pLanding = FindSafeIslandLandingCell(pHouse, ground, targetZone, false);
+		CellClass* pLanding = FindSafeIslandLandingCell(pHouse, ground, targetZone, false);
 		const CellStruct footCoords = pFoot->GetMapCoords();
 
 		// A transport that comes now: one the house could build only after more prerequisites left the
 		// engineers waiting OpNoTransportFrames for a crossing nothing it had could make.
 		if (!pLanding)
 			return false;
+
+		// With no cell of the land to come down on the search answers the reference cell itself. Under
+		// a building no transport sets the unit down: the free ground of the same land beside it is the
+		// address, and with none the unit asks again OpRetryFrames later.
+		if (auto const pUnder = pLanding->GetBuilding())
+		{
+			CellStruct beside = CellStruct::Empty;
+			auto const pBeside = BuildingApproachGround(pUnder, beside) == targetZone ? MapClass::Instance.TryGetCellAt(beside) : nullptr;
+
+			if (!pBeside)
+			{
+				macro.TransportOpRetryUntil[uid] = now + OpRetryFrames;
+				Debug::Log("[NeuralAI] House %d transport refused for %s %u at (%d,%d): no cell of zone %d to set it down by (%d,%d), frame %d.\n",
+					pHouse->ArrayIndex, pType->ID, uid, footCoords.X, footCoords.Y, targetZone, ground.X, ground.Y, now);
+
+				return false;
+			}
+
+			pLanding = pBeside;
+			ground = beside;
+		}
 
 		if (!CanHouseFerryTypeAcrossWater(pHouse, pType, &footCoords, &pLanding->MapCoords, true))
 		{
@@ -3757,6 +3778,20 @@ namespace
 					NoteOrderCaller(pTransport, "move");
 					transport.OrderCell = pNext->MapCoords;
 				}
+				else if (transport.Tries > OpMaxLandingTries)
+				{
+					// No other cell of the land and its tries are spent: the load goes back now rather
+					// than at the crossing's cap.
+					Debug::Log("[NeuralAI] House %d transport op %d: %s %u could not set down at (%d,%d) and finds no other cell of zone %d: "
+						"takes its load back, frame %d.\n", houseIndex, op.Id, pTransport->GetTechnoType()->ID, pTransport->UniqueID,
+						transport.Landing.X, transport.Landing.Y, op.TargetZone, now);
+					transport.Leg = NeuralOpLeg::Returning;
+					transport.LegFrame = now;
+					transport.ParkFrame = -1;
+					transport.Route.clear();
+					transport.RouteFrame = -1;
+					op.FailedTrips++;
+				}
 
 				return;
 			}
@@ -3811,6 +3846,78 @@ namespace
 			transport.LastCell = pTransport->GetMapCoords();
 			transport.LastHealth = pTransport->Health;
 			transport.LastLoaded = loaded;
+
+			// The engine sends a flying transport whose landing is not clear on to a clear cell near it
+			// (AircraftClass::New_LZ). On the land of the address that cell is its landing now. Off it
+			// (the landing lies under a building or inside a wall ring) the landing failed: another cell
+			// of that land, else the load goes back at once, the operation ends once it is home and the
+			// crossing stays shut OpNoTransportRetryFrames. In match #21545 a transport was sent back 268
+			// times to the cell of a walled-in tech until its crossing ran out, then flew the same trip.
+			if (transport.Leg == NeuralOpLeg::Crossing && carrier == OpCarrier::Flyer && loaded > 0
+				&& transport.OrderCell == transport.Landing)
+			{
+				auto const pEngineLz = abstract_cast<CellClass*>(pTransport->Destination);
+
+				if (pEngineLz && pEngineLz->MapCoords != transport.Landing
+					&& pEngineLz->MapCoords.DistanceFrom(transport.Landing) <= OpEngineLzCells)
+				{
+					const CellStruct engineLz = pEngineLz->MapCoords;
+
+					if (!pEngineLz->GetBuilding() && MapClass::Instance.GetMovementZoneType(engineLz, MovementZone::Normal, false) == op.TargetZone)
+					{
+						transport.Landing = engineLz;
+						transport.OrderCell = engineLz;
+					}
+					else
+					{
+						transport.Tries++;
+						transport.FailedLandings[transport.FailedLandingCursor % transport.FailedLandings.size()] = transport.Landing;
+						transport.FailedLandingCursor++;
+						std::vector<CellStruct> blocked;
+
+						for (auto const& bad : transport.FailedLandings)
+						{
+							if (bad != CellStruct::Empty)
+								blocked.push_back(bad);
+						}
+
+						auto const pNext = transport.Tries <= OpMaxLandingTries
+							? PickOpFlyerCell(transport.Landing, op.TargetZone, 1, transport.Landing, blocked) : nullptr;
+
+						if (pNext)
+						{
+							Debug::Log("[NeuralAI] House %d transport op %d: %s %u taken by the engine from its landing (%d,%d) to (%d,%d) off zone %d, "
+								"tries (%d,%d), frame %d.\n", houseIndex, op.Id, pTransport->GetTechnoType()->ID, pTransport->UniqueID,
+								transport.Landing.X, transport.Landing.Y, engineLz.X, engineLz.Y, op.TargetZone, pNext->MapCoords.X,
+								pNext->MapCoords.Y, now);
+							transport.Landing = pNext->MapCoords;
+							transport.Route.clear();
+							transport.RouteFrame = -1;
+							orderTo(pTransport, transport.OrderCell, pNext, 1.0);
+						}
+						else
+						{
+							Debug::Log("[NeuralAI] House %d transport op %d: %s %u finds no cell of zone %d to set down by (%d,%d) (the engine took it "
+								"to (%d,%d)): takes its load back, frame %d.\n", houseIndex, op.Id, pTransport->GetTechnoType()->ID,
+								pTransport->UniqueID, op.TargetZone, transport.Landing.X, transport.Landing.Y, engineLz.X, engineLz.Y, now);
+							transport.Leg = NeuralOpLeg::Returning;
+							transport.LegFrame = now;
+							transport.ParkFrame = -1;
+							transport.Route.clear();
+							transport.RouteFrame = -1;
+							transport.OrderCell = CellStruct::Empty;
+							op.FailedTrips = std::max(op.FailedTrips + 1, OpMaxFailedTrips);
+							macro.CrossingBlockedUntil[CrossingBlockKey(op.Client, op.OriginZone, op.TargetZone)] = now + OpNoTransportRetryFrames;
+
+							for (auto const& member : op.Members)
+							{
+								if (member.Client != op.Client)
+									macro.CrossingBlockedUntil[CrossingBlockKey(member.Client, op.OriginZone, op.TargetZone)] = now + OpNoTransportRetryFrames;
+							}
+						}
+					}
+				}
+			}
 
 			if (transport.Leg != NeuralOpLeg::Parked)
 				checkInterference(pTransport, transport.OrderCell, true, pCargo);
