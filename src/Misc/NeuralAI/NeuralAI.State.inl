@@ -2970,6 +2970,9 @@ namespace
 	constexpr double OpStuckCells = 2.0;
 	constexpr int OpCrossCapFrames = 9000;
 	constexpr double OpUnloadCells = 2.5;
+	// A flying transport whose landing is not clear is sent on by the engine to a clear cell around
+	// it (AircraftClass::New_LZ); a cell this close to its landing is taken for that choice.
+	constexpr double OpEngineLzCells = 8.0;
 	constexpr double OpParkCells = 4.0;
 	constexpr double OpGatherCells = 5.0;
 	// Where units board a transport (FindBoardingCell): the nearest cell to them on the outskirts

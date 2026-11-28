@@ -1665,12 +1665,27 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 		if (footZone >= 0 && targetZone != footZone && IsBuildingEnterableFromZone(abstract_cast<BuildingClass*>(pTarget), footZone))
 			targetZone = footZone;
 
+		// A building whose own cells are a pocket of the zone map (a wall ring around the foundation
+		// closes them off) is reached from the free ground around it: no transport lands on its centre
+		// cell (match #21545: a transport sent back 268 times to the cell of a walled-in tech until its
+		// crossing ran out, while the engine kept offering clear cells outside the wall).
+		CellStruct buildingGround = CellStruct::Empty;
+		auto const pTargetBuilding = abstract_cast<BuildingClass*>(pTarget);
+
+		if (pTargetBuilding && targetZone != footZone && IsGroundZone(targetZone) && !IsBuildingEnterableFromZone(pTargetBuilding, targetZone))
+		{
+			const int groundZone = BuildingApproachGround(pTargetBuilding, buildingGround);
+
+			if (groundZone >= 0)
+				targetZone = groundZone;
+		}
+
 		// A target on no ground (a ship off the shore, a unit at a cliff foot, a cell with no zone) is
 		// reached from the ground next to it: ours when it touches it (the unit walks up and fires from
 		// the shore), else the nearest other one. With no ground around it no transport can land the
 		// unit by it. Units asked for a transport to such targets and waited on the beach until they
 		// gave up: 43 of 219 ferry wait timeouts in 41 matches were for zone 1, 11 for no zone.
-		CellStruct targetGround = targetCoords;
+		CellStruct targetGround = buildingGround != CellStruct::Empty ? buildingGround : targetCoords;
 
 		if (!IsGroundZone(targetZone))
 		{
@@ -10114,6 +10129,10 @@ void NeuralAI::ExecuteTacticalAndSpecOpsMicro(HouseClass* pHouse, const std::arr
 				// and not taken by an Expert 4 capture; enemy buildings require line of sight, but for
 				// the techs an enemy took.
 				if (isNeutralTech ? !IsSpecOpsTechAvailable(pHouse, pBld, pInf->UniqueID) : (!knownEnemyTech && !IsCellVisibleToAI(pHouse, pCell)))
+					continue;
+
+				// A walled-in tech an enemy took is the SpecOps breach's too (RunSpecOpsEngineer).
+				if (knownEnemyTech && IsKnownTechWalled(pHouse, pBld))
 					continue;
 
 				// An enemy building only when nothing guards it (user, 2026-11-20: capture enemy structures
