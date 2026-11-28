@@ -313,6 +313,27 @@ namespace
 		return (pOverlay && pOverlay->Wall) ? pOverlay : nullptr;
 	}
 
+	// The wall on this cell that is a building (Wall=, Gate=, LaserFence=, LaserFencePost=,
+	// FirestormWall=), or nullptr. A wall a player builds of a wall type with ToOverlay= becomes an
+	// overlay (GetWallOverlayAt); these stay buildings.
+	BuildingClass* GetWallBuildingAt(const CellStruct& cell)
+	{
+		auto const pCell = MapClass::Instance.TryGetCellAt(cell);
+		auto const pBld = pCell ? pCell->GetBuilding() : nullptr;
+		auto const pType = pBld ? pBld->Type : nullptr;
+
+		if (!pType || !pBld->IsAlive || pBld->InLimbo)
+			return nullptr;
+
+		return (pType->Wall || pType->Gate || pType->LaserFence || pType->LaserFencePost || pType->FirestormWall) ? pBld : nullptr;
+	}
+
+	// A wall piece on this cell: an overlay or a building.
+	bool IsWallPieceAt(const CellStruct& cell)
+	{
+		return GetWallOverlayAt(cell) || GetWallBuildingAt(cell);
+	}
+
 	// The free ground a unit from another land is set down on to reach a building: the nearest cell
 	// around the foundation, within three cells, on ground and free of walls and buildings (fixed
 	// order). The zone of the building's own cells is no such ground when a wall ring closes them off:
@@ -379,8 +400,10 @@ namespace
 	// a building as open (map tech is often fenced in on the cells right around it), and the
 	// engineer then stands at the fence until its op times out. Breachable: a single wall piece
 	// stands orthogonally between our ground and the inside (a diagonal gap may not let a soldier
-	// through); outBreach gets the one nearest to `from`. Sealed: thicker walls, or only pieces
-	// that are Immune or belong to an ally.
+	// through), or two pieces in a row with the inner one opening the inside (the breach takes them
+	// one after the other); outBreach gets the outer piece nearest to `from`, a single piece first.
+	// Sealed: thicker walls, or only pieces that are Immune or belong to an ally. Wall buildings
+	// (gates, fences) count as pieces too.
 	NeuralTechWall GetTechWallState(HouseClass* pHouse, const BuildingClass* pBld, int zone, const CellStruct& from,
 		NeuralTechBreach& outBreach)
 	{
@@ -429,7 +452,7 @@ namespace
 				if (ring == 0 || !MapClass::Instance.CoordinatesLegal(cell))
 					continue;
 
-				if (GetWallOverlayAt(cell))
+				if (IsWallPieceAt(cell))
 				{
 					wallNear = wallNear || ring <= 2;
 
@@ -452,6 +475,62 @@ namespace
 		static constexpr std::array<std::pair<short, short>, 4> Sides { { { 0, -1 }, { 1, 0 }, { 0, 1 }, { -1, 0 } } };
 		int bestDistSq = INT_MAX;
 
+		// A piece we may knock down: not Immune, not an ally's.
+		auto breakableAt = [&](const CellStruct& cell)
+		{
+			HouseClass* pWallOwner = nullptr;
+
+			if (auto const pWall = GetWallOverlayAt(cell))
+			{
+				if (pWall->Immune)
+					return false;
+
+				auto const pCell = MapClass::Instance.TryGetCellAt(cell);
+				pWallOwner = (pCell->WallOwnerIndex >= 0 && pCell->WallOwnerIndex < HouseClass::Array.Count)
+					? HouseClass::Array.GetItem(pCell->WallOwnerIndex) : nullptr;
+			}
+			else if (auto const pWallBld = GetWallBuildingAt(cell))
+			{
+				if (pWallBld->Type->Immune)
+					return false;
+
+				pWallOwner = pWallBld->Owner;
+			}
+			else
+			{
+				return false;
+			}
+
+			return !pWallOwner || pWallOwner == pHouse || !pHouse->IsAlliedWith(pWallOwner);
+		};
+
+		// Gone, this piece opens the inside: it stands right beside the foundation (not on its corner),
+		// or free inside ground (another zone, right around the foundation) lies next to it.
+		auto opensInside = [&](const CellStruct& cell)
+		{
+			int rx = 0;
+			int ry = 0;
+			axisRings(cell, rx, ry);
+
+			if (std::max(rx, ry) == 1 && std::min(rx, ry) == 0)
+				return true;
+
+			for (auto const& [sx, sy] : Sides)
+			{
+				const CellStruct side { static_cast<short>(cell.X + sx), static_cast<short>(cell.Y + sy) };
+
+				if (!MapClass::Instance.CoordinatesLegal(side) || ringOf(side) != 1 || IsWallPieceAt(side))
+					continue;
+
+				const int sideZone = zoneOf(side);
+
+				if (sideZone > 1 && sideZone != zone)
+					return true;
+			}
+
+			return false;
+		};
+
 		for (int dy = -2; dy <= height + 1; ++dy)
 		{
 			for (int dx = -2; dx <= width + 1; ++dx)
@@ -464,47 +543,49 @@ namespace
 				if (rx == 0 && ry == 0)
 					continue;
 
-				auto const pWall = GetWallOverlayAt(cell);
-
-				if (!pWall || pWall->Immune)
+				if (!breakableAt(cell))
 					continue;
 
-				auto const pCell = MapClass::Instance.TryGetCellAt(cell);
-				auto const pWallOwner = (pCell->WallOwnerIndex >= 0 && pCell->WallOwnerIndex < HouseClass::Array.Count)
-					? HouseClass::Array.GetItem(pCell->WallOwnerIndex) : nullptr;
-
-				if (pWallOwner && pWallOwner != pHouse && pHouse->IsAlliedWith(pWallOwner))
-					continue;
-
-				// A piece right beside the foundation (not on its corner) opens the door by itself;
-				// one further out needs free inside ground behind it.
-				bool inside = std::max(rx, ry) == 1 && std::min(rx, ry) == 0;
+				bool inside = opensInside(cell);
 				CellStruct approach = CellStruct::Empty;
 
 				for (auto const& [sx, sy] : Sides)
 				{
 					const CellStruct side { static_cast<short>(cell.X + sx), static_cast<short>(cell.Y + sy) };
 
-					if (!MapClass::Instance.CoordinatesLegal(side) || ringOf(side) == 0 || GetWallOverlayAt(side))
-						continue;
-
-					const int sideZone = zoneOf(side);
-
-					if (sideZone == zone)
+					if (MapClass::Instance.CoordinatesLegal(side) && ringOf(side) != 0 && !IsWallPieceAt(side) && zoneOf(side) == zone)
 					{
-						if (approach == CellStruct::Empty)
-							approach = side;
-					}
-					else if (sideZone > 1 && ringOf(side) == 1)
-					{
-						inside = true;
+						approach = side;
+						break;
 					}
 				}
 
-				if (!inside || approach == CellStruct::Empty)
+				if (approach == CellStruct::Empty)
 					continue;
 
-				const int distSq = (cell.X - from.X) * (cell.X - from.X) + (cell.Y - from.Y) * (cell.Y - from.Y);
+				// Two pieces thick: an inner piece next to this one that opens the inside.
+				bool twoPieces = false;
+
+				if (!inside)
+				{
+					for (auto const& [sx, sy] : Sides)
+					{
+						const CellStruct side { static_cast<short>(cell.X + sx), static_cast<short>(cell.Y + sy) };
+
+						if (MapClass::Instance.CoordinatesLegal(side) && ringOf(side) != 0 && ringOf(side) < ringOf(cell)
+							&& IsWallPieceAt(side) && breakableAt(side) && opensInside(side))
+						{
+							twoPieces = true;
+							break;
+						}
+					}
+				}
+
+				if (!inside && !twoPieces)
+					continue;
+
+				const int distSq = (cell.X - from.X) * (cell.X - from.X) + (cell.Y - from.Y) * (cell.Y - from.Y)
+					+ (twoPieces ? 10000 : 0);
 
 				if (distSq < bestDistSq)
 				{
@@ -617,6 +698,65 @@ namespace
 	bool CanBreachWall(FootClass* pFoot, const OverlayTypeClass* pWall)
 	{
 		return CanShootWall(pFoot, pWall) || CanCrushWall(pFoot, pWall);
+	}
+
+	// What a breaker fires at to knock the piece on this cell down: the wall building, else the cell.
+	AbstractClass* BreachTargetAt(const CellStruct& cell)
+	{
+		if (auto const pWallBld = GetWallBuildingAt(cell))
+			return pWallBld;
+
+		return MapClass::Instance.TryGetCellAt(cell);
+	}
+
+	// Can this unit knock the piece on this cell down by its fire? A wall building is hurt like any
+	// building.
+	bool CanShootPieceAt(FootClass* pFoot, const CellStruct& cell)
+	{
+		if (auto const pWall = GetWallOverlayAt(cell))
+			return CanShootWall(pFoot, pWall);
+
+		auto const pType = pFoot ? pFoot->GetTechnoType() : nullptr;
+
+		return GetWallBuildingAt(cell) && pType && GroundRangeOf(pType) > 0 && CanFootDamageBuildings(pFoot);
+	}
+
+	// Can this unit knock the piece on this cell down: by its fire, or by crushing a wall overlay.
+	bool CanBreachPieceAt(FootClass* pFoot, const CellStruct& cell)
+	{
+		if (auto const pWall = GetWallOverlayAt(cell))
+			return CanBreachWall(pFoot, pWall);
+
+		return CanShootPieceAt(pFoot, cell);
+	}
+
+	// Orders a wall breaker at the piece on this cell: it fires at it, or a crusher drives over it. A
+	// breaker fighting an enemy finishes that first. False when the unit cannot knock that piece down.
+	bool OrderWallBreach(FootClass* pFoot, const CellStruct& cell)
+	{
+		auto const pBreachTarget = BreachTargetAt(cell);
+
+		if (!pFoot || pFoot->InLimbo || !pBreachTarget || !CanBreachPieceAt(pFoot, cell))
+			return false;
+
+		if (pFoot->Target == pBreachTarget || (pFoot->Target && pFoot->Target->WhatAmI() != AbstractType::Cell))
+			return true;
+
+		if (CanShootPieceAt(pFoot, cell))
+		{
+			pFoot->ClearMegaMissionData();
+			pFoot->SetTarget(pBreachTarget);
+			pFoot->QueueMission(Mission::Attack, true);
+		}
+		else if (pFoot->Destination != pBreachTarget)
+		{
+			pFoot->ClearMegaMissionData();
+			pFoot->SetDestination(pBreachTarget, true);
+			pFoot->QueueMission(Mission::Move, true);
+			NoteOrderCaller(pFoot, "breach");
+		}
+
+		return true;
 	}
 
 	// Breach lines are capped per match so a long training match keeps them readable.
@@ -2786,14 +2926,14 @@ namespace
 	// Idle armed ground units and soldiers of ours near a tech, nearest first (UniqueID on ties),
 	// not in a plan nor escorting or breaching for another capture (nor for pPending, the capture
 	// being set up). Specialists (engineers, spies, thieves) and harvesters never escort. With
-	// pBreachWall, only units that can knock that wall down count, from a little further away
+	// breach (cell is the wall piece), only units that can knock that piece down count, from a little further away
 	// (without them the engineer cannot get in at all): those standing in breachZone (Normal), then
 	// those in ferryZone that go over with pFerryWith (the engineer): within OpJoinStagingCells of it,
 	// so that they board the same operation, and seated with it in one transport of ours
 	// (CanShareTransport); then the ones that crush it rather than shoot it.
 	void CollectSpecOpsEscorts(HouseClass* pHouse, const CellStruct& cell, int maxCount, std::vector<FootClass*>& out,
-		const NeuralSpecOpsCapture* pPending = nullptr, const OverlayTypeClass* pBreachWall = nullptr, int breachZone = -1,
-		int ferryZone = -1, const FootClass* pFerryWith = nullptr)
+		const NeuralSpecOpsCapture* pPending = nullptr, bool breach = false, int breachZone = -1, int ferryZone = -1,
+		const FootClass* pFerryWith = nullptr)
 	{
 		out.clear();
 		auto const& state = GetSpecOpsState(pHouse);
@@ -2819,9 +2959,9 @@ namespace
 
 			int rank = 0;
 
-			if (pBreachWall)
+			if (breach)
 			{
-				if (!CanBreachWall(pFoot, pBreachWall))
+				if (!CanBreachPieceAt(pFoot, cell))
 					return;
 
 				const int footZone = ObjectZone(pFoot, MovementZone::Normal);
@@ -2838,7 +2978,7 @@ namespace
 					rank += 1000;
 				}
 
-				if (!CanShootWall(pFoot, pBreachWall))
+				if (!CanShootPieceAt(pFoot, cell))
 					rank += 500;
 			}
 
@@ -2853,7 +2993,7 @@ namespace
 
 			const int dist = static_cast<int>(pFoot->GetMapCoords().DistanceFrom(cell));
 
-			if (dist <= (pBreachWall ? 90 : 45))
+			if (dist <= (breach ? 90 : 45))
 				candidates.emplace_back(dist + rank, pFoot);
 		};
 
@@ -2899,12 +3039,13 @@ namespace
 			return;
 
 		auto const pWallCell = MapClass::Instance.TryGetCellAt(capture.BreachCell);
+		auto const pWallBld = GetWallBuildingAt(capture.BreachCell);
 
 		for (const DWORD id : capture.Breachers)
 		{
 			auto const pFoot = FindOwnFootByID(pHouse, id);
 
-			if (pFoot && pWallCell && pFoot->Target == pWallCell)
+			if (pFoot && pFoot->Target && (pFoot->Target == pWallCell || pFoot->Target == pWallBld))
 			{
 				pFoot->SetTarget(nullptr);
 				pFoot->QueueMission(Mission::Guard, true);
@@ -2932,9 +3073,7 @@ namespace
 			return false;
 		};
 
-		const OverlayTypeClass* pWall = GetWallOverlayAt(capture.BreachCell);
-
-		if (!pWall)
+		if (!IsWallPieceAt(capture.BreachCell))
 		{
 			ReleaseSpecOpsBreachers(pHouse, capture);
 			capture.BreachPieces++;
@@ -2963,7 +3102,6 @@ namespace
 
 			capture.BreachCell = next.Wall;
 			capture.BreachApproach = next.Approach;
-			pWall = GetWallOverlayAt(next.Wall);
 		}
 
 		// Across the water the breach's time runs from the first breaker on the land of the wall; the
@@ -2998,7 +3136,6 @@ namespace
 			return fail("too long");
 		}
 
-		auto const pWallCell = MapClass::Instance.TryGetCellAt(capture.BreachCell);
 		auto const pEngineer = FindOwnFootByID(pHouse, capture.EngineerID);
 		int breakers = 0;
 		int ferryRefused = 0;
@@ -3008,7 +3145,7 @@ namespace
 		{
 			auto const pFoot = FindOwnFootByID(pHouse, id);
 
-			if (!pFoot || !CanBreachWall(pFoot, pWall))
+			if (!pFoot || !CanBreachPieceAt(pFoot, capture.BreachCell))
 				continue;
 
 			// Waiting for its transport or aboard: on its way when the operation goes to the land of the
@@ -3039,24 +3176,8 @@ namespace
 
 			breakers++;
 
-			// A breaker fighting enemies finishes that first; one that dropped the order gets it back.
-			if (pFoot->Target == pWallCell || (pFoot->Target && pFoot->Target->WhatAmI() != AbstractType::Cell))
-				continue;
-
-			if (CanShootWall(pFoot, pWall))
-			{
-				pFoot->ClearMegaMissionData();
-				pFoot->SetTarget(pWallCell);
-				pFoot->QueueMission(Mission::Attack, true);
-			}
-			else if (pFoot->Destination != pWallCell)
-			{
-				// A crusher drives over the piece.
-				pFoot->ClearMegaMissionData();
-				pFoot->SetDestination(pWallCell, true);
-				pFoot->QueueMission(Mission::Move, true);
-				NoteOrderCaller(pFoot, "breach");
-			}
+			// One that dropped the order gets it back.
+			OrderWallBreach(pFoot, capture.BreachCell);
 		}
 
 		for (const DWORD id : taken)
@@ -3078,7 +3199,7 @@ namespace
 		if (breakers == 0)
 		{
 			std::vector<FootClass*> fresh;
-			CollectSpecOpsEscorts(pHouse, capture.BreachCell, 2, fresh, nullptr, pWall, capture.BreachZone, capture.BreachFerryZone, pEngineer);
+			CollectSpecOpsEscorts(pHouse, capture.BreachCell, 2, fresh, nullptr, true, capture.BreachZone, capture.BreachFerryZone, pEngineer);
 
 			if (fresh.empty())
 				return fail("no wall breaker left");
@@ -3094,13 +3215,86 @@ namespace
 			// more breaker joins, once.
 			capture.BreachReinforced = true;
 			std::vector<FootClass*> fresh;
-			CollectSpecOpsEscorts(pHouse, capture.BreachCell, 1, fresh, nullptr, pWall, capture.BreachZone, capture.BreachFerryZone, pEngineer);
+			CollectSpecOpsEscorts(pHouse, capture.BreachCell, 1, fresh, nullptr, true, capture.BreachZone, capture.BreachFerryZone, pEngineer);
 
 			for (auto const pFoot : fresh)
 				capture.Breachers.push_back(pFoot->UniqueID);
 		}
 
 		return true;
+	}
+
+	// The wall state of an enemy building for an engineer of ours from home ground
+	// (GetTechWallStateFrom): a wall a player builds around its yard or a superweapon. Read again
+	// every 150 frames, or now when fresh.
+	NeuralTechWall GetEnemyBuildingWallState(HouseClass* pHouse, const BuildingClass* pBld, NeuralTechBreach& outBreach, bool fresh = false)
+	{
+		struct NeuralWallReading
+		{
+			NeuralTechWall State { NeuralTechWall::Open };
+			NeuralTechBreach Breach {};
+			int Frame { 0 };
+		};
+
+		static int readingSerial = -1;
+		static std::array<std::unordered_map<DWORD, NeuralWallReading>, 32> readings;
+		outBreach = NeuralTechBreach {};
+
+		if (!pHouse || !pBld || pHouse->ArrayIndex < 0 || pHouse->ArrayIndex >= 32)
+			return NeuralTechWall::Open;
+
+		if (readingSerial != NeuralMatchSerial)
+		{
+			readingSerial = NeuralMatchSerial;
+
+			for (auto& houseReadings : readings)
+				houseReadings.clear();
+		}
+
+		const int now = Unsorted::CurrentFrame;
+		auto& houseReadings = readings[static_cast<size_t>(pHouse->ArrayIndex)];
+
+		if (houseReadings.size() > 512)
+			std::erase_if(houseReadings, [now](const auto& entry) { return now < entry.second.Frame || now - entry.second.Frame >= 150; });
+
+		if (auto const it = houseReadings.find(pBld->UniqueID);
+			!fresh && it != houseReadings.end() && now >= it->second.Frame && now - it->second.Frame < 150)
+		{
+			outBreach = it->second.Breach;
+			return it->second.State;
+		}
+
+		const CellStruct home = GetHouseHomeCell(pHouse);
+		const int homeZone = home != CellStruct::Empty ? MapClass::Instance.GetMovementZoneType(home, MovementZone::Normal, false) : -1;
+		NeuralWallReading reading;
+		reading.State = GetTechWallStateFrom(pHouse, pBld, homeZone, home, reading.Breach);
+		reading.Frame = now;
+		houseReadings.insert_or_assign(pBld->UniqueID, reading);
+		outBreach = reading.Breach;
+
+		return reading.State;
+	}
+
+	// For the plans (their file comes before this one): GetEnemyBuildingWallState as 0 open, 1
+	// breachable, 2 sealed, with the piece, our ground next to it and that ground's zone.
+	int GetEnemyWallForPlan(HouseClass* pHouse, const BuildingClass* pBld, CellStruct& outWall, CellStruct& outApproach, int& outZone,
+		bool fresh)
+	{
+		NeuralTechBreach breach;
+		const NeuralTechWall wall = GetEnemyBuildingWallState(pHouse, pBld, breach, fresh);
+		outWall = breach.Wall;
+		outApproach = breach.Approach;
+		outZone = breach.Zone;
+
+		return wall == NeuralTechWall::Open ? 0 : (wall == NeuralTechWall::Breachable ? 1 : 2);
+	}
+
+	// For the plans: idle wall breakers of ours standing in zone near the piece (CollectSpecOpsEscorts).
+	int CollectWallBreakersForPlan(HouseClass* pHouse, const CellStruct& wall, int zone, int maxCount, std::vector<FootClass*>& out)
+	{
+		CollectSpecOpsEscorts(pHouse, wall, maxCount, out, nullptr, true, zone);
+
+		return static_cast<int>(out.size());
 	}
 
 	// Expert 4 engineer: take (or keep) a capture op, send the escort first when enemies were
@@ -3178,7 +3372,7 @@ namespace
 				const int engineerZone = ObjectZone(pEngineer, MovementZone::Normal);
 				const int zone = breach.Zone >= 0 ? breach.Zone : engineerZone;
 				std::vector<FootClass*> breachers;
-				CollectSpecOpsEscorts(pHouse, breach.Wall, 2, breachers, nullptr, GetWallOverlayAt(breach.Wall), zone,
+				CollectSpecOpsEscorts(pHouse, breach.Wall, 2, breachers, nullptr, true, zone,
 					zone != engineerZone ? engineerZone : -1, pEngineer);
 
 				if (breachers.empty())
@@ -3302,7 +3496,7 @@ namespace
 				const CellStruct approach = pCapture->BreachApproach;
 				const CellStruct back { static_cast<short>(approach.X + 2 * (approach.X - wallCell.X)),
 					static_cast<short>(approach.Y + 2 * (approach.Y - wallCell.Y)) };
-				const bool backFree = MapClass::Instance.CoordinatesLegal(back) && !GetWallOverlayAt(back)
+				const bool backFree = MapClass::Instance.CoordinatesLegal(back) && !IsWallPieceAt(back)
 					&& MapClass::Instance.GetMovementZoneType(back, MovementZone::Normal, false) == pCapture->BreachZone;
 				const CellStruct stand = backFree ? back : approach;
 
